@@ -204,6 +204,7 @@ architecture rtl of M65832_Core is
     signal addr_reg         : std_logic_vector(31 downto 0);
     signal write_data       : std_logic_vector(7 downto 0);
     signal branch_taken     : std_logic;
+    signal is_indirect_addr : std_logic;
     signal is_bit_op        : std_logic;
     signal read_width       : std_logic_vector(1 downto 0);
     signal write_width      : std_logic_vector(1 downto 0);
@@ -544,8 +545,16 @@ begin
                         case ADDR_MODE is
                             when "0010" | "0011" | "0100" =>
                                 -- Direct page modes - done after 1 byte
-                                -- Effective address = D + offset (for simplicity, just offset for now)
-                                eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                -- Effective address = D + offset (with index if needed)
+                                if ADDR_MODE = "0011" then
+                                    eff_addr <= D_reg(31 downto 8) &
+                                                std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
+                                elsif ADDR_MODE = "0100" then
+                                    eff_addr <= D_reg(31 downto 8) &
+                                                std_logic_vector(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)));
+                                else
+                                    eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                end if;
                                 if IS_ALU_OP = '1' and ALU_OP = "100" then
                                     -- Store operation
                                     state <= ST_WRITE;
@@ -555,6 +564,20 @@ begin
                                 else
                                     state <= ST_READ;
                                 end if;
+                            when "1001" =>
+                                if IS_JMP_d = '1' then
+                                    -- JMP (abs,X): absolute address, handle in next byte
+                                    state <= ST_ADDR2;
+                                else
+                                    -- (dp,X): compute pointer address, then fetch pointer bytes
+                                    eff_addr <= D_reg(31 downto 8) &
+                                                std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
+                                    state <= ST_ADDR2;
+                                end if;
+                            when "1010" =>
+                                -- (dp),Y: pointer address is direct page byte
+                                eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                state <= ST_ADDR2;
                             when others =>
                                 state <= ST_ADDR2;
                         end case;
@@ -579,6 +602,19 @@ begin
                                     resize(unsigned(data_buffer(7 downto 0)), 16),
                                     32) +
                                 unsigned(Y_reg));
+                        elsif ADDR_MODE = "1001" or ADDR_MODE = "1010" then
+                            if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                                -- JMP (abs,X): pointer address = abs + X
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 16) sll 8) or
+                                        resize(unsigned(data_buffer(7 downto 0)), 16),
+                                        32) +
+                                    unsigned(X_reg));
+                            else
+                                -- Indirect modes: latch pointer low byte, fetch high next
+                                data_buffer(7 downto 0) <= DATA_IN;
+                            end if;
                         else
                             eff_addr <= std_logic_vector(
                                 resize(
@@ -588,7 +624,7 @@ begin
                         end if;
                         
                         case ADDR_MODE is
-                            when "0101" | "0110" | "0111" | "1000" | "1001" | "1010" =>
+                            when "0101" | "0110" | "0111" | "1000" =>
                                 -- Absolute modes - done after 2 bytes
                                 if IS_JSR = '1' then
                                     -- JSR: capture return address (PC of high byte)
@@ -601,6 +637,9 @@ begin
                                 else
                                     state <= ST_READ;
                                 end if;
+                            when "1001" | "1010" =>
+                                -- Indirect modes - fetch pointer high next
+                                state <= ST_ADDR3;
                             when "1111" =>
                                 -- Long - need 3rd byte
                                 state <= ST_ADDR3;
@@ -610,21 +649,53 @@ begin
                         
                     when ST_ADDR3 =>
                         data_buffer(23 downto 16) <= DATA_IN;
-                        eff_addr <= x"00" & DATA_IN & data_buffer(15 downto 0);
-                        if IS_ALU_OP = '1' and ALU_OP = "100" then
+                        if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                            -- JMP (abs,X): pointer low byte
+                            DR <= DATA_IN;
+                            state <= ST_ADDR4;
+                        elsif ADDR_MODE = "1001" then
+                            -- (dp,X): pointer high in DATA_IN, low in data_buffer(7:0)
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32));
+                        elsif ADDR_MODE = "1010" then
+                            -- (dp),Y: pointer + Y
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32) +
+                                unsigned(Y_reg));
+                        else
+                            eff_addr <= x"00" & DATA_IN & data_buffer(15 downto 0);
+                        end if;
+                        if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                            null;
+                        elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                             state <= ST_WRITE;
                         else
                             state <= ST_READ;
                         end if;
                         
                     when ST_ADDR4 =>
-                        data_buffer(31 downto 24) <= DATA_IN;
-                        eff_addr <= DATA_IN & data_buffer(23 downto 0);
-                        state <= ST_READ;
+                        if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                            -- JMP (abs,X): pointer high byte, then jump
+                            data_buffer(15 downto 8) <= DATA_IN;
+                            state <= ST_FETCH;
+                        else
+                            data_buffer(31 downto 24) <= DATA_IN;
+                            eff_addr <= DATA_IN & data_buffer(23 downto 0);
+                            state <= ST_READ;
+                        end if;
                         
                     when ST_READ =>
                         -- Read data byte
                         data_buffer(7 downto 0) <= DATA_IN;
+                        if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
+                            DR <= DATA_IN;  -- latch indirect low byte
+                        end if;
                         data_byte_count <= data_byte_count + 1;
                         
                         -- Check if we need more bytes based on width
@@ -639,7 +710,9 @@ begin
                     when ST_READ2 =>
                         data_buffer(15 downto 8) <= DATA_IN;
                         data_byte_count <= data_byte_count + 1;
-                        if read_width = WIDTH_16 then
+                        if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
+                            state <= ST_FETCH;
+                        elsif read_width = WIDTH_16 then
                             state <= ST_EXECUTE;
                         else
                             state <= ST_READ3;
@@ -737,8 +810,28 @@ begin
             when ST_FETCH | ST_DECODE | ST_BRANCH =>
                 ADDR <= PC_reg;
             when ST_ADDR1 | ST_ADDR2 | ST_ADDR3 | ST_ADDR4 =>
-                -- Fetching address bytes from PC
-                ADDR <= PC_reg;
+                -- Fetching address bytes from PC or pointer reads for indirect modes
+                if (ADDR_MODE = "1001" or ADDR_MODE = "1010") then
+                    if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                        if state = ST_ADDR3 then
+                            ADDR <= eff_addr;
+                        elsif state = ST_ADDR4 then
+                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                        else
+                            ADDR <= PC_reg;
+                        end if;
+                    else
+                        if state = ST_ADDR2 then
+                            ADDR <= eff_addr;
+                        elsif state = ST_ADDR3 then
+                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                        else
+                            ADDR <= PC_reg;
+                        end if;
+                    end if;
+                else
+                    ADDR <= PC_reg;
+                end if;
             when ST_VECTOR1 =>
                 ADDR <= x"0000" & VEC_RESET;
             when ST_VECTOR2 =>
@@ -853,7 +946,8 @@ begin
                             IR = x"3C" or IR = x"89"))
                 else '0';
     
-    read_width <= WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
+    read_width <= WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
+                  WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
                   X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
                                 (REG_DST = "001" or REG_DST = "010")) else
                   X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
@@ -1014,12 +1108,20 @@ begin
     
     pc_direct <= std_logic_vector(unsigned(jsr_return) + 1);
     
+    is_indirect_addr <= '1' when (ADDR_MODE = "1001" or ADDR_MODE = "1010") else '0';
+    
     LOAD_PC <= "010" when (state = ST_VECTOR2 or
                            (state = ST_ADDR2 and (IS_JSR = '1' or IS_JMP_d = '1'))) -- Load PC from D_IN:DR
+              else "010" when (state = ST_READ2 and IS_JMP_d = '1' and
+                               (ADDR_MODE = "1000" or ADDR_MODE = "1001")) -- JMP indirect
+              else "010" when (state = ST_ADDR4 and IS_JMP_d = '1' and
+                               ADDR_MODE = "1001") -- JMP (abs,X) indirect
                else "100" when (state = ST_BRANCH2 and branch_taken = '1') -- Branch taken: add offset
                else "001" when (state = ST_FETCH or
-                           state = ST_ADDR1 or state = ST_ADDR2 or 
-                           state = ST_ADDR3 or state = ST_ADDR4 or
+                           state = ST_ADDR1 or 
+                           (state = ST_ADDR2 and is_indirect_addr = '0') or 
+                           (state = ST_ADDR3 and is_indirect_addr = '0') or
+                           state = ST_ADDR4 or
                            state = ST_BRANCH or  -- Fetch branch offset
                            ((state = ST_DECODE) and IR = x"02" and E_mode = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
