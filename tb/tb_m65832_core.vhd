@@ -1430,6 +1430,560 @@ begin
         check_mem(16#023E#, x"55", "32-bit CMP sets Z");
         
         -----------------------------------------------------------------------
+        -- TEST 41: 32-bit indexed addressing LDA abs,X
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 41: 32-bit indexed addressing LDA abs,X";
+        
+        -- Pre-load 32-bit data at indexed location
+        -- Base address $0500, X=$00000100, so target = $0500 + $100 = $0600
+        poke(16#0600#, x"11");  -- byte 0
+        poke(16#0601#, x"22");  -- byte 1
+        poke(16#0602#, x"33");  -- byte 2
+        poke(16#0603#, x"44");  -- byte 3
+        
+        -- Program: set 32-bit M and X, LDX #$00000100, LDA $0500,X, STA $0240
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit accumulator
+        poke(16#8004#, x"C2");  -- REP
+        poke(16#8005#, x"10");  -- clear X0
+        poke(16#8006#, x"E2");  -- SEP
+        poke(16#8007#, x"20");  -- set X1 -> 32-bit X
+        poke(16#8008#, x"A2");  -- LDX #
+        poke(16#8009#, x"00");  -- byte 0
+        poke(16#800A#, x"01");  -- byte 1
+        poke(16#800B#, x"00");  -- byte 2
+        poke(16#800C#, x"00");  -- byte 3  -> X=$00000100
+        poke(16#800D#, x"BD");  -- LDA abs,X
+        poke(16#800E#, x"00");  -- $00
+        poke(16#800F#, x"05");  -- $05  -> $0500 + X = $0600
+        poke(16#8010#, x"8D");  -- STA abs
+        poke(16#8011#, x"80");  -- $80
+        poke(16#8012#, x"02");  -- $02  -> $0280-$0283
+        poke(16#8013#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0280#, x"11", "32-bit LDA abs,X byte 0");
+        check_mem(16#0281#, x"22", "32-bit LDA abs,X byte 1");
+        check_mem(16#0282#, x"33", "32-bit LDA abs,X byte 2");
+        check_mem(16#0283#, x"44", "32-bit LDA abs,X byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 42: 32-bit indexed addressing LDA abs,Y
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 42: 32-bit indexed addressing LDA abs,Y";
+        
+        -- Pre-load 32-bit data at indexed location
+        -- Base address $0500, Y=$00000200, so target = $0500 + $200 = $0700
+        poke(16#0700#, x"AA");  -- byte 0
+        poke(16#0701#, x"BB");  -- byte 1
+        poke(16#0702#, x"CC");  -- byte 2
+        poke(16#0703#, x"DD");  -- byte 3
+        
+        -- Program: set 32-bit M and Y, LDY #$00000200, LDA $0500,Y, STA $0244
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit accumulator
+        poke(16#8004#, x"C2");  -- REP
+        poke(16#8005#, x"10");  -- clear X0 (shared for X/Y)
+        poke(16#8006#, x"E2");  -- SEP
+        poke(16#8007#, x"20");  -- set X1 -> 32-bit Y
+        poke(16#8008#, x"A0");  -- LDY #
+        poke(16#8009#, x"00");  -- byte 0
+        poke(16#800A#, x"02");  -- byte 1
+        poke(16#800B#, x"00");  -- byte 2
+        poke(16#800C#, x"00");  -- byte 3  -> Y=$00000200
+        poke(16#800D#, x"B9");  -- LDA abs,Y
+        poke(16#800E#, x"00");  -- $00
+        poke(16#800F#, x"05");  -- $05  -> $0500 + Y = $0700
+        poke(16#8010#, x"8D");  -- STA abs
+        poke(16#8011#, x"84");  -- $84
+        poke(16#8012#, x"02");  -- $02  -> $0284-$0287
+        poke(16#8013#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0284#, x"AA", "32-bit LDA abs,Y byte 0");
+        check_mem(16#0285#, x"BB", "32-bit LDA abs,Y byte 1");
+        check_mem(16#0286#, x"CC", "32-bit LDA abs,Y byte 2");
+        check_mem(16#0287#, x"DD", "32-bit LDA abs,Y byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 43: 32-bit indexed addressing STA abs,X
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 43: 32-bit indexed addressing STA abs,X";
+        
+        -- Program: set 32-bit M and X, LDX #$00000300, LDA #$11223344,
+        --          STA $0500,X -> store to $0800
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit accumulator
+        poke(16#8004#, x"C2");  -- REP
+        poke(16#8005#, x"10");  -- clear X0
+        poke(16#8006#, x"E2");  -- SEP
+        poke(16#8007#, x"20");  -- set X1 -> 32-bit X
+        poke(16#8008#, x"A2");  -- LDX #
+        poke(16#8009#, x"00");  -- byte 0
+        poke(16#800A#, x"03");  -- byte 1
+        poke(16#800B#, x"00");  -- byte 2
+        poke(16#800C#, x"00");  -- byte 3  -> X=$00000300
+        poke(16#800D#, x"A9");  -- LDA #
+        poke(16#800E#, x"44");  -- byte 0
+        poke(16#800F#, x"33");  -- byte 1
+        poke(16#8010#, x"22");  -- byte 2
+        poke(16#8011#, x"11");  -- byte 3  -> A=$11223344
+        poke(16#8012#, x"9D");  -- STA abs,X
+        poke(16#8013#, x"00");  -- $00
+        poke(16#8014#, x"05");  -- $05  -> $0500 + X = $0800
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0800#, x"44", "32-bit STA abs,X byte 0");
+        check_mem(16#0801#, x"33", "32-bit STA abs,X byte 1");
+        check_mem(16#0802#, x"22", "32-bit STA abs,X byte 2");
+        check_mem(16#0803#, x"11", "32-bit STA abs,X byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 44: 32-bit indexed addressing STA abs,Y
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 44: 32-bit indexed addressing STA abs,Y";
+        
+        -- Program: set 32-bit M and Y, LDY #$00000400, LDA #$AABBCCDD,
+        --          STA $0500,Y -> store to $0900
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit accumulator
+        poke(16#8004#, x"C2");  -- REP
+        poke(16#8005#, x"10");  -- clear X0
+        poke(16#8006#, x"E2");  -- SEP
+        poke(16#8007#, x"20");  -- set X1 -> 32-bit Y
+        poke(16#8008#, x"A0");  -- LDY #
+        poke(16#8009#, x"00");  -- byte 0
+        poke(16#800A#, x"04");  -- byte 1
+        poke(16#800B#, x"00");  -- byte 2
+        poke(16#800C#, x"00");  -- byte 3  -> Y=$00000400
+        poke(16#800D#, x"A9");  -- LDA #
+        poke(16#800E#, x"DD");  -- byte 0
+        poke(16#800F#, x"CC");  -- byte 1
+        poke(16#8010#, x"BB");  -- byte 2
+        poke(16#8011#, x"AA");  -- byte 3  -> A=$AABBCCDD
+        poke(16#8012#, x"99");  -- STA abs,Y
+        poke(16#8013#, x"00");  -- $00
+        poke(16#8014#, x"05");  -- $05  -> $0500 + Y = $0900
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0900#, x"DD", "32-bit STA abs,Y byte 0");
+        check_mem(16#0901#, x"CC", "32-bit STA abs,Y byte 1");
+        check_mem(16#0902#, x"BB", "32-bit STA abs,Y byte 2");
+        check_mem(16#0903#, x"AA", "32-bit STA abs,Y byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 45: 32-bit ASL abs (arithmetic shift left)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 45: 32-bit ASL abs";
+        
+        -- Program: set 32-bit M, store $01020304 at $0248,
+        --          ASL $0248 -> $02040608, read and store at $024C
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"04");  -- byte 0
+        poke(16#8006#, x"03");  -- byte 1
+        poke(16#8007#, x"02");  -- byte 2
+        poke(16#8008#, x"01");  -- byte 3  -> $01020304
+        poke(16#8009#, x"8D");  -- STA abs
+        poke(16#800A#, x"48");  -- $48
+        poke(16#800B#, x"02");  -- $02  -> $0248-$024B
+        poke(16#800C#, x"0E");  -- ASL abs
+        poke(16#800D#, x"48");  -- $48
+        poke(16#800E#, x"02");  -- $02  -> ASL $0248
+        poke(16#800F#, x"AD");  -- LDA abs
+        poke(16#8010#, x"48");  -- $48
+        poke(16#8011#, x"02");  -- $02
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"4C");  -- $4C
+        poke(16#8014#, x"02");  -- $02  -> $024C-$024F
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#024C#, x"08", "32-bit ASL abs byte 0");
+        check_mem(16#024D#, x"06", "32-bit ASL abs byte 1");
+        check_mem(16#024E#, x"04", "32-bit ASL abs byte 2");
+        check_mem(16#024F#, x"02", "32-bit ASL abs byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 46: 32-bit LSR abs (logical shift right)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 46: 32-bit LSR abs";
+        
+        -- Program: set 32-bit M, store $80808080 at $0250,
+        --          LSR $0250 -> $40404040, read and store at $0254
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"80");  -- byte 0
+        poke(16#8006#, x"80");  -- byte 1
+        poke(16#8007#, x"80");  -- byte 2
+        poke(16#8008#, x"80");  -- byte 3  -> $80808080
+        poke(16#8009#, x"8D");  -- STA abs
+        poke(16#800A#, x"50");  -- $50
+        poke(16#800B#, x"02");  -- $02  -> $0250-$0253
+        poke(16#800C#, x"4E");  -- LSR abs
+        poke(16#800D#, x"50");  -- $50
+        poke(16#800E#, x"02");  -- $02  -> LSR $0250
+        poke(16#800F#, x"AD");  -- LDA abs
+        poke(16#8010#, x"50");  -- $50
+        poke(16#8011#, x"02");  -- $02
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"54");  -- $54
+        poke(16#8014#, x"02");  -- $02  -> $0254-$0257
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0254#, x"40", "32-bit LSR abs byte 0");
+        check_mem(16#0255#, x"40", "32-bit LSR abs byte 1");
+        check_mem(16#0256#, x"40", "32-bit LSR abs byte 2");
+        check_mem(16#0257#, x"40", "32-bit LSR abs byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 47: 32-bit ROL abs (rotate left through carry)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 47: 32-bit ROL abs";
+        
+        -- Program: set 32-bit M, CLC (C=0), store $40000000 at $0258,
+        --          ROL $0258 -> $80000000, read and store at $025C
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"18");  -- CLC (C=0)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"00");  -- byte 0
+        poke(16#8007#, x"00");  -- byte 1
+        poke(16#8008#, x"00");  -- byte 2
+        poke(16#8009#, x"40");  -- byte 3  -> $40000000
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"58");  -- $58
+        poke(16#800C#, x"02");  -- $02  -> $0258-$025B
+        poke(16#800D#, x"2E");  -- ROL abs
+        poke(16#800E#, x"58");  -- $58
+        poke(16#800F#, x"02");  -- $02  -> ROL $0258
+        poke(16#8010#, x"AD");  -- LDA abs
+        poke(16#8011#, x"58");  -- $58
+        poke(16#8012#, x"02");  -- $02
+        poke(16#8013#, x"8D");  -- STA abs
+        poke(16#8014#, x"5C");  -- $5C
+        poke(16#8015#, x"02");  -- $02  -> $025C-$025F
+        poke(16#8016#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#025C#, x"00", "32-bit ROL abs byte 0");
+        check_mem(16#025D#, x"00", "32-bit ROL abs byte 1");
+        check_mem(16#025E#, x"00", "32-bit ROL abs byte 2");
+        check_mem(16#025F#, x"80", "32-bit ROL abs byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 48: 32-bit ROR abs (rotate right through carry)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 48: 32-bit ROR abs";
+        
+        -- Program: set 32-bit M, CLC (C=0), store $00000002 at $0260,
+        --          ROR $0260 -> $00000001, read and store at $0264
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"18");  -- CLC (C=0)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"02");  -- byte 0
+        poke(16#8007#, x"00");  -- byte 1
+        poke(16#8008#, x"00");  -- byte 2
+        poke(16#8009#, x"00");  -- byte 3  -> $00000002
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"60");  -- $60
+        poke(16#800C#, x"02");  -- $02  -> $0260-$0263
+        poke(16#800D#, x"6E");  -- ROR abs
+        poke(16#800E#, x"60");  -- $60
+        poke(16#800F#, x"02");  -- $02  -> ROR $0260
+        poke(16#8010#, x"AD");  -- LDA abs
+        poke(16#8011#, x"60");  -- $60
+        poke(16#8012#, x"02");  -- $02
+        poke(16#8013#, x"8D");  -- STA abs
+        poke(16#8014#, x"64");  -- $64
+        poke(16#8015#, x"02");  -- $02  -> $0264-$0267
+        poke(16#8016#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0264#, x"01", "32-bit ROR abs byte 0");
+        check_mem(16#0265#, x"00", "32-bit ROR abs byte 1");
+        check_mem(16#0266#, x"00", "32-bit ROR abs byte 2");
+        check_mem(16#0267#, x"00", "32-bit ROR abs byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 49: 32-bit ADC carry propagation
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 49: 32-bit ADC carry propagation";
+        
+        -- Program: set 32-bit M, SEC (C=1), LDA #$FFFFFFFF, ADC #$00000000
+        --          -> $00000000 with C=1, store result and branch marker
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"38");  -- SEC (C=1)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"FF");  -- byte 0
+        poke(16#8007#, x"FF");  -- byte 1
+        poke(16#8008#, x"FF");  -- byte 2
+        poke(16#8009#, x"FF");  -- byte 3  -> $FFFFFFFF
+        poke(16#800A#, x"69");  -- ADC #
+        poke(16#800B#, x"00");  -- byte 0
+        poke(16#800C#, x"00");  -- byte 1
+        poke(16#800D#, x"00");  -- byte 2
+        poke(16#800E#, x"00");  -- byte 3  -> +$00000000
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"A0");  -- $A0
+        poke(16#8011#, x"02");  -- $02  -> $02A0-$02A3
+        poke(16#8012#, x"B0");  -- BCS
+        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"00");  -- byte 0
+        poke(16#8016#, x"00");  -- byte 1
+        poke(16#8017#, x"00");  -- byte 2
+        poke(16#8018#, x"00");  -- byte 3
+        poke(16#8019#, x"A9");  -- LDA #
+        poke(16#801A#, x"AA");  -- byte 0
+        poke(16#801B#, x"00");  -- byte 1
+        poke(16#801C#, x"00");  -- byte 2
+        poke(16#801D#, x"00");  -- byte 3
+        poke(16#801E#, x"8D");  -- STA abs
+        poke(16#801F#, x"A4");  -- $A4
+        poke(16#8020#, x"02");  -- $02  -> $02A4
+        poke(16#8021#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#02A0#, x"00", "32-bit ADC result byte 0");
+        check_mem(16#02A1#, x"00", "32-bit ADC result byte 1");
+        check_mem(16#02A2#, x"00", "32-bit ADC result byte 2");
+        check_mem(16#02A3#, x"00", "32-bit ADC result byte 3");
+        check_mem(16#02A4#, x"AA", "32-bit ADC sets carry");
+        
+        -----------------------------------------------------------------------
+        -- TEST 50: 32-bit ADC overflow
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 50: 32-bit ADC overflow";
+        
+        -- Program: set 32-bit M, CLC (C=0), LDA #$7FFFFFFF, ADC #$00000001
+        --          -> $80000000 with V=1, store result and branch marker
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"18");  -- CLC (C=0)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"FF");  -- byte 0
+        poke(16#8007#, x"FF");  -- byte 1
+        poke(16#8008#, x"FF");  -- byte 2
+        poke(16#8009#, x"7F");  -- byte 3  -> $7FFFFFFF
+        poke(16#800A#, x"69");  -- ADC #
+        poke(16#800B#, x"01");  -- byte 0
+        poke(16#800C#, x"00");  -- byte 1
+        poke(16#800D#, x"00");  -- byte 2
+        poke(16#800E#, x"00");  -- byte 3  -> +$00000001
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"A8");  -- $A8
+        poke(16#8011#, x"02");  -- $02  -> $02A8-$02AB
+        poke(16#8012#, x"70");  -- BVS
+        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"00");  -- byte 0
+        poke(16#8016#, x"00");  -- byte 1
+        poke(16#8017#, x"00");  -- byte 2
+        poke(16#8018#, x"00");  -- byte 3
+        poke(16#8019#, x"A9");  -- LDA #
+        poke(16#801A#, x"BB");  -- byte 0
+        poke(16#801B#, x"00");  -- byte 1
+        poke(16#801C#, x"00");  -- byte 2
+        poke(16#801D#, x"00");  -- byte 3
+        poke(16#801E#, x"8D");  -- STA abs
+        poke(16#801F#, x"AC");  -- $AC
+        poke(16#8020#, x"02");  -- $02  -> $02AC
+        poke(16#8021#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#02A8#, x"00", "32-bit ADC overflow byte 0");
+        check_mem(16#02A9#, x"00", "32-bit ADC overflow byte 1");
+        check_mem(16#02AA#, x"00", "32-bit ADC overflow byte 2");
+        check_mem(16#02AB#, x"80", "32-bit ADC overflow byte 3");
+        check_mem(16#02AC#, x"BB", "32-bit ADC sets V");
+        
+        -----------------------------------------------------------------------
+        -- TEST 51: 32-bit SBC borrow (carry clear)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 51: 32-bit SBC borrow";
+        
+        -- Program: set 32-bit M, SEC (C=1), LDA #$00000000, SBC #$00000001
+        --          -> $FFFFFFFF with C=0, store result and branch marker
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"38");  -- SEC (C=1)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"00");  -- byte 0
+        poke(16#8007#, x"00");  -- byte 1
+        poke(16#8008#, x"00");  -- byte 2
+        poke(16#8009#, x"00");  -- byte 3  -> $00000000
+        poke(16#800A#, x"E9");  -- SBC #
+        poke(16#800B#, x"01");  -- byte 0
+        poke(16#800C#, x"00");  -- byte 1
+        poke(16#800D#, x"00");  -- byte 2
+        poke(16#800E#, x"00");  -- byte 3  -> -$00000001
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"B0");  -- $B0
+        poke(16#8011#, x"02");  -- $02  -> $02B0-$02B3
+        poke(16#8012#, x"90");  -- BCC
+        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"00");  -- byte 0
+        poke(16#8016#, x"00");  -- byte 1
+        poke(16#8017#, x"00");  -- byte 2
+        poke(16#8018#, x"00");  -- byte 3
+        poke(16#8019#, x"A9");  -- LDA #
+        poke(16#801A#, x"CC");  -- byte 0
+        poke(16#801B#, x"00");  -- byte 1
+        poke(16#801C#, x"00");  -- byte 2
+        poke(16#801D#, x"00");  -- byte 3
+        poke(16#801E#, x"8D");  -- STA abs
+        poke(16#801F#, x"B4");  -- $B4
+        poke(16#8020#, x"02");  -- $02  -> $02B4
+        poke(16#8021#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#02B0#, x"FF", "32-bit SBC borrow byte 0");
+        check_mem(16#02B1#, x"FF", "32-bit SBC borrow byte 1");
+        check_mem(16#02B2#, x"FF", "32-bit SBC borrow byte 2");
+        check_mem(16#02B3#, x"FF", "32-bit SBC borrow byte 3");
+        check_mem(16#02B4#, x"CC", "32-bit SBC clears carry");
+        
+        -----------------------------------------------------------------------
+        -- TEST 52: 32-bit SBC overflow
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 52: 32-bit SBC overflow";
+        
+        -- Program: set 32-bit M, SEC (C=1), LDA #$80000000, SBC #$00000001
+        --          -> $7FFFFFFF with V=1, store result and branch marker
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"38");  -- SEC (C=1)
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"00");  -- byte 0
+        poke(16#8007#, x"00");  -- byte 1
+        poke(16#8008#, x"00");  -- byte 2
+        poke(16#8009#, x"80");  -- byte 3  -> $80000000
+        poke(16#800A#, x"E9");  -- SBC #
+        poke(16#800B#, x"01");  -- byte 0
+        poke(16#800C#, x"00");  -- byte 1
+        poke(16#800D#, x"00");  -- byte 2
+        poke(16#800E#, x"00");  -- byte 3  -> -$00000001
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"B8");  -- $B8
+        poke(16#8011#, x"02");  -- $02  -> $02B8-$02BB
+        poke(16#8012#, x"70");  -- BVS
+        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"00");  -- byte 0
+        poke(16#8016#, x"00");  -- byte 1
+        poke(16#8017#, x"00");  -- byte 2
+        poke(16#8018#, x"00");  -- byte 3
+        poke(16#8019#, x"A9");  -- LDA #
+        poke(16#801A#, x"DD");  -- byte 0
+        poke(16#801B#, x"00");  -- byte 1
+        poke(16#801C#, x"00");  -- byte 2
+        poke(16#801D#, x"00");  -- byte 3
+        poke(16#801E#, x"8D");  -- STA abs
+        poke(16#801F#, x"BC");  -- $BC
+        poke(16#8020#, x"02");  -- $02  -> $02BC
+        poke(16#8021#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#02B8#, x"FF", "32-bit SBC overflow byte 0");
+        check_mem(16#02B9#, x"FF", "32-bit SBC overflow byte 1");
+        check_mem(16#02BA#, x"FF", "32-bit SBC overflow byte 2");
+        check_mem(16#02BB#, x"7F", "32-bit SBC overflow byte 3");
+        check_mem(16#02BC#, x"DD", "32-bit SBC sets V");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";
