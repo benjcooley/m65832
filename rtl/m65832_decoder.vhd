@@ -253,6 +253,13 @@ begin
                     IS_RMW_OP <= '1';
                     RMW_OP <= aaa;
                     
+                    -- Set register source/destination for STX/LDX
+                    if aaa = "101" then
+                        REG_DST <= "001";  -- LDX
+                    elsif aaa = "100" then
+                        REG_SRC <= "001";  -- STX
+                    end if;
+                    
                     case bbb is
                         when "000" =>  -- Immediate (LDX only)
                             if aaa = "101" then
@@ -304,9 +311,9 @@ begin
                         when x"6B" => IS_RTL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";
                         
                         -- JSR, JMP
-                        when x"20" => IS_JSR <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "011";  -- JSR abs
+                        when x"20" => IS_JSR <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- JSR abs
                         when x"22" => IS_JSL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "100";  -- JSL long
-                        when x"4C" => IS_JMP <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "011";  -- JMP abs
+                        when x"4C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- JMP abs
                         when x"5C" => IS_JML <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "100";  -- JML long
                         when x"6C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1000"; INSTR_LEN <= "011";  -- JMP (abs)
                         when x"7C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1001"; INSTR_LEN <= "011";  -- JMP (abs,X)

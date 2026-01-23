@@ -51,6 +51,9 @@ entity M65832_AddrGen is
         -- Reset PC value (for initialization)
         RESET_PC        : in  std_logic_vector(31 downto 0);
         
+        -- Direct PC load (core override)
+        PC_DIRECT       : in  std_logic_vector(31 downto 0);
+        
         -- Outputs
         PC              : out std_logic_vector(31 downto 0);  -- Program counter
         VA              : out std_logic_vector(31 downto 0);  -- Virtual address
@@ -193,11 +196,11 @@ begin
                 end if;
                 
             when "111" =>
-                -- PC - 3 (for MVN/MVP)
+                -- Direct PC load (used by core override)
                 if PC_DEC = '1' then
                     NextPC <= std_logic_vector(unsigned(PCr) - 3);
                 else
-                    NextPC <= PCr;
+                    NextPC <= PC_DIRECT;
                 end if;
                 
             when others =>

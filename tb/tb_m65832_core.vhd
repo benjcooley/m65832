@@ -51,7 +51,12 @@ architecture sim of tb_M65832_Core is
     -- Simulated Memory (64KB for now)
     ---------------------------------------------------------------------------
     type memory_t is array (0 to 65535) of std_logic_vector(7 downto 0);
-    shared variable memory : memory_t := (others => x"00");
+    signal memory : memory_t := (others => x"00");
+    
+    -- Test memory write interface (directly sets memory)
+    signal test_wr_addr : integer range 0 to 65535 := 0;
+    signal test_wr_data : std_logic_vector(7 downto 0) := x"00";
+    signal test_wr_en   : std_logic := '0';
     
     ---------------------------------------------------------------------------
     -- Test Control
@@ -125,24 +130,28 @@ begin
     ---------------------------------------------------------------------------
     -- Memory Model
     ---------------------------------------------------------------------------
+    -- Asynchronous read for CPU (critical for correct timing!)
+    data_in <= memory(to_integer(unsigned(addr(15 downto 0))));
+    
+    -- Single memory process (handles both CPU writes and test writes)
     memory_process: process(clk)
         variable addr_int : integer;
     begin
         if rising_edge(clk) then
-            addr_int := to_integer(unsigned(addr(15 downto 0)));
-            
-            if we = '1' then
-                -- Write
-                memory(addr_int) := data_out;
+            -- Test writes have priority (used for initialization)
+            if test_wr_en = '1' then
+                memory(test_wr_addr) <= test_wr_data;
+            -- CPU writes
+            elsif we = '1' then
+                addr_int := to_integer(unsigned(addr(15 downto 0)));
+                memory(addr_int) <= data_out;
                 report "MEM WRITE: $" & to_hstring(addr(15 downto 0)) & 
                        " <= $" & to_hstring(data_out) &
                        " @ cycle " & integer'image(cycle_count);
             end if;
             
-            -- Read (always provide data)
-            data_in <= memory(addr_int);
-            
             -- Debug: show fetches and reads (first 30 cycles only)
+            addr_int := to_integer(unsigned(addr(15 downto 0)));
             if cycle_count < 30 then
                 report "CYCLE " & integer'image(cycle_count) & 
                        ": ADDR=$" & to_hstring(addr) &
@@ -159,17 +168,21 @@ begin
     ---------------------------------------------------------------------------
     test_process: process
         
-        -- Helper procedure to load a byte into memory
+        -- Helper procedure to load a byte into memory (via test write interface)
         procedure poke(addr_val : integer; data_val : std_logic_vector(7 downto 0)) is
         begin
-            memory(addr_val) := data_val;
+            test_wr_addr <= addr_val;
+            test_wr_data <= data_val;
+            test_wr_en <= '1';
+            wait until rising_edge(clk);
+            test_wr_en <= '0';
         end procedure;
         
         -- Helper to load 16-bit value (little-endian)
         procedure poke16(addr_val : integer; data_val : std_logic_vector(15 downto 0)) is
         begin
-            memory(addr_val) := data_val(7 downto 0);
-            memory(addr_val + 1) := data_val(15 downto 8);
+            poke(addr_val, data_val(7 downto 0));
+            poke(addr_val + 1, data_val(15 downto 8));
         end procedure;
         
         -- Wait for N clock cycles
@@ -441,6 +454,222 @@ begin
         wait_cycles(80);
         
         check_mem(16#0206#, x"BB", "LDA abs,X result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 9: INX, DEX, INY, DEY
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 9: INX, DEX, INY, DEY";
+        
+        -- Program: LDX #$10, INX, INX, DEX -> X=$11
+        --          LDY #$20, INY, DEY, DEY -> Y=$1F
+        --          STX $0207, STY $0208
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"10");  -- $10
+        poke(16#8002#, x"E8");  -- INX  -> $11
+        poke(16#8003#, x"E8");  -- INX  -> $12
+        poke(16#8004#, x"CA");  -- DEX  -> $11
+        poke(16#8005#, x"A0");  -- LDY #
+        poke(16#8006#, x"20");  -- $20
+        poke(16#8007#, x"C8");  -- INY  -> $21
+        poke(16#8008#, x"88");  -- DEY  -> $20
+        poke(16#8009#, x"88");  -- DEY  -> $1F
+        poke(16#800A#, x"8E");  -- STX abs
+        poke(16#800B#, x"07");  -- $07
+        poke(16#800C#, x"02");  -- $02  -> $0207
+        poke(16#800D#, x"8C");  -- STY abs
+        poke(16#800E#, x"08");  -- $08
+        poke(16#800F#, x"02");  -- $02  -> $0208
+        poke(16#8010#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#0207#, x"11", "INX/DEX result");
+        check_mem(16#0208#, x"1F", "INY/DEY result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 10: Register transfers TAX, TXA, TAY, TYA
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 10: Register transfers";
+        
+        -- Program: LDA #$55, TAX, LDA #$AA, TAY, TXA, STA $0209
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"55");  -- $55
+        poke(16#8002#, x"AA");  -- TAX  -> X=$55
+        poke(16#8003#, x"A9");  -- LDA #
+        poke(16#8004#, x"AA");  -- $AA
+        poke(16#8005#, x"A8");  -- TAY  -> Y=$AA
+        poke(16#8006#, x"8A");  -- TXA  -> A=$55
+        poke(16#8007#, x"8D");  -- STA abs
+        poke(16#8008#, x"09");  -- $09
+        poke(16#8009#, x"02");  -- $02  -> $0209
+        poke(16#800A#, x"98");  -- TYA  -> A=$AA
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"0A");  -- $0A
+        poke(16#800D#, x"02");  -- $02  -> $020A
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#0209#, x"55", "TXA result");
+        check_mem(16#020A#, x"AA", "TYA result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 11: Logical operations ORA, AND, EOR
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 11: ORA, AND, EOR";
+        
+        -- Program: LDA #$0F, ORA #$F0 -> $FF, STA $020B
+        --          LDA #$FF, AND #$0F -> $0F, STA $020C
+        --          LDA #$FF, EOR #$AA -> $55, STA $020D
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"0F");  -- $0F
+        poke(16#8002#, x"09");  -- ORA #
+        poke(16#8003#, x"F0");  -- $F0  -> A=$FF
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"0B");  -- $0B
+        poke(16#8006#, x"02");  -- $02  -> $020B
+        poke(16#8007#, x"A9");  -- LDA #
+        poke(16#8008#, x"FF");  -- $FF
+        poke(16#8009#, x"29");  -- AND #
+        poke(16#800A#, x"0F");  -- $0F  -> A=$0F
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"0C");  -- $0C
+        poke(16#800D#, x"02");  -- $02  -> $020C
+        poke(16#800E#, x"A9");  -- LDA #
+        poke(16#800F#, x"FF");  -- $FF
+        poke(16#8010#, x"49");  -- EOR #
+        poke(16#8011#, x"AA");  -- $AA  -> A=$55
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"0D");  -- $0D
+        poke(16#8014#, x"02");  -- $02  -> $020D
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#020B#, x"FF", "ORA result");
+        check_mem(16#020C#, x"0F", "AND result");
+        check_mem(16#020D#, x"55", "EOR result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 12: SBC (subtract with carry)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 12: SBC";
+        
+        -- Program: SEC, LDA #$50, SBC #$10 -> $40, STA $020E
+        poke(16#8000#, x"38");  -- SEC
+        poke(16#8001#, x"A9");  -- LDA #
+        poke(16#8002#, x"50");  -- $50
+        poke(16#8003#, x"E9");  -- SBC #
+        poke(16#8004#, x"10");  -- $10  -> A=$40
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"0E");  -- $0E
+        poke(16#8007#, x"02");  -- $02  -> $020E
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#020E#, x"40", "SBC result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 13: Accumulator shifts ASL A, LSR A
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 13: ASL A, LSR A";
+        
+        -- Program: LDA #$11, ASL A -> $22, ASL A -> $44, STA $020F
+        --          LDA #$80, LSR A -> $40, LSR A -> $20, STA $0210
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"11");  -- $11
+        poke(16#8002#, x"0A");  -- ASL A  -> $22
+        poke(16#8003#, x"0A");  -- ASL A  -> $44
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"0F");  -- $0F
+        poke(16#8006#, x"02");  -- $02  -> $020F
+        poke(16#8007#, x"A9");  -- LDA #
+        poke(16#8008#, x"80");  -- $80
+        poke(16#8009#, x"4A");  -- LSR A  -> $40
+        poke(16#800A#, x"4A");  -- LSR A  -> $20
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"10");  -- $10
+        poke(16#800D#, x"02");  -- $02  -> $0210
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#020F#, x"44", "ASL A result");
+        check_mem(16#0210#, x"20", "LSR A result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 14: LDA abs,Y addressing
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 14: LDA abs,Y";
+        
+        -- Pre-load data
+        poke(16#0403#, x"CC");
+        
+        -- Program: LDY #$03, LDA $0400,Y -> load from $0403, STA $0211
+        poke(16#8000#, x"A0");  -- LDY #
+        poke(16#8001#, x"03");  -- $03
+        poke(16#8002#, x"B9");  -- LDA abs,Y
+        poke(16#8003#, x"00");  -- $00
+        poke(16#8004#, x"04");  -- $04  -> $0400 + Y = $0403
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"11");  -- $11
+        poke(16#8007#, x"02");  -- $02  -> $0211
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0211#, x"CC", "LDA abs,Y result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 15: BNE not taken (Z=1)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 15: BNE not taken";
+        
+        -- Program: LDA #$00 (sets Z), BNE +2 (not taken), LDA #$77, STA $0212
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"00");  -- $00  (Z=1)
+        poke(16#8002#, x"D0");  -- BNE
+        poke(16#8003#, x"02");  -- +2 (skip next 2 bytes) - should NOT be taken
+        poke(16#8004#, x"A9");  -- LDA # (executed)
+        poke(16#8005#, x"77");  -- $77
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"12");  -- $12
+        poke(16#8008#, x"02");  -- $02  -> $0212
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        -- If branch NOT taken, $0212 should be $77
+        check_mem(16#0212#, x"77", "BNE not taken");
         
         -----------------------------------------------------------------------
         -- Summary

@@ -208,8 +208,17 @@ architecture rtl of M65832_Core is
     -- DR (data register) for address generation
     signal DR               : std_logic_vector(7 downto 0);
     
+    -- JSR/RTS return address (minimal stackless support)
+    signal jsr_return       : std_logic_vector(31 downto 0);
+    signal pc_direct        : std_logic_vector(31 downto 0);
+    
     -- Effective address computed during address phases
     signal eff_addr         : std_logic_vector(31 downto 0);
+    
+    -- Flag update control signals
+    signal flag_c_in        : std_logic;
+    signal flag_c_load      : std_logic;
+    signal flag_nzv_load    : std_logic;
 
 begin
 
@@ -272,18 +281,18 @@ begin
         P_LOAD      => P_load,
         P_OUT       => P_reg,
         
-        FLAG_C_IN   => ALU_CO,
-        FLAG_C_LOAD => '0',
+        FLAG_C_IN   => flag_c_in,
+        FLAG_C_LOAD => flag_c_load,
         FLAG_Z_IN   => ALU_ZO,
-        FLAG_Z_LOAD => '0',
+        FLAG_Z_LOAD => flag_nzv_load,
         FLAG_I_IN   => '0',
         FLAG_I_LOAD => '0',
         FLAG_D_IN   => '0',
         FLAG_D_LOAD => '0',
         FLAG_V_IN   => ALU_VO,
-        FLAG_V_LOAD => '0',
+        FLAG_V_LOAD => flag_nzv_load,
         FLAG_N_IN   => ALU_SO,
-        FLAG_N_LOAD => '0',
+        FLAG_N_LOAD => flag_nzv_load,
         
         E_MODE      => E_mode,
         S_MODE      => S_mode,
@@ -346,6 +355,7 @@ begin
         E_MODE          => E_mode,
         W_MODE          => W_mode,
         RESET_PC        => x"00008000",  -- Default reset PC for testing
+        PC_DIRECT       => pc_direct,
         PC              => PC_reg,
         VA              => VA_out,
         AA              => AA_out,
@@ -474,6 +484,7 @@ begin
             data_byte_count <= (others => '0');
             DR <= (others => '0');
             eff_addr <= (others => '0');
+            jsr_return <= (others => '0');
         elsif rising_edge(CLK) then
             if CE = '1' and RDY = '1' then
                 case state is
@@ -546,12 +557,38 @@ begin
                     when ST_ADDR2 =>
                         -- Second address byte
                         data_buffer(15 downto 8) <= DATA_IN;
-                        -- Compute absolute address: high byte : low byte
-                        eff_addr <= x"0000" & DATA_IN & data_buffer(7 downto 0);
+                        -- Compute absolute address: high byte : low byte (with index if needed)
+                        if ADDR_MODE = "0110" then
+                            -- Absolute,X
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32) +
+                                unsigned(X_reg));
+                        elsif ADDR_MODE = "0111" then
+                            -- Absolute,Y
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32) +
+                                unsigned(Y_reg));
+                        else
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32));
+                        end if;
                         
                         case ADDR_MODE is
                             when "0101" | "0110" | "0111" | "1000" | "1001" | "1010" =>
                                 -- Absolute modes - done after 2 bytes
+                                if IS_JSR = '1' then
+                                    -- JSR: capture return address (PC of high byte)
+                                    jsr_return <= PC_reg;
+                                end if;
                                 if IS_ALU_OP = '1' and ALU_OP = "100" then
                                     state <= ST_WRITE;
                                 elsif IS_RMW_OP = '1' and RMW_OP = "100" then
@@ -614,7 +651,14 @@ begin
                         
                     when ST_EXECUTE =>
                         -- Execute instruction
-                        state <= ST_FETCH;
+                        if IS_RMW_OP = '1' and ADDR_MODE /= "0000" and
+                           RMW_OP /= "100" and RMW_OP /= "101" then
+                            -- Memory RMW (INC/DEC/shift/rotate): write back result
+                            state <= ST_WRITE;
+                            data_byte_count <= (others => '0');
+                        else
+                            state <= ST_FETCH;
+                        end if;
                         
                     when ST_WRITE =>
                         data_byte_count <= data_byte_count + 1;
@@ -682,7 +726,7 @@ begin
     -- Address Output Mux
     ---------------------------------------------------------------------------
     
-    process(state, PC_reg, VA_out, SP_reg, vector_addr, E_mode, eff_addr, data_byte_count)
+    process(state, PC_reg, VA_out, SP_reg, vector_addr, E_mode, eff_addr, data_byte_count, ADDR_MODE)
     begin
         case state is
             when ST_FETCH | ST_DECODE =>
@@ -700,7 +744,12 @@ begin
                 ADDR <= std_logic_vector(unsigned(SP_reg) + 1);
             when ST_READ | ST_READ2 | ST_READ3 | ST_READ4 =>
                 -- Reading from effective address (multi-byte adds offset)
-                ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+                if ADDR_MODE = "0001" then
+                    -- Immediate reads come from PC
+                    ADDR <= PC_reg;
+                else
+                    ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+                end if;
             when ST_WRITE | ST_WRITE2 | ST_WRITE3 | ST_WRITE4 =>
                 -- Writing to effective address
                 ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
@@ -719,11 +768,14 @@ begin
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC)
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES)
         variable write_reg : std_logic_vector(31 downto 0);
     begin
         -- Select source register for stores
-        if IS_ALU_OP = '1' and ALU_OP = "100" then
+        if IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" then
+            -- RMW writeback uses ALU result
+            write_reg := ALU_RES;
+        elsif IS_ALU_OP = '1' and ALU_OP = "100" then
             -- STA
             write_reg := A_reg;
         elsif IS_RMW_OP = '1' and RMW_OP = "100" then
@@ -769,48 +821,93 @@ begin
     ---------------------------------------------------------------------------
     
     ALU_L <= A_reg;
-    ALU_R <= data_buffer;
+    
+    -- ALU_R: select operand based on instruction type
+    -- - Accumulator RMW (ASL A, LSR A, etc.): use A_reg
+    -- - Register RMW (INX, DEX, INY, DEY): use X_reg or Y_reg
+    -- - Memory operations: use data_buffer
+    ALU_R <= A_reg when (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "000") else
+             X_reg when (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "001") else
+             Y_reg when (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "010") else
+             data_buffer;
+    
     ALU_WIDTH <= M_width;
     ALU_BCD <= P_reg(P_D);
     ALU_CI <= P_reg(P_C);
     ALU_VI <= P_reg(P_V);
     ALU_SI <= P_reg(P_N);
     
-    ALU_CTRL.fstOp <= ALU_FST_PASS;
-    ALU_CTRL.secOp <= ALU_OP;
-    ALU_CTRL.fc <= '0';
-    ALU_CTRL.w16 <= '1' when M_width = WIDTH_16 else '0';
-    ALU_CTRL.w32 <= '1' when M_width = WIDTH_32 else '0';
+    process(IS_RMW_OP, RMW_OP, ALU_OP, M_width)
+    begin
+        -- Defaults for ALU ops
+        ALU_CTRL.fstOp <= ALU_FST_PASS;
+        ALU_CTRL.fc <= '0';
+        ALU_CTRL.w16 <= '1' when M_width = WIDTH_16 else '0';
+        ALU_CTRL.w32 <= '1' when M_width = WIDTH_32 else '0';
+        
+        -- Map ALU_OP to secOp (note: LDA/STA map to PASS, not TRB!)
+        -- ALU_OP: 000=ORA, 001=AND, 010=EOR, 011=ADC, 100=STA, 101=LDA, 110=CMP, 111=SBC
+        -- ALU_SEC: 000=OR, 001=AND, 010=XOR, 011=ADC, 100=PASS, 101=TRB, 110=CMP, 111=SBC
+        case ALU_OP is
+            when "100" | "101" => ALU_CTRL.secOp <= ALU_SEC_PASS;  -- STA, LDA
+            when others        => ALU_CTRL.secOp <= ALU_OP;
+        end case;
+        
+        if IS_RMW_OP = '1' then
+            -- RMW uses first-stage operation and pass-through
+            ALU_CTRL.secOp <= ALU_SEC_PASS;
+            case RMW_OP is
+                when "000" => ALU_CTRL.fstOp <= ALU_FST_ASL;
+                when "001" => ALU_CTRL.fstOp <= ALU_FST_ROL;
+                when "010" => ALU_CTRL.fstOp <= ALU_FST_LSR;
+                when "011" => ALU_CTRL.fstOp <= ALU_FST_ROR;
+                when "110" => ALU_CTRL.fstOp <= ALU_FST_DEC;
+                when "111" => ALU_CTRL.fstOp <= ALU_FST_INC;
+                when others => ALU_CTRL.fstOp <= ALU_FST_PASS;
+            end case;
+        end if;
+    end process;
     
     ---------------------------------------------------------------------------
     -- Register Load Signals
     ---------------------------------------------------------------------------
     
-    -- Accumulator input: data_buffer for loads, ALU result for operations
+    -- Accumulator input: data_buffer for loads, ALU result for operations, register for transfers
     -- ALU_OP: 000=ORA, 001=AND, 010=EOR, 011=ADC, 100=STA, 101=LDA, 110=CMP, 111=SBC
-    A_in <= data_buffer when (IS_ALU_OP = '1' and ALU_OP = "101") else ALU_RES;
+    A_in <= data_buffer when (IS_ALU_OP = '1' and ALU_OP = "101") 
+            else X_reg when (IS_TRANSFER = '1' and REG_SRC = "001" and REG_DST = "000")  -- TXA
+            else Y_reg when (IS_TRANSFER = '1' and REG_SRC = "010" and REG_DST = "000")  -- TYA
+            else ALU_RES;
     
-    -- A loads on: LDA, or ALU operations that produce results (not STA, not CMP)
-    A_load <= '1' when state = ST_EXECUTE and IS_ALU_OP = '1' and 
-              ALU_OP /= "100" and ALU_OP /= "110"  -- not STA, not CMP
+    -- A loads on: LDA, ALU operations that produce results (not STA, not CMP),
+    -- accumulator RMW (ASL A, etc.), or transfers to A (TXA, TYA)
+    A_load <= '1' when state = ST_EXECUTE and 
+              ((IS_ALU_OP = '1' and ALU_OP /= "100" and ALU_OP /= "110") or  -- ALU ops except STA, CMP
+               (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "000" and 
+                RMW_OP /= "100" and RMW_OP /= "101") or  -- Accumulator RMW (not stores/loads)
+               (IS_TRANSFER = '1' and REG_DST = "000"))  -- Transfers to A (TXA, TYA)
               else '0';
     
     -- X register: LDX is RMW_OP = "101" with REG_DST = "001"
     -- Also handle transfers TAX (REG_DST = "001")
+    -- Also handle INX/DEX (RMW_OP = "110"/"111" with REG_DST = "001")
     X_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "001")
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "001")
+            else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "001")
             else (others => '0');
     X_load <= '1' when state = ST_EXECUTE and 
-              ((IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "001") or
+              ((IS_RMW_OP = '1' and REG_DST = "001" and RMW_OP /= "100") or  -- LDX, INX, DEX
                (IS_TRANSFER = '1' and REG_DST = "001"))
               else '0';
     
     -- Y register: LDY is RMW_OP = "101" with REG_DST = "010"
+    -- Also handle INY/DEY (RMW_OP = "110"/"111" with REG_DST = "010")
     Y_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "010")
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "010")
+            else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "010")
             else (others => '0');
     Y_load <= '1' when state = ST_EXECUTE and 
-              ((IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "010") or
+              ((IS_RMW_OP = '1' and REG_DST = "010" and RMW_OP /= "100") or  -- LDY, INY, DEY
                (IS_TRANSFER = '1' and REG_DST = "010"))
               else '0';
     
@@ -832,15 +929,65 @@ begin
     P_load <= '0';
     
     ---------------------------------------------------------------------------
+    -- Flag Update Logic
+    ---------------------------------------------------------------------------
+    
+    -- Carry flag input: ALU carry for arithmetic, or explicit set/clear for CLC/SEC
+    flag_c_in <= '0' when (IS_FLAG_OP = '1' and IR = x"18") else  -- CLC
+                 '1' when (IS_FLAG_OP = '1' and IR = x"38") else  -- SEC
+                 ALU_CO;
+    
+    -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
+    flag_c_load <= '1' when state = ST_EXECUTE and 
+                   ((IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
+                    (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "111")) or  -- ADC, SBC
+                    (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 
+                                          RMW_OP = "010" or RMW_OP = "011")))  -- ASL, ROL, LSR, ROR
+                   else '0';
+    
+    -- N, Z, V flags load: most ALU operations and RMW operations
+    flag_nzv_load <= '1' when state = ST_EXECUTE and 
+                     ((IS_ALU_OP = '1' and ALU_OP /= "100") or  -- All ALU except STA
+                      (IS_RMW_OP = '1' and RMW_OP /= "100"))    -- All RMW except STX/STY
+                     else '0';
+    
+    ---------------------------------------------------------------------------
+    -- Branch Condition Evaluation
+    ---------------------------------------------------------------------------
+    -- BRANCH_COND: 000=BPL(N=0), 001=BMI(N=1), 010=BVC(V=0), 011=BVS(V=1),
+    --              100=BCC(C=0), 101=BCS(C=1), 110=BNE(Z=0), 111=BEQ(Z=1)
+    
+    branch_taken <= '1' when IS_BRANCH = '1' and 
+                    (IR = x"80" or  -- BRA: always taken
+                     IR = x"82" or  -- BRL: always taken
+                     (BRANCH_COND = "000" and P_reg(P_N) = '0') or  -- BPL: N=0
+                     (BRANCH_COND = "001" and P_reg(P_N) = '1') or  -- BMI: N=1
+                     (BRANCH_COND = "010" and P_reg(P_V) = '0') or  -- BVC: V=0
+                     (BRANCH_COND = "011" and P_reg(P_V) = '1') or  -- BVS: V=1
+                     (BRANCH_COND = "100" and P_reg(P_C) = '0') or  -- BCC: C=0
+                     (BRANCH_COND = "101" and P_reg(P_C) = '1') or  -- BCS: C=1
+                     (BRANCH_COND = "110" and P_reg(P_Z) = '0') or  -- BNE: Z=0
+                     (BRANCH_COND = "111" and P_reg(P_Z) = '1'))    -- BEQ: Z=1
+                    else '0';
+    
+    ---------------------------------------------------------------------------
     -- Address Generator Control
     ---------------------------------------------------------------------------
-    -- LOAD_PC: 000=hold, 001=increment, 010=load from D_IN:DR
+    -- LOAD_PC: 000=hold, 001=increment, 010=load from D_IN:DR, 100=branch offset
     
-    LOAD_PC <= "010" when state = ST_VECTOR2 -- Load PC from reset vector
-               else "001" when (state = ST_FETCH or state = ST_DECODE or
+    pc_direct <= std_logic_vector(unsigned(jsr_return) + 1);
+    
+    LOAD_PC <= "010" when (state = ST_VECTOR2 or
+                           (state = ST_ADDR2 and (IS_JSR = '1' or IS_JMP_d = '1'))) -- Load PC from D_IN:DR
+               else "100" when (state = ST_BRANCH2 and branch_taken = '1') -- Branch taken: add offset
+               else "001" when (state = ST_FETCH or
                            state = ST_ADDR1 or state = ST_ADDR2 or 
                            state = ST_ADDR3 or state = ST_ADDR4 or
-                           (state = ST_READ and ADDR_MODE = "0001")) -- Immediate mode
+                           state = ST_BRANCH or  -- Fetch branch offset
+                           ((state = ST_DECODE) and IR = x"02" and E_mode = '0') or
+                           ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
+                            ADDR_MODE = "0001")) -- Immediate mode
+               else "111" when (state = ST_EXECUTE and IS_RTS = '1') -- RTS uses stored return
                else "000";
     PC_DEC <= '0';
     ADDR_CTRL <= (others => '0');
