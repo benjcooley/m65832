@@ -251,7 +251,11 @@ begin
                 when "10" =>
                     -- Group 2: ASL, ROL, LSR, ROR, STX, LDX, DEC, INC
                     -- plus implied/register transfers that share cc="10"
-                    if IR = x"AA" then
+                    if IR = x"C2" then
+                        IS_REP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- REP #imm
+                    elsif IR = x"E2" then
+                        IS_SEP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- SEP #imm
+                    elsif IR = x"AA" then
                         IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TAX
                     elsif IR = x"8A" then
                         IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TXA
@@ -370,8 +374,8 @@ begin
                         when x"B8" => IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- CLV
                         when x"D8" => IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- CLD
                         when x"F8" => IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- SED
-                        when x"C2" => IS_REP <= '1'; IS_FLAG_OP <= '1'; INSTR_LEN <= "010";  -- REP
-                        when x"E2" => IS_SEP <= '1'; IS_FLAG_OP <= '1'; INSTR_LEN <= "010";  -- SEP
+                        when x"C2" => IS_REP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- REP #imm
+                        when x"E2" => IS_SEP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- SEP #imm
                         when x"FB" => IS_XCE <= '1'; IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- XCE
                         
                         -- Transfers
@@ -409,21 +413,21 @@ begin
                             else INSTR_LEN <= "010";
                             end if;
                         
-                        when x"E0" => IS_RMW_OP <= '1'; RMW_OP <= "110"; ADDR_MODE <= "0001";  -- CPX #imm
+                        when x"E0" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "001"; ADDR_MODE <= "0001";  -- CPX #imm
                             if X_WIDTH = WIDTH_32 then INSTR_LEN <= "101";
                             elsif X_WIDTH = WIDTH_16 then INSTR_LEN <= "011";
                             else INSTR_LEN <= "010";
                             end if;
-                        when x"E4" => IS_RMW_OP <= '1'; RMW_OP <= "110"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- CPX dp
-                        when x"EC" => IS_RMW_OP <= '1'; RMW_OP <= "110"; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- CPX abs
+                        when x"E4" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "001"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- CPX dp
+                        when x"EC" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "001"; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- CPX abs
                         
-                        when x"C0" => IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0001";  -- CPY #imm
+                        when x"C0" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0001";  -- CPY #imm
                             if X_WIDTH = WIDTH_32 then INSTR_LEN <= "101";
                             elsif X_WIDTH = WIDTH_16 then INSTR_LEN <= "011";
                             else INSTR_LEN <= "010";
                             end if;
-                        when x"C4" => IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- CPY dp
-                        when x"CC" => IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- CPY abs
+                        when x"C4" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- CPY dp
+                        when x"CC" => IS_ALU_OP <= '1'; ALU_OP <= "110"; REG_SRC <= "010"; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- CPY abs
                         
                         -- STY, LDY
                         when x"84" => IS_RMW_OP <= '1'; RMW_OP <= "100"; REG_SRC <= "010"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- STY dp

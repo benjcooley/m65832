@@ -972,6 +972,464 @@ begin
         check_mem(16#021D#, x"42", "LSR abs result");
         
         -----------------------------------------------------------------------
+        -- TEST 27: SBC immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 27: SBC #imm";
+        
+        -- Program: SEC, LDA #$50, SBC #$10 -> $40, STA $021E
+        poke(16#8000#, x"38");  -- SEC (C=1)
+        poke(16#8001#, x"A9");  -- LDA #
+        poke(16#8002#, x"50");  -- $50
+        poke(16#8003#, x"E9");  -- SBC #
+        poke(16#8004#, x"10");  -- $10  -> $40
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"1E");  -- $1E
+        poke(16#8007#, x"02");  -- $02  -> $021E
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#021E#, x"40", "SBC immediate result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 28: BIT sets Z/V/N flags
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 28: BIT flag behavior";
+        
+        -- Pre-load memory operand ($0224 = $C0 => V=1, N=1)
+        poke(16#0224#, x"C0");
+        
+        -- Program:
+        -- LDA #$00, BIT $0224 (Z=1, V=1, N=1)
+        -- BEQ +2 (taken), BVS +2 (taken), BMI +2 (taken)
+        -- LDA #$11, STA $021F
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"00");  -- $00
+        poke(16#8002#, x"2C");  -- BIT abs
+        poke(16#8003#, x"24");  -- $24
+        poke(16#8004#, x"02");  -- $02  -> $0224
+        poke(16#8005#, x"F0");  -- BEQ
+        poke(16#8006#, x"02");  -- +2 (skip LDA #$FF)
+        poke(16#8007#, x"A9");  -- LDA #
+        poke(16#8008#, x"FF");  -- $FF
+        poke(16#8009#, x"70");  -- BVS
+        poke(16#800A#, x"02");  -- +2 (skip LDA #$EE)
+        poke(16#800B#, x"A9");  -- LDA #
+        poke(16#800C#, x"EE");  -- $EE
+        poke(16#800D#, x"30");  -- BMI
+        poke(16#800E#, x"02");  -- +2 (skip LDA #$DD)
+        poke(16#800F#, x"A9");  -- LDA #
+        poke(16#8010#, x"DD");  -- $DD
+        poke(16#8011#, x"A9");  -- LDA #
+        poke(16#8012#, x"11");  -- $11
+        poke(16#8013#, x"8D");  -- STA abs
+        poke(16#8014#, x"1F");  -- $1F
+        poke(16#8015#, x"02");  -- $02  -> $021F
+        poke(16#8016#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#021F#, x"11", "BIT sets Z/V/N flags");
+        
+        -----------------------------------------------------------------------
+        -- TEST 29: CPX immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 29: CPX #imm";
+        
+        -- Program: LDX #$10, CPX #$10 (Z=1), BEQ +2 (taken), LDA #$22, STA $0220
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"10");  -- $10
+        poke(16#8002#, x"E0");  -- CPX #
+        poke(16#8003#, x"10");  -- $10
+        poke(16#8004#, x"F0");  -- BEQ
+        poke(16#8005#, x"02");  -- +2 (skip LDA #$FF)
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"FF");  -- $FF
+        poke(16#8008#, x"A9");  -- LDA #
+        poke(16#8009#, x"22");  -- $22
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"20");  -- $20
+        poke(16#800C#, x"02");  -- $02  -> $0220
+        poke(16#800D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#0220#, x"22", "CPX sets Z flag");
+        
+        -----------------------------------------------------------------------
+        -- TEST 30: CPY immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 30: CPY #imm";
+        
+        -- Program: LDY #$20, CPY #$10 (C=1), BCS +2 (taken), LDA #$33, STA $0221
+        poke(16#8000#, x"A0");  -- LDY #
+        poke(16#8001#, x"20");  -- $20
+        poke(16#8002#, x"C0");  -- CPY #
+        poke(16#8003#, x"10");  -- $10
+        poke(16#8004#, x"B0");  -- BCS
+        poke(16#8005#, x"02");  -- +2 (skip LDA #$FF)
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"FF");  -- $FF
+        poke(16#8008#, x"A9");  -- LDA #
+        poke(16#8009#, x"33");  -- $33
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"21");  -- $21
+        poke(16#800C#, x"02");  -- $02  -> $0221
+        poke(16#800D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#0221#, x"33", "CPY sets C flag");
+        
+        -----------------------------------------------------------------------
+        -- TEST 31: 16-bit accumulator mode
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 31: 16-bit accumulator LDA/STA";
+        
+        -- Program: SEP #$40 (M0=1), LDA #$1234, STA $0222
+        poke(16#8000#, x"E2");  -- SEP
+        poke(16#8001#, x"40");  -- set M0 -> 16-bit
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"34");  -- low
+        poke(16#8004#, x"12");  -- high
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"22");  -- $22
+        poke(16#8007#, x"02");  -- $02  -> $0222/$0223
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#0222#, x"34", "16-bit STA low byte");
+        check_mem(16#0223#, x"12", "16-bit STA high byte");
+        
+        -----------------------------------------------------------------------
+        -- TEST 32: 16-bit index mode (LDX/STX)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 32: 16-bit index LDX/STX";
+        
+        -- Program: SEP #$10 (X0=1), LDX #$BEEF, STX $0224
+        poke(16#8000#, x"E2");  -- SEP
+        poke(16#8001#, x"10");  -- set X0 -> 16-bit
+        poke(16#8002#, x"A2");  -- LDX #
+        poke(16#8003#, x"EF");  -- low
+        poke(16#8004#, x"BE");  -- high
+        poke(16#8005#, x"8E");  -- STX abs
+        poke(16#8006#, x"24");  -- $24
+        poke(16#8007#, x"02");  -- $02  -> $0224/$0225
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(100);
+        
+        check_mem(16#0224#, x"EF", "16-bit STX low byte");
+        check_mem(16#0225#, x"BE", "16-bit STX high byte");
+        
+        -----------------------------------------------------------------------
+        -- TEST 33: 32-bit accumulator mode
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 33: 32-bit accumulator LDA/STA";
+        
+        -- Program: REP #$40 (M0=0), SEP #$80 (M1=1), LDA #$89ABCDEF, STA $0226
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"EF");  -- byte 0
+        poke(16#8006#, x"CD");  -- byte 1
+        poke(16#8007#, x"AB");  -- byte 2
+        poke(16#8008#, x"89");  -- byte 3
+        poke(16#8009#, x"8D");  -- STA abs
+        poke(16#800A#, x"26");  -- $26
+        poke(16#800B#, x"02");  -- $02  -> $0226-$0229
+        poke(16#800C#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#0226#, x"EF", "32-bit STA byte 0");
+        check_mem(16#0227#, x"CD", "32-bit STA byte 1");
+        check_mem(16#0228#, x"AB", "32-bit STA byte 2");
+        check_mem(16#0229#, x"89", "32-bit STA byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 34: 32-bit index mode (LDX/STX)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 34: 32-bit index LDX/STX";
+        
+        -- Program: REP #$10 (X0=0), SEP #$20 (X1=1), LDX #$12345678, STX $022A
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"10");  -- clear X0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"20");  -- set X1 -> 32-bit
+        poke(16#8004#, x"A2");  -- LDX #
+        poke(16#8005#, x"78");  -- byte 0
+        poke(16#8006#, x"56");  -- byte 1
+        poke(16#8007#, x"34");  -- byte 2
+        poke(16#8008#, x"12");  -- byte 3
+        poke(16#8009#, x"8E");  -- STX abs
+        poke(16#800A#, x"2A");  -- $2A
+        poke(16#800B#, x"02");  -- $02  -> $022A-$022D
+        poke(16#800C#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#022A#, x"78", "32-bit STX byte 0");
+        check_mem(16#022B#, x"56", "32-bit STX byte 1");
+        check_mem(16#022C#, x"34", "32-bit STX byte 2");
+        check_mem(16#022D#, x"12", "32-bit STX byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 35: 16-bit ADC immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 35: 16-bit ADC #imm";
+        
+        -- Program: REP #$80, SEP #$40, CLC, LDA #$1234, ADC #$0001 -> $1235, STA $0230
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"18");  -- CLC
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"34");  -- low
+        poke(16#8007#, x"12");  -- high
+        poke(16#8008#, x"69");  -- ADC #
+        poke(16#8009#, x"01");  -- low
+        poke(16#800A#, x"00");  -- high
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"30");  -- $30
+        poke(16#800D#, x"02");  -- $02  -> $0230/$0231
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#0230#, x"35", "16-bit ADC low byte");
+        check_mem(16#0231#, x"12", "16-bit ADC high byte");
+        
+        -----------------------------------------------------------------------
+        -- TEST 36: 16-bit SBC immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 36: 16-bit SBC #imm";
+        
+        -- Program: REP #$80, SEP #$40, SEC, LDA #$1000, SBC #$0001 -> $0FFF, STA $0232
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"38");  -- SEC
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"00");  -- low
+        poke(16#8007#, x"10");  -- high
+        poke(16#8008#, x"E9");  -- SBC #
+        poke(16#8009#, x"01");  -- low
+        poke(16#800A#, x"00");  -- high
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"32");  -- $32
+        poke(16#800D#, x"02");  -- $02  -> $0232/$0233
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#0232#, x"FF", "16-bit SBC low byte");
+        check_mem(16#0233#, x"0F", "16-bit SBC high byte");
+        
+        -----------------------------------------------------------------------
+        -- TEST 37: 16-bit CMP immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 37: 16-bit CMP #imm";
+        
+        -- Program: REP #$80, SEP #$40, LDA #$00F0, CMP #$00F0 (Z=1),
+        --          BEQ +3, LDA #$0000 (skipped), LDA #$0077, STA $0234
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"F0");  -- low
+        poke(16#8006#, x"00");  -- high
+        poke(16#8007#, x"C9");  -- CMP #
+        poke(16#8008#, x"F0");  -- low
+        poke(16#8009#, x"00");  -- high
+        poke(16#800A#, x"F0");  -- BEQ
+        poke(16#800B#, x"03");  -- +3 (skip 16-bit LDA #$0000)
+        poke(16#800C#, x"A9");  -- LDA #
+        poke(16#800D#, x"00");  -- low
+        poke(16#800E#, x"00");  -- high
+        poke(16#800F#, x"A9");  -- LDA #
+        poke(16#8010#, x"77");  -- low
+        poke(16#8011#, x"00");  -- high
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"34");  -- $34
+        poke(16#8014#, x"02");  -- $02  -> $0234
+        poke(16#8015#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#0234#, x"77", "16-bit CMP sets Z");
+        
+        -----------------------------------------------------------------------
+        -- TEST 38: 32-bit ADC immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 38: 32-bit ADC #imm";
+        
+        -- Program: REP #$40, SEP #$80, CLC, LDA #$01020304, ADC #$11111111 -> $12131415, STA $0236
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"18");  -- CLC
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"04");  -- byte 0
+        poke(16#8007#, x"03");  -- byte 1
+        poke(16#8008#, x"02");  -- byte 2
+        poke(16#8009#, x"01");  -- byte 3
+        poke(16#800A#, x"69");  -- ADC #
+        poke(16#800B#, x"11");  -- byte 0
+        poke(16#800C#, x"11");  -- byte 1
+        poke(16#800D#, x"11");  -- byte 2
+        poke(16#800E#, x"11");  -- byte 3
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"36");  -- $36
+        poke(16#8011#, x"02");  -- $02  -> $0236-$0239
+        poke(16#8012#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#0236#, x"15", "32-bit ADC byte 0");
+        check_mem(16#0237#, x"14", "32-bit ADC byte 1");
+        check_mem(16#0238#, x"13", "32-bit ADC byte 2");
+        check_mem(16#0239#, x"12", "32-bit ADC byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 39: 32-bit SBC immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 39: 32-bit SBC #imm";
+        
+        -- Program: REP #$40, SEP #$80, SEC, LDA #$10000000, SBC #$00000001 -> $0FFFFFFF, STA $023A
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"38");  -- SEC
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"00");  -- byte 0
+        poke(16#8007#, x"00");  -- byte 1
+        poke(16#8008#, x"00");  -- byte 2
+        poke(16#8009#, x"10");  -- byte 3
+        poke(16#800A#, x"E9");  -- SBC #
+        poke(16#800B#, x"01");  -- byte 0
+        poke(16#800C#, x"00");  -- byte 1
+        poke(16#800D#, x"00");  -- byte 2
+        poke(16#800E#, x"00");  -- byte 3
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"3A");  -- $3A
+        poke(16#8011#, x"02");  -- $02  -> $023A-$023D
+        poke(16#8012#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#023A#, x"FF", "32-bit SBC byte 0");
+        check_mem(16#023B#, x"FF", "32-bit SBC byte 1");
+        check_mem(16#023C#, x"FF", "32-bit SBC byte 2");
+        check_mem(16#023D#, x"0F", "32-bit SBC byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 40: 32-bit CMP immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 40: 32-bit CMP #imm";
+        
+        -- Program: REP #$40, SEP #$80, LDA #$0000FFFF, CMP #$0000FFFF (Z=1),
+        --          BEQ +5, LDA #$00000000 (skipped), LDA #$00000055, STA $023E
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"FF");  -- byte 0
+        poke(16#8006#, x"FF");  -- byte 1
+        poke(16#8007#, x"00");  -- byte 2
+        poke(16#8008#, x"00");  -- byte 3
+        poke(16#8009#, x"C9");  -- CMP #
+        poke(16#800A#, x"FF");  -- byte 0
+        poke(16#800B#, x"FF");  -- byte 1
+        poke(16#800C#, x"00");  -- byte 2
+        poke(16#800D#, x"00");  -- byte 3
+        poke(16#800E#, x"F0");  -- BEQ
+        poke(16#800F#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
+        poke(16#8010#, x"A9");  -- LDA #
+        poke(16#8011#, x"00");  -- byte 0
+        poke(16#8012#, x"00");  -- byte 1
+        poke(16#8013#, x"00");  -- byte 2
+        poke(16#8014#, x"00");  -- byte 3
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"55");  -- byte 0
+        poke(16#8017#, x"00");  -- byte 1
+        poke(16#8018#, x"00");  -- byte 2
+        poke(16#8019#, x"00");  -- byte 3
+        poke(16#801A#, x"8D");  -- STA abs
+        poke(16#801B#, x"3E");  -- $3E
+        poke(16#801C#, x"02");  -- $02  -> $023E
+        poke(16#801D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#023E#, x"55", "32-bit CMP sets Z");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";

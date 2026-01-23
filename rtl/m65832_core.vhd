@@ -204,6 +204,11 @@ architecture rtl of M65832_Core is
     signal addr_reg         : std_logic_vector(31 downto 0);
     signal write_data       : std_logic_vector(7 downto 0);
     signal branch_taken     : std_logic;
+    signal is_bit_op        : std_logic;
+    signal read_width       : std_logic_vector(1 downto 0);
+    signal write_width      : std_logic_vector(1 downto 0);
+    signal alu_width_eff    : std_logic_vector(1 downto 0);
+    signal p_next           : std_logic_vector(P_WIDTH-1 downto 0);
     
     -- DR (data register) for address generation
     signal DR               : std_logic_vector(7 downto 0);
@@ -514,7 +519,7 @@ begin
                             state <= ST_FETCH;
                         elsif IS_TRANSFER = '1' then
                             state <= ST_EXECUTE;
-                        elsif IS_FLAG_OP = '1' then
+                        elsif IS_FLAG_OP = '1' and IS_REP = '0' and IS_SEP = '0' then
                             state <= ST_EXECUTE;
                         elsif IS_BRANCH = '1' then
                             state <= ST_BRANCH;
@@ -623,9 +628,9 @@ begin
                         data_byte_count <= data_byte_count + 1;
                         
                         -- Check if we need more bytes based on width
-                        if M_width = WIDTH_8 or data_byte_count = "011" then
+                        if read_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_EXECUTE;
-                        elsif M_width = WIDTH_16 and data_byte_count = "001" then
+                        elsif read_width = WIDTH_16 and data_byte_count = "001" then
                             state <= ST_EXECUTE;
                         else
                             state <= ST_READ2;
@@ -634,7 +639,7 @@ begin
                     when ST_READ2 =>
                         data_buffer(15 downto 8) <= DATA_IN;
                         data_byte_count <= data_byte_count + 1;
-                        if M_width = WIDTH_16 then
+                        if read_width = WIDTH_16 then
                             state <= ST_EXECUTE;
                         else
                             state <= ST_READ3;
@@ -662,9 +667,9 @@ begin
                         
                     when ST_WRITE =>
                         data_byte_count <= data_byte_count + 1;
-                        if M_width = WIDTH_8 or data_byte_count = "011" then
+                        if write_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_FETCH;
-                        elsif M_width = WIDTH_16 and data_byte_count = "001" then
+                        elsif write_width = WIDTH_16 and data_byte_count = "001" then
                             state <= ST_FETCH;
                         else
                             state <= ST_WRITE2;
@@ -672,7 +677,7 @@ begin
                         
                     when ST_WRITE2 =>
                         data_byte_count <= data_byte_count + 1;
-                        if M_width = WIDTH_16 then
+                        if write_width = WIDTH_16 then
                             state <= ST_FETCH;
                         else
                             state <= ST_WRITE3;
@@ -820,7 +825,9 @@ begin
     -- ALU Connections (simplified)
     ---------------------------------------------------------------------------
     
-    ALU_L <= A_reg;
+    ALU_L <= X_reg when (IS_ALU_OP = '1' and ALU_OP = "110" and REG_SRC = "001") else
+             Y_reg when (IS_ALU_OP = '1' and ALU_OP = "110" and REG_SRC = "010") else
+             A_reg;
     
     -- ALU_R: select operand based on instruction type
     -- - Accumulator RMW (ASL A, LSR A, etc.): use A_reg
@@ -831,13 +838,33 @@ begin
              Y_reg when (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "010") else
              data_buffer;
     
-    ALU_WIDTH <= M_width;
+    alu_width_eff <= X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
+                                   (REG_SRC = "001" or REG_SRC = "010"))
+                     else M_width;
+    
+    ALU_WIDTH <= alu_width_eff;
     ALU_BCD <= P_reg(P_D);
     ALU_CI <= P_reg(P_C);
     ALU_VI <= P_reg(P_V);
     ALU_SI <= P_reg(P_N);
     
-    process(IS_RMW_OP, RMW_OP, ALU_OP, M_width)
+    is_bit_op <= '1' when (IS_ALU_OP = '1' and ALU_OP = "001" and
+                           (IR = x"24" or IR = x"2C" or IR = x"34" or
+                            IR = x"3C" or IR = x"89"))
+                else '0';
+    
+    read_width <= WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
+                  X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
+                                (REG_DST = "001" or REG_DST = "010")) else
+                  X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
+                                (REG_SRC = "001" or REG_SRC = "010")) else
+                  M_width;
+    
+    write_width <= X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
+                                 (REG_SRC = "001" or REG_SRC = "010")) else
+                   M_width;
+    
+    process(IS_RMW_OP, RMW_OP, ALU_OP, M_width, is_bit_op)
     begin
         -- Defaults for ALU ops
         ALU_CTRL.fstOp <= ALU_FST_PASS;
@@ -852,6 +879,10 @@ begin
             when "100" | "101" => ALU_CTRL.secOp <= ALU_SEC_PASS;  -- STA, LDA
             when others        => ALU_CTRL.secOp <= ALU_OP;
         end case;
+        
+        if is_bit_op = '1' then
+            ALU_CTRL.fc <= '1';
+        end if;
         
         if IS_RMW_OP = '1' then
             -- RMW uses first-stage operation and pass-through
@@ -882,7 +913,7 @@ begin
     -- A loads on: LDA, ALU operations that produce results (not STA, not CMP),
     -- accumulator RMW (ASL A, etc.), or transfers to A (TXA, TYA)
     A_load <= '1' when state = ST_EXECUTE and 
-              ((IS_ALU_OP = '1' and ALU_OP /= "100" and ALU_OP /= "110") or  -- ALU ops except STA, CMP
+              ((IS_ALU_OP = '1' and ALU_OP /= "100" and ALU_OP /= "110" and is_bit_op = '0') or  -- ALU ops except STA, CMP, BIT
                (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "000" and 
                 RMW_OP /= "100" and RMW_OP /= "101") or  -- Accumulator RMW (not stores/loads)
                (IS_TRANSFER = '1' and REG_DST = "000"))  -- Transfers to A (TXA, TYA)
@@ -925,8 +956,14 @@ begin
     VBR_load <= '0';
     T_in <= (others => '0');
     T_load <= '0';
-    P_in <= (others => '0');
-    P_load <= '0';
+    p_next <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and (not data_buffer(7 downto 0)))
+              when IS_REP = '1' else
+              P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or data_buffer(7 downto 0))
+              when IS_SEP = '1' else
+              P_reg;
+    
+    P_in <= p_next;
+    P_load <= '1' when state = ST_EXECUTE and (IS_REP = '1' or IS_SEP = '1') else '0';
     
     ---------------------------------------------------------------------------
     -- Flag Update Logic
