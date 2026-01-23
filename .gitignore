@@ -1,0 +1,60 @@
+# GHDL build artifacts
+*.o
+*.cf
+work-obj08.cf
+work-obj93.cf
+e~*
+
+# Simulation outputs
+*.ghw
+*.vcd
+*.fst
+
+# Executable outputs
+tb_*
+!tb_*.vhd
+
+# Xilinx/Vivado
+*.bit
+*.bin
+*.ltx
+*.dcp
+*.xpr
+*.jou
+*.log
+.Xil/
+*.ip_user_files/
+*.hw/
+*.sim/
+*.runs/
+*.cache/
+*.srcs/
+
+# IDE
+.vscode/
+*.code-workspace
+.idea/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Backup files
+*~
+*.bak
+*.swp
+*.swo
+
+# Python (for future tooling)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.env
+
+# Build directories
+build/
+dist/
