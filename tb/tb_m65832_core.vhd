@@ -2435,6 +2435,168 @@ begin
         check_mem(16#02D8#, x"4D", "JMP (abs,X) result");
         
         -----------------------------------------------------------------------
+        -- TEST 67: LDA [dp] (long indirect)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 67: LDA [dp]";
+        
+        -- Setup long pointer at $0080/$0081/$0082 -> $000500
+        poke(16#0080#, x"00");  -- low
+        poke(16#0081#, x"05");  -- high
+        poke(16#0082#, x"00");  -- bank
+        poke(16#0500#, x"9A");  -- data
+        
+        -- Program: LDA [dp], STA $02E0
+        poke(16#8000#, x"A7");  -- LDA [dp] (cc=11, bbb=001)
+        poke(16#8001#, x"80");  -- dp
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"E0");  -- $E0
+        poke(16#8004#, x"02");  -- $02 -> $02E0
+        poke(16#8005#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#02E0#, x"9A", "LDA [dp] result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 68: LDA [dp],Y (long indirect indexed)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 68: LDA [dp],Y";
+        
+        -- Setup long pointer at $0084/$0085/$0086 -> $000510, Y=$03
+        poke(16#0084#, x"10");  -- low
+        poke(16#0085#, x"05");  -- high
+        poke(16#0086#, x"00");  -- bank
+        poke(16#0513#, x"B4");  -- data at $0510 + Y
+        
+        -- Program: LDY #$03, LDA [dp],Y, STA $02E1
+        poke(16#8000#, x"A0");  -- LDY #
+        poke(16#8001#, x"03");  -- $03
+        poke(16#8002#, x"B3");  -- LDA [dp],Y (cc=11, bbb=100)
+        poke(16#8003#, x"84");  -- dp
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"E1");  -- $E1
+        poke(16#8006#, x"02");  -- $02 -> $02E1
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#02E1#, x"B4", "LDA [dp],Y result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 69: LDA sr,S (stack-relative)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 69: LDA sr,S";
+        
+        -- SP defaults to $01FF; offset $05 -> $0204
+        poke(16#0204#, x"77");  -- data
+        
+        -- Program: LDA sr,S, STA $02E2
+        poke(16#8000#, x"A3");  -- LDA sr,S (cc=11, bbb=000)
+        poke(16#8001#, x"05");  -- offset
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"E2");  -- $E2
+        poke(16#8004#, x"02");  -- $02 -> $02E2
+        poke(16#8005#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#02E2#, x"77", "LDA sr,S result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 70: LDA (sr,S),Y
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 70: LDA (sr,S),Y";
+        
+        -- Pointer at $0206/$0207 -> $0520, Y=$02, data at $0522
+        poke(16#0206#, x"20");  -- low
+        poke(16#0207#, x"05");  -- high -> $0520
+        poke(16#0522#, x"5D");  -- data
+        
+        -- Program: LDY #$02, LDA (sr,S),Y, STA $02E3
+        poke(16#8000#, x"A0");  -- LDY #
+        poke(16#8001#, x"02");  -- $02
+        poke(16#8002#, x"AF");  -- LDA (sr,S),Y (cc=11, bbb=011)
+        poke(16#8003#, x"07");  -- offset -> SP+7 = $0206
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"E3");  -- $E3
+        poke(16#8006#, x"02");  -- $02 -> $02E3
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#02E3#, x"5D", "LDA (sr,S),Y result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 71: LDA long
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 71: LDA long";
+        
+        -- Data at $000620
+        poke(16#0620#, x"5F");  -- data
+        
+        -- Program: LDA long, STA $02E4
+        poke(16#8000#, x"AB");  -- LDA long (cc=11, bbb=010)
+        poke(16#8001#, x"20");  -- low
+        poke(16#8002#, x"06");  -- high
+        poke(16#8003#, x"00");  -- bank
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"E4");  -- $E4
+        poke(16#8006#, x"02");  -- $02 -> $02E4
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#02E4#, x"5F", "LDA long result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 72: LDA long,X
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 72: LDA long,X";
+        
+        -- Data at $000630 + X($03) = $000633
+        poke(16#0633#, x"6E");  -- data
+        
+        -- Program: LDX #$03, LDA long,X, STA $02E5
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"03");  -- $03
+        poke(16#8002#, x"BF");  -- LDA long,X (cc=11, bbb=111)
+        poke(16#8003#, x"30");  -- low
+        poke(16#8004#, x"06");  -- high
+        poke(16#8005#, x"00");  -- bank
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"E5");  -- $E5
+        poke(16#8008#, x"02");  -- $02 -> $02E5
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(160);
+        
+        check_mem(16#02E5#, x"6E", "LDA long,X result");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";
