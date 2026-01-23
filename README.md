@@ -70,6 +70,77 @@ SB #$90000000       ; Set absolute base
 LDA $1234           ; Loads from $90001234 (3-byte instruction!)
 ```
 
+### Classic Coprocessor: Cycle-Accurate 6502 Emulation
+
+The M65832 includes a unique **three-core interleaved architecture** that enables cycle-accurate execution of classic 6502 games while running Linux:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    M65832 SoC Architecture                          │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │              Fractional Clock Divider                        │   │
+│  │   Master: 50 MHz  →  Target: 1.022727 MHz (C64 NTSC)        │   │
+│  │   Generates tick every ~49 cycles for exact 6502 timing     │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              │                                      │
+│        ┌─────────────────────┼─────────────────────┐               │
+│        ▼                     ▼                     ▼               │
+│  ┌──────────┐         ┌──────────┐         ┌──────────┐           │
+│  │ M65832   │         │  6502    │         │ Servicer │           │
+│  │ Main Core│         │Game Core │         │   Core   │           │
+│  │ (Linux)  │         │(Classic) │         │  (I/O)   │           │
+│  │  ~90%    │         │   ~2%    │         │ on-demand│           │
+│  └──────────┘         └──────────┘         └──────────┘           │
+│       │                     │                     │                │
+│       └─────────────────────┴─────────────────────┘                │
+│                              │                                      │
+│                    ┌─────────▼─────────┐                           │
+│                    │   Shared Memory   │                           │
+│                    │ Shadow Regs, FIFO │                           │
+│                    └───────────────────┘                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Why three cores?**
+
+Classic games like those for C64, NES, and Atari rely on *exact* cycle timing:
+- **Raster racing**: Code that changes graphics mid-scanline
+- **Sound timing**: Music engines that count cycles for tempo
+- **Sprite multiplexing**: Repositioning sprites during blanking
+
+Software emulation can't match this while Linux handles interrupts. The solution: **dedicated hardware**.
+
+**How it works:**
+
+1. **M65832 Main Core** (~90% of cycles): Runs Linux, apps, and game rendering
+2. **6502 Game Core** (~2% of cycles): Executes classic game code at exact original speed
+3. **Servicer Core** (on-demand): Handles I/O reads that need computed responses
+
+The **fractional clock divider** uses Bresenham-style scheduling to generate precise 6502 timing even when the master clock isn't an exact multiple:
+
+```
+Master Clock:   50.000000 MHz
+Target (C64):    1.022727 MHz
+Ratio:          ~48.9 cycles per 6502 tick
+
+The divider alternates 49/48 cycle gaps to maintain
+long-term frequency accuracy within 0.001%
+```
+
+**Servicer core** has extended instructions for fast I/O:
+
+| Opcode | Mnemonic | Description |
+|--------|----------|-------------|
+| $03 | LDBY | A = beam_y (current scanline) |
+| $13 | LDBX | A = beam_x (position in line) |
+| $43 | BBOX | Z=1 if sprite bounding boxes overlap |
+| $83 | RTS_SVC | Fast return from service routine |
+
+**Shadow registers** capture all classic chip writes with cycle timestamps, letting Linux render the frame accurately while the 6502 runs at real speed.
+
+See [Classic Coprocessor](docs/M65832_Classic_Coprocessor.md) for complete details.
+
 ### Modern Features
 
 - **Atomic operations**: CAS, LL/SC for lock-free programming
