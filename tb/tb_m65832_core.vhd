@@ -672,6 +672,306 @@ begin
         check_mem(16#0212#, x"77", "BNE not taken");
         
         -----------------------------------------------------------------------
+        -- TEST 16: CMP (compare accumulator)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 16: CMP sets flags correctly";
+        
+        -- Program: LDA #$50, CMP #$30 (A > operand, C=1, Z=0, N=0)
+        --          BCS +2 (taken), LDA #$FF (skipped), STA $0213
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"50");  -- $50
+        poke(16#8002#, x"C9");  -- CMP #
+        poke(16#8003#, x"30");  -- $30  ($50 >= $30, so C=1)
+        poke(16#8004#, x"B0");  -- BCS (branch if C=1)
+        poke(16#8005#, x"02");  -- +2
+        poke(16#8006#, x"A9");  -- LDA # (skipped)
+        poke(16#8007#, x"FF");  -- $FF
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"13");  -- $13
+        poke(16#800A#, x"02");  -- $02  -> $0213
+        poke(16#800B#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0213#, x"50", "CMP sets C flag");
+        
+        -----------------------------------------------------------------------
+        -- TEST 17: CMP equal sets Z flag
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 17: CMP equal sets Z flag";
+        
+        -- Program: LDA #$42, CMP #$42 (equal, Z=1, C=1)
+        --          Store result showing Z was set
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"42");  -- $42
+        poke(16#8002#, x"C9");  -- CMP #
+        poke(16#8003#, x"42");  -- $42  (equal, Z=1)
+        poke(16#8004#, x"F0");  -- BEQ (branch if Z=1)
+        poke(16#8005#, x"02");  -- +2
+        poke(16#8006#, x"A9");  -- LDA # (skipped if Z=1)
+        poke(16#8007#, x"FF");  -- $FF
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"14");  -- $14
+        poke(16#800A#, x"02");  -- $02  -> $0214
+        poke(16#800B#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0214#, x"42", "CMP equal sets Z");
+        
+        -----------------------------------------------------------------------
+        -- TEST 18: ROL accumulator (rotate left through carry)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 18: ROL A";
+        
+        -- Program: SEC (C=1), LDA #$40, ROL A -> $81 (C was shifted in)
+        --          STA $0215
+        poke(16#8000#, x"38");  -- SEC (C=1)
+        poke(16#8001#, x"A9");  -- LDA #
+        poke(16#8002#, x"40");  -- $40 = 0100_0000
+        poke(16#8003#, x"2A");  -- ROL A -> 1000_0001 = $81 (C shifts into bit 0)
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"15");  -- $15
+        poke(16#8006#, x"02");  -- $02  -> $0215
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0215#, x"81", "ROL A result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 19: ROR accumulator (rotate right through carry)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 19: ROR A";
+        
+        -- Program: SEC (C=1), LDA #$02, ROR A -> $81 (C shifts into bit 7)
+        --          STA $0216
+        poke(16#8000#, x"38");  -- SEC (C=1)
+        poke(16#8001#, x"A9");  -- LDA #
+        poke(16#8002#, x"02");  -- $02 = 0000_0010
+        poke(16#8003#, x"6A");  -- ROR A -> 1000_0001 = $81 (C shifts into bit 7)
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"16");  -- $16
+        poke(16#8006#, x"02");  -- $02  -> $0216
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0216#, x"81", "ROR A result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 20: BCC (branch if carry clear)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 20: BCC branch";
+        
+        -- Program: CLC (C=0), BCC +2 (taken), LDA #$FF (skipped), LDA #$20, STA $0217
+        poke(16#8000#, x"18");  -- CLC (C=0)
+        poke(16#8001#, x"90");  -- BCC (branch if C=0)
+        poke(16#8002#, x"02");  -- +2
+        poke(16#8003#, x"A9");  -- LDA # (skipped)
+        poke(16#8004#, x"FF");  -- $FF
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"20");  -- $20
+        poke(16#8007#, x"8D");  -- STA abs
+        poke(16#8008#, x"17");  -- $17
+        poke(16#8009#, x"02");  -- $02  -> $0217
+        poke(16#800A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0217#, x"20", "BCC taken");
+        
+        -----------------------------------------------------------------------
+        -- TEST 21: BPL (branch if plus/positive)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 21: BPL branch";
+        
+        -- Program: LDA #$7F (positive, N=0), BPL +2 (taken), LDA #$FF, STA $0218
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"7F");  -- $7F (positive, N=0)
+        poke(16#8002#, x"10");  -- BPL (branch if N=0)
+        poke(16#8003#, x"02");  -- +2
+        poke(16#8004#, x"A9");  -- LDA # (skipped)
+        poke(16#8005#, x"FF");  -- $FF
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"18");  -- $18
+        poke(16#8008#, x"02");  -- $02  -> $0218
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0218#, x"7F", "BPL taken");
+        
+        -----------------------------------------------------------------------
+        -- TEST 22: BMI (branch if minus/negative)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 22: BMI branch";
+        
+        -- Program: LDA #$80 (negative, N=1), BMI +2 (taken), LDA #$FF, STA $0219
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"80");  -- $80 (negative, N=1)
+        poke(16#8002#, x"30");  -- BMI (branch if N=1)
+        poke(16#8003#, x"02");  -- +2
+        poke(16#8004#, x"A9");  -- LDA # (skipped)
+        poke(16#8005#, x"FF");  -- $FF
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"19");  -- $19
+        poke(16#8008#, x"02");  -- $02  -> $0219
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(80);
+        
+        check_mem(16#0219#, x"80", "BMI taken");
+        
+        -----------------------------------------------------------------------
+        -- TEST 23: INC memory (absolute addressing)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 23: INC abs";
+        
+        -- Program: Store $41 at $0220, INC $0220, then read and store at $021A
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"41");  -- $41
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"20");  -- $20
+        poke(16#8004#, x"02");  -- $02  -> $0220 = $41
+        poke(16#8005#, x"EE");  -- INC abs
+        poke(16#8006#, x"20");  -- $20
+        poke(16#8007#, x"02");  -- $02  -> INC $0220
+        poke(16#8008#, x"AD");  -- LDA abs
+        poke(16#8009#, x"20");  -- $20
+        poke(16#800A#, x"02");  -- $02  -> load from $0220
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"1A");  -- $1A
+        poke(16#800D#, x"02");  -- $02  -> $021A
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#021A#, x"42", "INC abs result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 24: DEC memory (absolute addressing)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 24: DEC abs";
+        
+        -- Program: Store $43 at $0221, DEC $0221, then read and store at $021B
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"43");  -- $43
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"21");  -- $21
+        poke(16#8004#, x"02");  -- $02  -> $0221 = $43
+        poke(16#8005#, x"CE");  -- DEC abs
+        poke(16#8006#, x"21");  -- $21
+        poke(16#8007#, x"02");  -- $02  -> DEC $0221
+        poke(16#8008#, x"AD");  -- LDA abs
+        poke(16#8009#, x"21");  -- $21
+        poke(16#800A#, x"02");  -- $02  -> load from $0221
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"1B");  -- $1B
+        poke(16#800D#, x"02");  -- $02  -> $021B
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#021B#, x"42", "DEC abs result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 25: ASL memory (arithmetic shift left)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 25: ASL abs";
+        
+        -- Program: Store $21 at $0222, ASL $0222 -> $42
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"21");  -- $21
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"22");  -- $22
+        poke(16#8004#, x"02");  -- $02  -> $0222 = $21
+        poke(16#8005#, x"0E");  -- ASL abs
+        poke(16#8006#, x"22");  -- $22
+        poke(16#8007#, x"02");  -- $02  -> ASL $0222
+        poke(16#8008#, x"AD");  -- LDA abs
+        poke(16#8009#, x"22");  -- $22
+        poke(16#800A#, x"02");  -- $02  -> load from $0222
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"1C");  -- $1C
+        poke(16#800D#, x"02");  -- $02  -> $021C
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#021C#, x"42", "ASL abs result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 26: LSR memory (logical shift right)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 26: LSR abs";
+        
+        -- Program: Store $84 at $0223, LSR $0223 -> $42
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"84");  -- $84
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"23");  -- $23
+        poke(16#8004#, x"02");  -- $02  -> $0223 = $84
+        poke(16#8005#, x"4E");  -- LSR abs
+        poke(16#8006#, x"23");  -- $23
+        poke(16#8007#, x"02");  -- $02  -> LSR $0223
+        poke(16#8008#, x"AD");  -- LDA abs
+        poke(16#8009#, x"23");  -- $23
+        poke(16#800A#, x"02");  -- $02  -> load from $0223
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"1D");  -- $1D
+        poke(16#800D#, x"02");  -- $02  -> $021D
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(120);
+        
+        check_mem(16#021D#, x"42", "LSR abs result");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";

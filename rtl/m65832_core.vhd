@@ -940,7 +940,7 @@ begin
     -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
     flag_c_load <= '1' when state = ST_EXECUTE and 
                    ((IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
-                    (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "111")) or  -- ADC, SBC
+                    (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
                     (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 
                                           RMW_OP = "010" or RMW_OP = "011")))  -- ASL, ROL, LSR, ROR
                    else '0';
