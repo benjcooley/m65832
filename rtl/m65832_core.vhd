@@ -575,6 +575,15 @@ begin
                                                 std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
                                     state <= ST_ADDR2;
                                 end if;
+                            when "1000" =>
+                                if IS_JMP_d = '1' then
+                                    -- JMP (abs): use absolute pointer address
+                                    state <= ST_ADDR2;
+                                else
+                                    -- (dp): pointer address is direct page byte
+                                    eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                    state <= ST_ADDR2;
+                                end if;
                             when "1010" | "1011" | "1100" =>
                                 -- (dp),Y and [dp]/[dp],Y: pointer address is direct page byte
                                 eff_addr <= D_reg(31 downto 8) & DATA_IN;
@@ -620,7 +629,7 @@ begin
                                     resize(unsigned(data_buffer(7 downto 0)), 16),
                                     32) +
                                 unsigned(Y_reg));
-                        elsif ADDR_MODE = "1001" or ADDR_MODE = "1010" or ADDR_MODE = "1011" or
+                        elsif ADDR_MODE = "1000" or ADDR_MODE = "1001" or ADDR_MODE = "1010" or ADDR_MODE = "1011" or
                               ADDR_MODE = "1100" or ADDR_MODE = "1110" or ADDR_MODE = "1111" then
                             if IS_JMP_d = '1' and ADDR_MODE = "1001" then
                                 -- JMP (abs,X): pointer address = abs + X
@@ -630,6 +639,13 @@ begin
                                         resize(unsigned(data_buffer(7 downto 0)), 16),
                                         32) +
                                     unsigned(X_reg));
+                            elsif IS_JMP_d = '1' and ADDR_MODE = "1000" then
+                                -- JMP (abs): pointer address is absolute
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 16) sll 8) or
+                                        resize(unsigned(data_buffer(7 downto 0)), 16),
+                                        32));
                             elsif ADDR_MODE = "1111" then
                                 -- Long/Long,X: latch high byte, bank next
                                 null;
@@ -645,32 +661,44 @@ begin
                                     32));
                         end if;
                         
-                        case ADDR_MODE is
-                            when "0101" | "0110" | "0111" | "1000" =>
-                                -- Absolute modes - done after 2 bytes
-                                if IS_JSR = '1' then
-                                    -- JSR: capture return address (PC of high byte)
-                                    jsr_return <= PC_reg;
-                                end if;
-                                if IS_ALU_OP = '1' and ALU_OP = "100" then
-                                    state <= ST_WRITE;
-                                elsif IS_RMW_OP = '1' and RMW_OP = "100" then
-                                    state <= ST_WRITE;
-                                else
+                        if ADDR_MODE = "1000" and IS_JMP_d = '1' then
+                            -- JMP (abs): pointer read follows
+                            state <= ST_READ;
+                        else
+                            case ADDR_MODE is
+                                when "0101" | "0110" | "0111" =>
+                                    -- Absolute modes - done after 2 bytes
+                                    if IS_JSR = '1' then
+                                        -- JSR: capture return address (PC of high byte)
+                                        jsr_return <= PC_reg;
+                                    end if;
+                                    if IS_ALU_OP = '1' and ALU_OP = "100" then
+                                        state <= ST_WRITE;
+                                    elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+                                        state <= ST_WRITE;
+                                    else
+                                        state <= ST_READ;
+                                    end if;
+                                when "1000" | "1001" | "1010" | "1011" | "1100" | "1110" | "1111" =>
+                                    -- Indirect/long modes - fetch next byte(s)
+                                    state <= ST_ADDR3;
+                                when others =>
                                     state <= ST_READ;
-                                end if;
-                            when "1001" | "1010" | "1011" | "1100" | "1110" | "1111" =>
-                                -- Indirect/long modes - fetch next byte(s)
-                                state <= ST_ADDR3;
-                            when others =>
-                                state <= ST_READ;
-                        end case;
+                            end case;
+                        end if;
                         
                     when ST_ADDR3 =>
                         if IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             -- JMP (abs,X): pointer low byte
                             DR <= DATA_IN;
                             state <= ST_ADDR4;
+                        elsif ADDR_MODE = "1000" then
+                            -- (dp): pointer high in DATA_IN, low in data_buffer(7:0)
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 16) sll 8) or
+                                    resize(unsigned(data_buffer(7 downto 0)), 16),
+                                    32));
                         elsif ADDR_MODE = "1001" then
                             -- (dp,X): pointer high in DATA_IN, low in data_buffer(7:0)
                             eff_addr <= std_logic_vector(
@@ -743,8 +771,18 @@ begin
                             state <= ST_FETCH;
                         elsif ADDR_MODE = "1011" then
                             -- [dp]: bank byte in DATA_IN
-                            eff_addr <= x"00" & DATA_IN & data_buffer(15 downto 0);
-                            state <= ST_READ;
+                            eff_addr <= std_logic_vector(
+                                resize(
+                                    (resize(unsigned(DATA_IN), 24) sll 16) or
+                                    resize(unsigned(data_buffer(15 downto 0)), 24),
+                                    32));
+                            if IS_ALU_OP = '1' and ALU_OP = "100" then
+                                state <= ST_WRITE;
+                            elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+                                state <= ST_WRITE;
+                            else
+                                state <= ST_READ;
+                            end if;
                         elsif ADDR_MODE = "1100" then
                             -- [dp],Y: bank byte in DATA_IN, then add Y
                             eff_addr <= std_logic_vector(
@@ -753,7 +791,13 @@ begin
                                     resize(unsigned(data_buffer(15 downto 0)), 24),
                                     32) +
                                 unsigned(Y_reg));
-                            state <= ST_READ;
+                            if IS_ALU_OP = '1' and ALU_OP = "100" then
+                                state <= ST_WRITE;
+                            elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+                                state <= ST_WRITE;
+                            else
+                                state <= ST_READ;
+                            end if;
                         else
                             data_buffer(31 downto 24) <= DATA_IN;
                             eff_addr <= DATA_IN & data_buffer(23 downto 0);
@@ -881,8 +925,8 @@ begin
                 ADDR <= PC_reg;
             when ST_ADDR1 | ST_ADDR2 | ST_ADDR3 | ST_ADDR4 =>
                 -- Fetching address bytes from PC or pointer reads for indirect modes
-                if (ADDR_MODE = "1001" or ADDR_MODE = "1010" or ADDR_MODE = "1011" or
-                    ADDR_MODE = "1100" or ADDR_MODE = "1110") then
+                if (ADDR_MODE = "1000" or ADDR_MODE = "1001" or ADDR_MODE = "1010" or
+                    ADDR_MODE = "1011" or ADDR_MODE = "1100" or ADDR_MODE = "1110") then
                     if IS_JMP_d = '1' and ADDR_MODE = "1001" then
                         if state = ST_ADDR3 then
                             ADDR <= eff_addr;
@@ -891,6 +935,9 @@ begin
                         else
                             ADDR <= PC_reg;
                         end if;
+                    elsif IS_JMP_d = '1' and ADDR_MODE = "1000" then
+                        -- JMP (abs): pointer reads happen in ST_READ, keep PC here
+                        ADDR <= PC_reg;
                     else
                         if state = ST_ADDR2 then
                             ADDR <= eff_addr;
@@ -1181,7 +1228,8 @@ begin
     
     pc_direct <= std_logic_vector(unsigned(jsr_return) + 1);
     
-    is_indirect_addr <= '1' when (ADDR_MODE = "1001" or ADDR_MODE = "1010" or
+    is_indirect_addr <= '1' when ((ADDR_MODE = "1000" and IS_JMP_d = '0') or
+                                  ADDR_MODE = "1001" or ADDR_MODE = "1010" or
                                   ADDR_MODE = "1011" or ADDR_MODE = "1100" or
                                   ADDR_MODE = "1110") else '0';
     is_long_x <= '1' when (ADDR_MODE = "1111" and IR(4 downto 0) = "11111") else '0';

@@ -2597,6 +2597,383 @@ begin
         check_mem(16#02E5#, x"6E", "LDA long,X result");
         
         -----------------------------------------------------------------------
+        -- TEST 73: 16-bit LDA [dp] and STA [dp]
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 73: 16-bit LDA/STA [dp]";
+        
+        -- Setup long pointer at $0088/$0089/$008A -> $000540
+        poke(16#0088#, x"40");  -- low
+        poke(16#0089#, x"05");  -- high
+        poke(16#008A#, x"00");  -- bank
+        poke(16#0540#, x"34");  -- low
+        poke(16#0541#, x"12");  -- high
+        
+        -- Program: set M=16-bit, LDA [dp], STA abs
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"A7");  -- LDA [dp]
+        poke(16#8005#, x"88");  -- dp
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"E6");  -- $E6
+        poke(16#8008#, x"02");  -- $02 -> $02E6/$02E7
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(160);
+        
+        check_mem(16#02E6#, x"34", "16-bit STA [dp] low");
+        check_mem(16#02E7#, x"12", "16-bit STA [dp] high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 74: 32-bit LDA [dp],Y and STA [dp],Y
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 74: 32-bit LDA/STA [dp],Y";
+        
+        -- Setup long pointer at $008C/$008D/$008E -> $000560, Y=$03
+        poke(16#008C#, x"60");  -- low
+        poke(16#008D#, x"05");  -- high
+        poke(16#008E#, x"00");  -- bank
+        poke(16#0563#, x"78");  -- byte 0
+        poke(16#0564#, x"56");  -- byte 1
+        poke(16#0565#, x"34");  -- byte 2
+        poke(16#0566#, x"12");  -- byte 3
+        
+        -- Program: set M=32-bit, LDY #$03, LDA [dp],Y, STA abs
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A0");  -- LDY #
+        poke(16#8005#, x"03");  -- $03
+        poke(16#8006#, x"B3");  -- LDA [dp],Y
+        poke(16#8007#, x"8C");  -- dp
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"E8");  -- $E8
+        poke(16#800A#, x"02");  -- $02 -> $02E8-$02EB
+        poke(16#800B#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#02E8#, x"78", "32-bit STA [dp],Y byte 0");
+        check_mem(16#02E9#, x"56", "32-bit STA [dp],Y byte 1");
+        check_mem(16#02EA#, x"34", "32-bit STA [dp],Y byte 2");
+        check_mem(16#02EB#, x"12", "32-bit STA [dp],Y byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 75: 16-bit LDA sr,S and STA sr,S
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 75: 16-bit LDA/STA sr,S";
+        
+        -- SP defaults to $01FF; offset $06 -> $0205
+        poke(16#0205#, x"CD");  -- low
+        poke(16#0206#, x"AB");  -- high
+        
+        -- Program: set M=16-bit, LDA sr,S, STA abs $02E6
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"A3");  -- LDA sr,S
+        poke(16#8005#, x"06");  -- offset
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"E6");  -- $E6
+        poke(16#8008#, x"02");  -- $02 -> $02E6/$02E7
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#02E6#, x"CD", "16-bit LDA sr,S low");
+        check_mem(16#02E7#, x"AB", "16-bit LDA sr,S high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 76: 32-bit LDA (sr,S),Y and STA (sr,S),Y
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 76: 32-bit LDA/STA (sr,S),Y";
+        
+        -- Pointer at $0208/$0209 -> $0580, Y=$02, data at $0582-$0585
+        poke(16#0208#, x"80");  -- low
+        poke(16#0209#, x"05");  -- high -> $0580
+        poke(16#0582#, x"DE");  -- byte 0
+        poke(16#0583#, x"AD");  -- byte 1
+        poke(16#0584#, x"BE");  -- byte 2
+        poke(16#0585#, x"EF");  -- byte 3
+        
+        -- Program: set M=32-bit, LDY #$02, LDA (sr,S),Y, STA abs
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A0");  -- LDY #
+        poke(16#8005#, x"02");  -- $02
+        poke(16#8006#, x"AF");  -- LDA (sr,S),Y
+        poke(16#8007#, x"09");  -- offset -> SP+9 = $0208
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"EC");  -- $EC
+        poke(16#800A#, x"02");  -- $02 -> $02EC-$02EF
+        poke(16#800B#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#02EC#, x"DE", "32-bit STA (sr,S),Y byte 0");
+        check_mem(16#02ED#, x"AD", "32-bit STA (sr,S),Y byte 1");
+        check_mem(16#02EE#, x"BE", "32-bit STA (sr,S),Y byte 2");
+        check_mem(16#02EF#, x"EF", "32-bit STA (sr,S),Y byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 77: 16-bit LDA long and STA long
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 77: 16-bit LDA/STA long";
+        
+        -- Data at $0005A0
+        poke(16#05A0#, x"11");  -- low
+        poke(16#05A1#, x"22");  -- high
+        
+        -- Program: set M=16-bit, LDA long, STA abs
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"AB");  -- LDA long
+        poke(16#8005#, x"A0");  -- low
+        poke(16#8006#, x"05");  -- high
+        poke(16#8007#, x"00");  -- bank
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"F0");  -- $F0
+        poke(16#800A#, x"02");  -- $02 -> $02F0/$02F1
+        poke(16#800B#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#02F0#, x"11", "16-bit STA long low");
+        check_mem(16#02F1#, x"22", "16-bit STA long high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 78: 32-bit LDA long,X and STA long
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 78: 32-bit LDA long,X/STA long";
+        
+        -- Data at $0005B0 + X($02) = $0005B2
+        poke(16#05B2#, x"01");  -- byte 0
+        poke(16#05B3#, x"23");  -- byte 1
+        poke(16#05B4#, x"45");  -- byte 2
+        poke(16#05B5#, x"67");  -- byte 3
+        
+        -- Program: set M=32-bit, LDX #$02, LDA long,X, STA abs
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"A2");  -- LDX #
+        poke(16#8005#, x"02");  -- $02
+        poke(16#8006#, x"BF");  -- LDA long,X
+        poke(16#8007#, x"B0");  -- low
+        poke(16#8008#, x"05");  -- high
+        poke(16#8009#, x"00");  -- bank
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"F2");  -- $F2
+        poke(16#800C#, x"02");  -- $02 -> $02F2-$02F5
+        poke(16#800D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#02F2#, x"01", "32-bit STA long,X byte 0");
+        check_mem(16#02F3#, x"23", "32-bit STA long,X byte 1");
+        check_mem(16#02F4#, x"45", "32-bit STA long,X byte 2");
+        check_mem(16#02F5#, x"67", "32-bit STA long,X byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 79: 8/16/32-bit LDA (dp) indirect
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 79: 8/16/32-bit LDA (dp)";
+        
+        -- 8-bit pointer at $0090/$0091 -> $0600
+        poke(16#0090#, x"00");  -- low
+        poke(16#0091#, x"06");  -- high -> $0600
+        poke(16#0600#, x"5C");  -- data
+        
+        -- Program: LDA (dp), STA $0300
+        poke(16#8000#, x"B2");  -- LDA (dp)
+        poke(16#8001#, x"90");  -- dp
+        poke(16#8002#, x"8D");  -- STA abs
+        poke(16#8003#, x"00");  -- $00
+        poke(16#8004#, x"03");  -- $03 -> $0300
+        poke(16#8005#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#0300#, x"5C", "8-bit LDA (dp) result");
+        
+        -- 16-bit pointer at $0094/$0095 -> $0610
+        poke(16#0094#, x"10");  -- low
+        poke(16#0095#, x"06");  -- high -> $0610
+        poke(16#0610#, x"78");  -- low
+        poke(16#0611#, x"56");  -- high
+        
+        -- Program: set M=16-bit, LDA (dp), STA $0302
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"B2");  -- LDA (dp)
+        poke(16#8005#, x"94");  -- dp
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"02");  -- $02
+        poke(16#8008#, x"03");  -- $03 -> $0302/$0303
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#0302#, x"78", "16-bit LDA (dp) low");
+        check_mem(16#0303#, x"56", "16-bit LDA (dp) high");
+        
+        -- 32-bit pointer at $0098/$0099 -> $0620
+        poke(16#0098#, x"20");  -- low
+        poke(16#0099#, x"06");  -- high -> $0620
+        poke(16#0620#, x"EF");  -- byte 0
+        poke(16#0621#, x"CD");  -- byte 1
+        poke(16#0622#, x"AB");  -- byte 2
+        poke(16#0623#, x"89");  -- byte 3
+        
+        -- Program: set M=32-bit, LDA (dp), STA $0304
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"B2");  -- LDA (dp)
+        poke(16#8005#, x"98");  -- dp
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"04");  -- $04
+        poke(16#8008#, x"03");  -- $03 -> $0304-$0307
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0304#, x"EF", "32-bit LDA (dp) byte 0");
+        check_mem(16#0305#, x"CD", "32-bit LDA (dp) byte 1");
+        check_mem(16#0306#, x"AB", "32-bit LDA (dp) byte 2");
+        check_mem(16#0307#, x"89", "32-bit LDA (dp) byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 82: STA long (16-bit) and STA long,X (32-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 82: STA long/STA long,X";
+        
+        -- 16-bit STA long to $000630
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"80");  -- clear M1
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"40");  -- set M0 -> 16-bit
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"34");  -- low
+        poke(16#8006#, x"12");  -- high
+        poke(16#8007#, x"8F");  -- STA long
+        poke(16#8008#, x"30");  -- low
+        poke(16#8009#, x"06");  -- high
+        poke(16#800A#, x"00");  -- bank
+        
+        -- 32-bit STA long,X to $000640 + X($02) = $000642
+        poke(16#800B#, x"C2");  -- REP
+        poke(16#800C#, x"40");  -- clear M0
+        poke(16#800D#, x"E2");  -- SEP
+        poke(16#800E#, x"80");  -- set M1 -> 32-bit
+        poke(16#800F#, x"A2");  -- LDX #
+        poke(16#8010#, x"02");  -- $02
+        poke(16#8011#, x"A9");  -- LDA #
+        poke(16#8012#, x"EF");  -- byte 0
+        poke(16#8013#, x"CD");  -- byte 1
+        poke(16#8014#, x"AB");  -- byte 2
+        poke(16#8015#, x"89");  -- byte 3
+        poke(16#8016#, x"9F");  -- STA long,X
+        poke(16#8017#, x"40");  -- low
+        poke(16#8018#, x"06");  -- high
+        poke(16#8019#, x"00");  -- bank
+        poke(16#801A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0630#, x"34", "16-bit STA long low");
+        check_mem(16#0631#, x"12", "16-bit STA long high");
+        check_mem(16#0642#, x"EF", "32-bit STA long,X byte 0");
+        check_mem(16#0643#, x"CD", "32-bit STA long,X byte 1");
+        check_mem(16#0644#, x"AB", "32-bit STA long,X byte 2");
+        check_mem(16#0645#, x"89", "32-bit STA long,X byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 83: STA [dp] and STA [dp],Y (8-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 83: STA [dp]/[dp],Y";
+        
+        -- Long pointer at $00A0/$00A1/$00A2 -> $000660
+        poke(16#00A0#, x"60");  -- low
+        poke(16#00A1#, x"06");  -- high
+        poke(16#00A2#, x"00");  -- bank
+        -- Long pointer at $00A4/$00A5/$00A6 -> $000670
+        poke(16#00A4#, x"70");  -- low
+        poke(16#00A5#, x"06");  -- high
+        poke(16#00A6#, x"00");  -- bank
+        
+        -- Program: LDA #$9C, STA [dp], LDY #$03, LDA #$AD, STA [dp],Y
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"9C");  -- $9C
+        poke(16#8002#, x"87");  -- STA [dp]
+        poke(16#8003#, x"A0");  -- dp
+        poke(16#8004#, x"A0");  -- LDY #
+        poke(16#8005#, x"03");  -- $03
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"AD");  -- $AD
+        poke(16#8008#, x"93");  -- STA [dp],Y
+        poke(16#8009#, x"A4");  -- dp
+        poke(16#800A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0660#, x"9C", "STA [dp] result");
+        check_mem(16#0673#, x"AD", "STA [dp],Y result");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";
