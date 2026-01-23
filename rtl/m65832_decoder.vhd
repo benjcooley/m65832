@@ -250,50 +250,63 @@ begin
                     
                 when "10" =>
                     -- Group 2: ASL, ROL, LSR, ROR, STX, LDX, DEC, INC
-                    IS_RMW_OP <= '1';
-                    RMW_OP <= aaa;
-                    
-                    -- Set register source/destination for STX/LDX
-                    if aaa = "101" then
-                        REG_DST <= "001";  -- LDX
-                    elsif aaa = "100" then
-                        REG_SRC <= "001";  -- STX
-                    end if;
-                    
-                    case bbb is
-                        when "000" =>  -- Immediate (LDX only)
-                            if aaa = "101" then
-                                ADDR_MODE <= "0001";
-                                if X_WIDTH = WIDTH_32 then
-                                    INSTR_LEN <= "101";
-                                elsif X_WIDTH = WIDTH_16 then
-                                    INSTR_LEN <= "011";
+                    -- plus implied/register transfers that share cc="10"
+                    if IR = x"AA" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TAX
+                    elsif IR = x"8A" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TXA
+                    elsif IR = x"BA" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "011"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TSX
+                    elsif IR = x"9A" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "011"; INSTR_LEN <= "001";  -- TXS
+                    elsif IR = x"CA" then
+                        IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_DST <= "001"; ADDR_MODE <= "0000"; INSTR_LEN <= "001";  -- DEX
+                    else
+                        IS_RMW_OP <= '1';
+                        RMW_OP <= aaa;
+                        
+                        -- Set register source/destination for STX/LDX
+                        if aaa = "101" then
+                            REG_DST <= "001";  -- LDX
+                        elsif aaa = "100" then
+                            REG_SRC <= "001";  -- STX
+                        end if;
+                        
+                        case bbb is
+                            when "000" =>  -- Immediate (LDX only)
+                                if aaa = "101" then
+                                    ADDR_MODE <= "0001";
+                                    if X_WIDTH = WIDTH_32 then
+                                        INSTR_LEN <= "101";
+                                    elsif X_WIDTH = WIDTH_16 then
+                                        INSTR_LEN <= "011";
+                                    else
+                                        INSTR_LEN <= "010";
+                                    end if;
                                 else
-                                    INSTR_LEN <= "010";
+                                    ADDR_MODE <= "0000";  -- Accumulator
+                                    INSTR_LEN <= "001";
                                 end if;
-                            else
-                                ADDR_MODE <= "0000";  -- Accumulator
-                                INSTR_LEN <= "001";
-                            end if;
-                        when "001" => ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- dp
-                        when "010" => ADDR_MODE <= "0000"; INSTR_LEN <= "001";  -- Accumulator
-                        when "011" => ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- abs
-                        when "101" =>  -- dp,X or dp,Y
-                            if aaa = "100" or aaa = "101" then
-                                ADDR_MODE <= "0100";  -- dp,Y (STX, LDX)
-                            else
-                                ADDR_MODE <= "0011";  -- dp,X
-                            end if;
-                            INSTR_LEN <= "010";
-                        when "111" =>  -- abs,X or abs,Y
-                            if aaa = "101" then
-                                ADDR_MODE <= "0111";  -- abs,Y (LDX)
-                            else
-                                ADDR_MODE <= "0110";  -- abs,X
-                            end if;
-                            INSTR_LEN <= "011";
-                        when others => null;
-                    end case;
+                            when "001" => ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- dp
+                            when "010" => ADDR_MODE <= "0000"; INSTR_LEN <= "001";  -- Accumulator
+                            when "011" => ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- abs
+                            when "101" =>  -- dp,X or dp,Y
+                                if aaa = "100" or aaa = "101" then
+                                    ADDR_MODE <= "0100";  -- dp,Y (STX, LDX)
+                                else
+                                    ADDR_MODE <= "0011";  -- dp,X
+                                end if;
+                                INSTR_LEN <= "010";
+                            when "111" =>  -- abs,X or abs,Y
+                                if aaa = "101" then
+                                    ADDR_MODE <= "0111";  -- abs,Y (LDX)
+                                else
+                                    ADDR_MODE <= "0110";  -- abs,X
+                                end if;
+                                INSTR_LEN <= "011";
+                            when others => null;
+                        end case;
+                    end if;
                     
                 when "00" =>
                     -- Group 0: Mixed instructions

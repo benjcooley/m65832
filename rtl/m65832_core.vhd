@@ -729,7 +729,7 @@ begin
     process(state, PC_reg, VA_out, SP_reg, vector_addr, E_mode, eff_addr, data_byte_count, ADDR_MODE)
     begin
         case state is
-            when ST_FETCH | ST_DECODE =>
+            when ST_FETCH | ST_DECODE | ST_BRANCH =>
                 ADDR <= PC_reg;
             when ST_ADDR1 | ST_ADDR2 | ST_ADDR3 | ST_ADDR4 =>
                 -- Fetching address bytes from PC

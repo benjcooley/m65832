@@ -58,3 +58,4 @@ venv/
 # Build directories
 build/
 dist/
+dbugging/
