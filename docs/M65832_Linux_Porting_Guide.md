@@ -44,6 +44,13 @@ Suggested Linux memory map:
 0xFFFF_F000 - 0xFFFF_FFFF   Exception vectors, system
 ```
 
+**System MMIO window (current RTL):**
+
+- MMU/system registers are decoded by the core on the low 16-bit `0xF0xx` window
+  (e.g. `0xFFFF_F000`, `0xFFFF_F004`, `0xFFFF_F010`, `0xFFFF_F014`).
+- These addresses bypass MMU translation so the kernel can always reach MMU control
+  registers even when paging is enabled.
+
 ### 2.2 Page Table Structure
 
 ```c

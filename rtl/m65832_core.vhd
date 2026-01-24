@@ -248,6 +248,38 @@ architecture rtl of M65832_Core is
     signal mmio_addr_read_lo  : std_logic_vector(15 downto 0);
     signal mmio_addr_write_lo : std_logic_vector(15 downto 0);
     
+    -- MMU integration
+    signal mem_ready       : std_logic;
+    signal mem_addr_virt   : std_logic_vector(31 downto 0);
+    signal mmu_translate   : std_logic;
+    signal mmu_access_type : std_logic_vector(1 downto 0);
+    signal mmu_va_valid    : std_logic;
+    signal mmu_enable      : std_logic;
+    signal mmu_wp          : std_logic;
+    signal mmu_nx          : std_logic;
+    signal mmu_pa          : std_logic_vector(64 downto 0);
+    signal mmu_pa_valid    : std_logic;
+    signal mmu_pa_ready    : std_logic;
+    signal mmu_page_fault  : std_logic;
+    signal mmu_fault_type  : std_logic_vector(2 downto 0);
+    signal mmu_fault_va    : std_logic_vector(31 downto 0);
+    signal mmu_pa_hold     : std_logic;
+    signal mmu_fault_hold  : std_logic;
+    signal mmu_bypass      : std_logic;
+    signal mmu_ptw_req     : std_logic;
+    signal mmu_ptw_ack     : std_logic;
+    signal mmu_ptw_addr    : std_logic_vector(64 downto 0);
+    signal mmu_ptw_data    : std_logic_vector(63 downto 0);
+    signal ptw_active      : std_logic;
+    signal ptw_addr_reg    : std_logic_vector(64 downto 0);
+    signal ptw_req_addr    : std_logic_vector(64 downto 0);
+    signal ptw_data_reg    : std_logic_vector(63 downto 0);
+    signal ptw_byte_count  : unsigned(2 downto 0);
+    signal ptw_ack_hold    : std_logic;
+    signal ptw_addr_armed  : std_logic;
+    signal ptw_req_latched : std_logic;
+    signal ptw_cooldown    : std_logic;
+    
     -- Register window (DP-as-registers)
     signal rw_addr1    : std_logic_vector(5 downto 0);
     signal rw_data1    : std_logic_vector(31 downto 0);
@@ -365,7 +397,7 @@ begin
     port map(
         CLK         => CLK,
         RST_N       => RST_N,
-        EN          => CE and RDY,
+        EN          => CE and mem_ready,
         
         A_IN        => A_in,
         A_LOAD      => A_load,
@@ -469,7 +501,7 @@ begin
     port map(
         CLK             => CLK,
         RST_N           => RST_N,
-        EN              => CE and RDY,
+        EN              => CE and mem_ready,
         
         LOAD_PC         => LOAD_PC,
         PC_DEC          => PC_DEC,
@@ -565,6 +597,140 @@ begin
     ---------------------------------------------------------------------------
     
     W_mode <= '1' when M_width = WIDTH_32 else '0';
+
+    ---------------------------------------------------------------------------
+    -- MMU Integration
+    ---------------------------------------------------------------------------
+    
+    MMU_inst : entity work.M65832_MMU
+    port map(
+        CLK             => CLK,
+        RST_N           => RST_N,
+        
+        VA              => mem_addr_virt,
+        VA_VALID        => mmu_va_valid,
+        ACCESS_TYPE     => mmu_access_type,
+        SUPERVISOR      => S_mode,
+        
+        PA              => mmu_pa,
+        PA_VALID        => mmu_pa_valid,
+        PA_READY        => mmu_pa_ready,
+        
+        PAGE_FAULT      => mmu_page_fault,
+        FAULT_TYPE      => mmu_fault_type,
+        FAULT_VA        => mmu_fault_va,
+        
+        PTBR            => mmu_ptbr,
+        ASID            => mmu_asid(7 downto 0),
+        MMU_ENABLE      => mmu_enable,
+        WP_ENABLE       => mmu_wp,
+        NX_ENABLE       => mmu_nx,
+        
+        TLB_FLUSH       => mmu_tlb_flush,
+        TLB_FLUSH_ASID  => mmu_tlb_flush_asid,
+        TLB_FLUSH_VA    => mmu_tlb_flush_va,
+        TLB_FLUSH_ADDR  => mmu_tlbinval,
+        
+        PTW_ADDR        => mmu_ptw_addr,
+        PTW_REQ         => mmu_ptw_req,
+        PTW_ACK         => mmu_ptw_ack,
+        PTW_DATA        => mmu_ptw_data,
+        
+        TLB_HIT_COUNT   => open,
+        TLB_MISS_COUNT  => open
+    );
+    
+    mmu_ptw_data <= ptw_data_reg;
+    
+    process(CLK, RST_N)
+    begin
+        if RST_N = '0' then
+            ptw_active <= '0';
+            ptw_addr_reg <= (others => '0');
+            ptw_req_addr <= (others => '0');
+            ptw_data_reg <= (others => '0');
+            ptw_byte_count <= (others => '0');
+            ptw_ack_hold <= '0';
+            mmu_ptw_ack <= '0';
+            mmu_pa_hold <= '0';
+            mmu_fault_hold <= '0';
+            ptw_addr_armed <= '0';
+            ptw_req_latched <= '0';
+            ptw_cooldown <= '0';
+        elsif rising_edge(CLK) then
+            if mmu_ptw_req = '1' then
+                ptw_req_latched <= '1';
+                ptw_req_addr <= mmu_ptw_addr;
+            end if;
+            if ptw_ack_hold = '1' then
+                mmu_ptw_ack <= '1';
+                ptw_ack_hold <= '0';
+                ptw_cooldown <= '1';
+            elsif ptw_cooldown = '1' then
+                mmu_ptw_ack <= '0';
+                ptw_cooldown <= '0';
+            else
+                mmu_ptw_ack <= '0';
+                if ptw_active = '0' and ptw_cooldown = '0' then
+                    if ptw_req_latched = '1' then
+                        ptw_active <= '1';
+                        ptw_addr_reg <= ptw_req_addr;
+                        ptw_data_reg <= (others => '0');
+                        ptw_byte_count <= (others => '0');
+                        ptw_addr_armed <= '0';
+                        ptw_req_latched <= '0';
+                    end if;
+                else
+                    if ptw_addr_armed = '0' then
+                        ptw_addr_armed <= '1';
+                    elsif RDY = '1' then
+                        case ptw_byte_count is
+                            when "000" => ptw_data_reg(7 downto 0) <= DATA_IN;
+                            when "001" => ptw_data_reg(15 downto 8) <= DATA_IN;
+                            when "010" => ptw_data_reg(23 downto 16) <= DATA_IN;
+                            when "011" => ptw_data_reg(31 downto 24) <= DATA_IN;
+                            when "100" => ptw_data_reg(39 downto 32) <= DATA_IN;
+                            when "101" => ptw_data_reg(47 downto 40) <= DATA_IN;
+                            when "110" => ptw_data_reg(55 downto 48) <= DATA_IN;
+                            when others => ptw_data_reg(63 downto 56) <= DATA_IN;
+                        end case;
+                        if ptw_byte_count = "111" then
+                            ptw_active <= '0';
+                            ptw_ack_hold <= '1';
+                            ptw_addr_armed <= '0';
+                        else
+                            ptw_byte_count <= ptw_byte_count + 1;
+                        end if;
+                    end if;
+                end if;
+            end if;
+            
+            if mmu_translate = '1' then
+                if mmu_pa_valid = '1' then
+                    mmu_pa_hold <= '1';
+                end if;
+                if mmu_page_fault = '1' then
+                    mmu_fault_hold <= '1';
+                end if;
+            end if;
+            if CE = '1' and mem_ready = '1' then
+                mmu_pa_hold <= '0';
+                mmu_fault_hold <= '0';
+            end if;
+        end if;
+    end process;
+    
+    process(mem_addr_virt, mmu_enable, mmu_pa, mmu_pa_valid, mmu_translate, ptw_active, ptw_addr_reg, ptw_byte_count)
+    begin
+        if ptw_active = '1' then
+            ADDR <= std_logic_vector(unsigned(ptw_addr_reg(31 downto 0)) + resize(ptw_byte_count, 32));
+        elsif mmu_enable = '1' and mmu_translate = '1' and mmu_bypass = '0' and
+              (mmu_pa_valid = '1' or mmu_pa_hold = '1') then
+            ADDR <= mmu_pa(31 downto 0);
+        else
+            ADDR <= mem_addr_virt;
+        end if;
+    end process;
     
     ---------------------------------------------------------------------------
     -- Interrupt Edge Detection
@@ -602,6 +768,35 @@ begin
     
     GOT_INTERRUPT <= nmi_pending or irq_pending or abort_pending;
     interrupt_active <= GOT_INTERRUPT;
+    
+    mmu_enable <= mmu_mmucr(0);
+    mmu_wp <= mmu_mmucr(1);
+    mmu_nx <= '1';
+    mmu_bypass <= '1' when mem_addr_virt(15 downto 8) = x"F0" else '0';
+    
+    process(state, ADDR_MODE)
+    begin
+        mmu_translate <= '0';
+        mmu_access_type <= "00";
+        case state is
+            when ST_READ | ST_READ2 | ST_READ3 | ST_READ4 |
+                 ST_PULL | ST_BM_READ =>
+                mmu_translate <= '1';
+                mmu_access_type <= "00";
+            when ST_WRITE | ST_WRITE2 | ST_WRITE3 | ST_WRITE4 |
+                 ST_PUSH | ST_BM_WRITE =>
+                mmu_translate <= '1';
+                mmu_access_type <= "01";
+            when others =>
+                null;
+        end case;
+    end process;
+    
+    mmu_va_valid <= mmu_translate and (not ptw_active) and (not mmu_bypass);
+    mem_ready <= '1' when (RDY = '1' and ptw_active = '0' and
+                           (mmu_enable = '0' or mmu_translate = '0' or mmu_bypass = '1' or
+                            mmu_pa_hold = '1' or mmu_fault_hold = '1'))
+                 else '0';
     
     ---------------------------------------------------------------------------
     -- Main State Machine
@@ -642,18 +837,18 @@ begin
             block_dir <= '0';
             block_src_bank <= (others => '0');
             block_dst_bank <= (others => '0');
-            mmu_mmucr <= (others => '0');
-            mmu_asid <= (others => '0');
-            mmu_faultva <= (others => '0');
-            mmu_ptbr <= (others => '0');
-            mmu_tlbinval <= (others => '0');
-            mmu_asid_inval <= (others => '0');
-            mmu_tlb_flush <= '0';
-            mmu_tlb_flush_asid <= '0';
-            mmu_tlb_flush_va <= '0';
         elsif rising_edge(CLK) then
-            if CE = '1' and RDY = '1' then
-                case state is
+            if CE = '1' and mem_ready = '1' then
+                if (mmu_page_fault = '1' or mmu_fault_hold = '1') and int_in_progress = '0' and rti_in_progress = '0' then
+                    int_in_progress <= '1';
+                    int_step <= (others => '0');
+                    int_push_reg <= PC_reg;
+                    int_push_width <= WIDTH_32;
+                    data_byte_count <= (others => '0');
+                    int_vector_addr <= VEC_PGFAULT;
+                    state <= ST_PUSH;
+                else
+                    case state is
                     when ST_RESET =>
                         -- Skip vector loading, PC is initialized via RESET_PC
                         -- Go directly to fetch first instruction
@@ -1510,6 +1705,7 @@ begin
                     when others =>
                         state <= ST_FETCH;
                 end case;
+                end if;
             end if;
         end if;
     end process;
@@ -1523,75 +1719,75 @@ begin
     begin
         case state is
             when ST_FETCH | ST_DECODE | ST_BRANCH =>
-                ADDR <= PC_reg;
+                mem_addr_virt <= PC_reg;
             when ST_ADDR1 | ST_ADDR2 | ST_ADDR3 | ST_ADDR4 =>
                 -- Fetching address bytes from PC or pointer reads for indirect modes
                 if (ADDR_MODE = "1000" or ADDR_MODE = "1001" or ADDR_MODE = "1010" or
                     ADDR_MODE = "1011" or ADDR_MODE = "1100" or ADDR_MODE = "1110") then
                     if IS_JMP_d = '1' and ADDR_MODE = "1001" then
                         if state = ST_ADDR3 then
-                            ADDR <= eff_addr;
+                            mem_addr_virt <= eff_addr;
                         elsif state = ST_ADDR4 then
-                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                            mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + 1);
                         else
-                            ADDR <= PC_reg;
+                            mem_addr_virt <= PC_reg;
                         end if;
                     elsif IS_JMP_d = '1' and ADDR_MODE = "1000" then
                         -- JMP (abs): pointer reads happen in ST_READ, keep PC here
-                        ADDR <= PC_reg;
+                        mem_addr_virt <= PC_reg;
                     elsif IS_JML = '1' and ADDR_MODE = "1011" then
                         if state = ST_ADDR2 then
-                            ADDR <= PC_reg;
+                            mem_addr_virt <= PC_reg;
                         elsif state = ST_ADDR3 then
-                            ADDR <= eff_addr;
+                            mem_addr_virt <= eff_addr;
                         elsif state = ST_ADDR4 then
-                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                            mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + 1);
                         else
-                            ADDR <= PC_reg;
+                            mem_addr_virt <= PC_reg;
                         end if;
                     else
                         if state = ST_ADDR2 then
-                            ADDR <= eff_addr;
+                            mem_addr_virt <= eff_addr;
                         elsif state = ST_ADDR3 then
-                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                            mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + 1);
                         elsif state = ST_ADDR4 and (ADDR_MODE = "1011" or ADDR_MODE = "1100") then
-                            ADDR <= std_logic_vector(unsigned(eff_addr) + 2);
+                            mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + 2);
                         else
-                            ADDR <= PC_reg;
+                            mem_addr_virt <= PC_reg;
                         end if;
                     end if;
                 else
-                    ADDR <= PC_reg;
+                    mem_addr_virt <= PC_reg;
                 end if;
             when ST_VECTOR1 =>
-                ADDR <= int_vector_addr;
+                mem_addr_virt <= int_vector_addr;
             when ST_VECTOR2 =>
-                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 1);
+                mem_addr_virt <= std_logic_vector(unsigned(int_vector_addr) + 1);
             when ST_VECTOR3 =>
-                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 2);
+                mem_addr_virt <= std_logic_vector(unsigned(int_vector_addr) + 2);
             when ST_VECTOR4 =>
-                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 3);
+                mem_addr_virt <= std_logic_vector(unsigned(int_vector_addr) + 3);
             when ST_PUSH =>
-                ADDR <= SP_reg;
+                mem_addr_virt <= SP_reg;
             when ST_PULL =>
-                ADDR <= std_logic_vector(unsigned(SP_reg) + 1);
+                mem_addr_virt <= std_logic_vector(unsigned(SP_reg) + 1);
             when ST_READ | ST_READ2 | ST_READ3 | ST_READ4 =>
                 -- Reading from effective address (multi-byte adds offset)
                 if ADDR_MODE = "0001" then
                     -- Immediate reads come from PC
-                    ADDR <= PC_reg;
+                    mem_addr_virt <= PC_reg;
                 else
-                    ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+                    mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
                 end if;
             when ST_BM_READ =>
-                ADDR <= block_src_addr;
+                mem_addr_virt <= block_src_addr;
             when ST_BM_WRITE =>
-                ADDR <= block_dst_addr;
+                mem_addr_virt <= block_dst_addr;
             when ST_WRITE | ST_WRITE2 | ST_WRITE3 | ST_WRITE4 =>
                 -- Writing to effective address
-                ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+                mem_addr_virt <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
             when others =>
-                ADDR <= VA_out;
+                mem_addr_virt <= VA_out;
         end case;
     end process;
     
@@ -1708,9 +1904,10 @@ begin
     -- Write Enable and Data Output
     ---------------------------------------------------------------------------
     
-    WE <= '1' when state = ST_WRITE or state = ST_WRITE2 or 
-                   state = ST_WRITE3 or state = ST_WRITE4 or
-                   state = ST_PUSH or state = ST_BM_WRITE else '0';
+WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or 
+                state = ST_WRITE3 or state = ST_WRITE4 or
+                state = ST_PUSH or state = ST_BM_WRITE) and ptw_active = '0'
+      else '0';
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
@@ -1818,12 +2015,25 @@ begin
     process(CLK, RST_N)
     begin
         if RST_N = '0' then
-            null;
+            mmu_mmucr <= (others => '0');
+            mmu_asid <= (others => '0');
+            mmu_faultva <= (others => '0');
+            mmu_ptbr <= (others => '0');
+            mmu_tlbinval <= (others => '0');
+            mmu_asid_inval <= (others => '0');
+            mmu_tlb_flush <= '0';
+            mmu_tlb_flush_asid <= '0';
+            mmu_tlb_flush_va <= '0';
         elsif rising_edge(CLK) then
-            if CE = '1' and RDY = '1' then
+            if CE = '1' and mem_ready = '1' then
                 mmu_tlb_flush <= '0';
                 mmu_tlb_flush_asid <= '0';
                 mmu_tlb_flush_va <= '0';
+                
+                if mmu_page_fault = '1' then
+                    mmu_faultva <= mmu_fault_va;
+                    mmu_mmucr(4 downto 2) <= mmu_fault_type;
+                end if;
                 
                 if state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4 then
                     case mmio_addr_write_lo is
@@ -2169,7 +2379,7 @@ begin
             f1_reg <= (others => '0');
             f2_reg <= (others => '0');
         elsif rising_edge(CLK) then
-            if CE = '1' and RDY = '1' then
+            if CE = '1' and mem_ready = '1' then
                 if state = ST_EXECUTE then
                     if ext_ldf = '1' then
                         case f_reg_sel is

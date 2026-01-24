@@ -183,6 +183,7 @@ architecture rtl of M65832_MMU is
     signal fault_type_reg : std_logic_vector(2 downto 0);
     signal pa_reg       : std_logic_vector(64 downto 0);
     signal pa_valid_reg : std_logic;
+    signal ptw_ack_armed : std_logic;
 
 begin
 
@@ -231,6 +232,7 @@ begin
             pa_valid_reg <= '0';
             fault_reg <= '0';
             fault_type_reg <= "000";
+            ptw_ack_armed <= '0';
             saved_va <= (others => '0');
             saved_access <= "00";
             saved_super <= '0';
@@ -291,7 +293,7 @@ begin
                     if VA_VALID = '1' then
                         if MMU_ENABLE = '0' then
                             -- MMU disabled: VA = PA (identity mapping)
-                            pa_reg <= '0' & VA;  -- Extend to 65 bits
+                            pa_reg <= (64 downto 32 => '0') & VA;  -- Extend to 65 bits
                             pa_valid_reg <= '1';
                             
                         elsif tlb_hit = '1' then
@@ -343,10 +345,15 @@ begin
                                 resize(unsigned(l1_index) & "000", 65));
                     PTW_ADDR <= pte_addr;
                     PTW_REQ <= '1';
+                    ptw_ack_armed <= '0';
                     ptw_state <= PTW_L1_WAIT;
                     
                 when PTW_L1_WAIT =>
-                    if PTW_ACK = '1' then
+                    if ptw_ack_armed = '0' then
+                        if PTW_ACK = '0' then
+                            ptw_ack_armed <= '1';
+                        end if;
+                    elsif PTW_ACK = '1' then
                         l1_pte <= PTW_DATA;
                         if PTW_DATA(PTE_PRESENT) = '0' then
                             -- L1 not present
@@ -368,10 +375,15 @@ begin
                                 resize(unsigned(l2_index) & "000", 65));
                     PTW_ADDR <= pte_addr;
                     PTW_REQ <= '1';
+                    ptw_ack_armed <= '0';
                     ptw_state <= PTW_L2_WAIT;
                     
                 when PTW_L2_WAIT =>
-                    if PTW_ACK = '1' then
+                    if ptw_ack_armed = '0' then
+                        if PTW_ACK = '0' then
+                            ptw_ack_armed <= '1';
+                        end if;
+                    elsif PTW_ACK = '1' then
                         l2_pte <= PTW_DATA;
                         if PTW_DATA(PTE_PRESENT) = '0' then
                             -- L2 not present

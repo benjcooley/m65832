@@ -39,6 +39,15 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 - **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Three-core architecture for retro gaming
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
 
+## Tests
+
+GHDL testbenches:
+
+- Full core testbench:
+  `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_core.vhd && ghdl -e --std=08 tb_M65832_Core && ghdl -r --std=08 tb_M65832_Core --stop-time=1ms`
+- MMU-only testbench (faster iteration):
+  `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_mmu.vhd && ghdl -e --std=08 tb_M65832_MMU && ghdl -r --std=08 tb_M65832_MMU --stop-time=1ms`
+
 ## Architecture Highlights
 
 ### Virtual 6502 Mode
