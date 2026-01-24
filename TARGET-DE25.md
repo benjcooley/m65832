@@ -139,6 +139,7 @@ Next Steps
 - Decide early RAM (SDRAM vs LPDDR4) and add controller stub.
 - Add a ROM image build step and test a "Hello" console.
 - Decide MMU interface and page table format.
+- Define minimal FPU opcode set and coprocessor interface.
 
 Toolchain Bootstrap (Later Stage)
 ---------------------------------

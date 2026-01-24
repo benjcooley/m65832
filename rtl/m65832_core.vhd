@@ -84,7 +84,14 @@ architecture rtl of M65832_Core is
         ST_BRANCH2,
         ST_VECTOR1,
         ST_VECTOR2,
-        ST_VECTOR3
+        ST_VECTOR3,
+        ST_VECTOR4,
+        ST_INT_NEXT,
+        ST_RTI_NEXT,
+        ST_WAI,
+        ST_STOP,
+        ST_BM_READ,
+        ST_BM_WRITE
     );
     
     signal state, next_state : cpu_state_t;
@@ -191,7 +198,6 @@ architecture rtl of M65832_Core is
     signal nmi_edge         : std_logic;
     signal old_nmi_n        : std_logic;
     signal interrupt_active : std_logic;
-    signal vector_addr      : std_logic_vector(15 downto 0);
     
     ---------------------------------------------------------------------------
     -- Data Buffer
@@ -254,6 +260,8 @@ architecture rtl of M65832_Core is
     signal stack_is_pull    : std_logic;
     signal stack_width      : std_logic_vector(1 downto 0);
     signal stack_write_reg  : std_logic_vector(31 downto 0);
+    signal stack_width_eff  : std_logic_vector(1 downto 0);
+    signal stack_write_reg_eff : std_logic_vector(31 downto 0);
     
     signal link_valid       : std_logic;
     signal link_addr        : std_logic_vector(31 downto 0);
@@ -265,6 +273,27 @@ architecture rtl of M65832_Core is
     signal p_next           : std_logic_vector(P_WIDTH-1 downto 0);
     signal p_override       : std_logic_vector(P_WIDTH-1 downto 0);
     signal p_override_valid : std_logic;
+    
+    -- Interrupt/trap sequencing
+    signal int_in_progress  : std_logic;
+    signal int_step         : unsigned(1 downto 0);
+    signal int_vector_addr  : std_logic_vector(31 downto 0);
+    signal int_push_reg     : std_logic_vector(31 downto 0);
+    signal int_push_width   : std_logic_vector(1 downto 0);
+    signal rti_in_progress  : std_logic;
+    signal rti_step         : unsigned(1 downto 0);
+    signal rti_pull_width   : std_logic_vector(1 downto 0);
+    
+    -- Block move (MVN/MVP)
+    signal block_active    : std_logic;
+    signal block_dir       : std_logic;
+    signal block_src_bank  : std_logic_vector(7 downto 0);
+    signal block_dst_bank  : std_logic_vector(7 downto 0);
+    signal block_src_addr  : std_logic_vector(31 downto 0);
+    signal block_dst_addr  : std_logic_vector(31 downto 0);
+    signal block_a_next    : std_logic_vector(31 downto 0);
+    signal block_x_next    : std_logic_vector(31 downto 0);
+    signal block_y_next    : std_logic_vector(31 downto 0);
     
     -- DR (data register) for address generation
     signal DR               : std_logic_vector(7 downto 0);
@@ -558,6 +587,18 @@ begin
             ldq_low_buffer <= (others => '0');
             ldq_high_phase <= '0';
             stq_high_reg <= '0';
+            int_in_progress <= '0';
+            int_step <= (others => '0');
+            int_vector_addr <= (others => '0');
+            int_push_reg <= (others => '0');
+            int_push_width <= WIDTH_8;
+            rti_in_progress <= '0';
+            rti_step <= (others => '0');
+            rti_pull_width <= WIDTH_8;
+            block_active <= '0';
+            block_dir <= '0';
+            block_src_bank <= (others => '0');
+            block_dst_bank <= (others => '0');
         elsif rising_edge(CLK) then
             if CE = '1' and RDY = '1' then
                 case state is
@@ -572,6 +613,35 @@ begin
                         IR <= DATA_IN;
                         is_extended <= '0';
                         state <= ST_DECODE;
+                        if int_in_progress = '0' and rti_in_progress = '0' then
+                            if nmi_pending = '1' or abort_pending = '1' or irq_pending = '1' then
+                                int_in_progress <= '1';
+                                int_step <= (others => '0');
+                                int_push_reg <= PC_reg;
+                                int_push_width <= WIDTH_32;
+                                data_byte_count <= (others => '0');
+                                if nmi_pending = '1' then
+                                    if E_mode = '1' then
+                                        int_vector_addr <= x"0000" & VEC_NMI_E;
+                                    else
+                                        int_vector_addr <= x"0000" & VEC_NMI_N;
+                                    end if;
+                                elsif abort_pending = '1' then
+                                    if E_mode = '1' then
+                                        int_vector_addr <= x"0000" & VEC_ABORT_E;
+                                    else
+                                        int_vector_addr <= x"0000" & VEC_ABORT_N;
+                                    end if;
+                                else
+                                    if E_mode = '1' then
+                                        int_vector_addr <= x"0000" & VEC_IRQ_E;
+                                    else
+                                        int_vector_addr <= x"0000" & VEC_IRQ_N;
+                                    end if;
+                                end if;
+                                state <= ST_PUSH;
+                            end if;
+                        end if;
                         
                     when ST_DECODE =>
                         -- Check for extended opcode prefix
@@ -595,7 +665,11 @@ begin
                             wid_prefix <= '0';
                             
                             -- Determine next state based on instruction
-                            if IS_CONTROL = '1' and IS_BRK = '0' and IS_COP = '0' then
+                            if IS_WAI = '1' then
+                                state <= ST_WAI;
+                            elsif IS_STP = '1' then
+                                state <= ST_STOP;
+                            elsif IS_CONTROL = '1' and IS_BRK = '0' and IS_COP = '0' then
                                 -- Simple control instruction (NOP, etc.)
                                 state <= ST_FETCH;
                             elsif IS_TRANSFER = '1' then
@@ -604,6 +678,9 @@ begin
                                 state <= ST_EXECUTE;
                             elsif IS_BRANCH = '1' then
                                 state <= ST_BRANCH;
+                            elsif IS_BLOCK_MOVE = '1' then
+                                state <= ST_READ;
+                                data_byte_count <= (others => '0');
                             elsif IS_STACK = '1' then
                                 if IR = x"F4" or IR = x"D4" or IR = x"62" then
                                     -- PEA/PEI/PER need operand read before push
@@ -1127,6 +1204,43 @@ begin
                             link_valid <= '1';
                             link_addr <= eff_addr;
                         end if;
+                        if IS_BRK = '1' then
+                            int_in_progress <= '1';
+                            int_step <= (others => '0');
+                            int_push_reg <= PC_reg;
+                            int_push_width <= WIDTH_32;
+                            data_byte_count <= (others => '0');
+                            if E_mode = '1' then
+                                int_vector_addr <= x"0000" & VEC_IRQ_E;
+                            else
+                                int_vector_addr <= x"0000" & VEC_BRK_N;
+                            end if;
+                            state <= ST_PUSH;
+                        elsif ext_trap = '1' then
+                            int_in_progress <= '1';
+                            int_step <= (others => '0');
+                            int_push_reg <= PC_reg;
+                            int_push_width <= WIDTH_32;
+                            data_byte_count <= (others => '0');
+                            int_vector_addr <= std_logic_vector(unsigned(VEC_SYSCALL) + (resize(unsigned(data_buffer(7 downto 0)), 32) sll 2));
+                            state <= ST_PUSH;
+                        elsif IS_RTI = '1' then
+                            rti_in_progress <= '1';
+                            rti_step <= (others => '0');
+                            rti_pull_width <= WIDTH_8;
+                            data_byte_count <= (others => '0');
+                            state <= ST_PULL;
+                        elsif IS_BLOCK_MOVE = '1' then
+                            block_active <= '1';
+                            if IR = x"54" then
+                                block_dir <= '1';
+                            else
+                                block_dir <= '0';
+                            end if;
+                            block_dst_bank <= data_buffer(7 downto 0);
+                            block_src_bank <= data_buffer(15 downto 8);
+                            state <= ST_BM_READ;
+                        else
                         if IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62") then
                             -- PEA/PEI/PER push after operand fetch
                             state <= ST_PUSH;
@@ -1151,6 +1265,7 @@ begin
                             data_byte_count <= (others => '0');
                         else
                             state <= ST_FETCH;
+                        end if;
                         end if;
                         
                     when ST_WRITE =>
@@ -1194,10 +1309,18 @@ begin
                         
                     when ST_PUSH =>
                         data_byte_count <= data_byte_count + 1;
-                        if stack_width = WIDTH_8 or data_byte_count = "011" then
-                            state <= ST_FETCH;
-                        elsif stack_width = WIDTH_16 and data_byte_count = "001" then
-                            state <= ST_FETCH;
+                        if stack_width_eff = WIDTH_8 or data_byte_count = "011" then
+                            if int_in_progress = '1' then
+                                state <= ST_INT_NEXT;
+                            else
+                                state <= ST_FETCH;
+                            end if;
+                        elsif stack_width_eff = WIDTH_16 and data_byte_count = "001" then
+                            if int_in_progress = '1' then
+                                state <= ST_INT_NEXT;
+                            else
+                                state <= ST_FETCH;
+                            end if;
                         else
                             state <= ST_PUSH;
                         end if;
@@ -1211,10 +1334,18 @@ begin
                             when others => null;
                         end case;
                         data_byte_count <= data_byte_count + 1;
-                        if stack_width = WIDTH_8 or data_byte_count = "011" then
-                            state <= ST_EXECUTE;
-                        elsif stack_width = WIDTH_16 and data_byte_count = "001" then
-                            state <= ST_EXECUTE;
+                        if stack_width_eff = WIDTH_8 or data_byte_count = "011" then
+                            if rti_in_progress = '1' then
+                                state <= ST_RTI_NEXT;
+                            else
+                                state <= ST_EXECUTE;
+                            end if;
+                        elsif stack_width_eff = WIDTH_16 and data_byte_count = "001" then
+                            if rti_in_progress = '1' then
+                                state <= ST_RTI_NEXT;
+                            else
+                                state <= ST_EXECUTE;
+                            end if;
                         else
                             state <= ST_PULL;
                         end if;
@@ -1235,13 +1366,63 @@ begin
                         
                     when ST_VECTOR2 =>
                         -- High byte is on D_IN, low byte is in DR
-                        -- LOAD_PC = "010" will load PC from D_IN:DR
                         data_buffer(15 downto 8) <= DATA_IN;
                         state <= ST_VECTOR3;
                         
                     when ST_VECTOR3 =>
-                        -- PC should now be loaded, go fetch first instruction
+                        data_buffer(23 downto 16) <= DATA_IN;
+                        state <= ST_VECTOR4;
+                        
+                    when ST_VECTOR4 =>
+                        data_buffer(31 downto 24) <= DATA_IN;
                         state <= ST_FETCH;
+                        
+                    when ST_INT_NEXT =>
+                        if int_step = to_unsigned(0, int_step'length) then
+                            int_step <= to_unsigned(1, int_step'length);
+                            int_push_reg <= x"000000" & P_reg(7 downto 0);
+                            int_push_width <= WIDTH_8;
+                            data_byte_count <= (others => '0');
+                            state <= ST_PUSH;
+                        else
+                            int_in_progress <= '0';
+                            int_step <= (others => '0');
+                            state <= ST_VECTOR1;
+                        end if;
+                        
+                    when ST_RTI_NEXT =>
+                        if rti_step = to_unsigned(0, rti_step'length) then
+                            rti_step <= to_unsigned(1, rti_step'length);
+                            rti_pull_width <= WIDTH_32;
+                            data_byte_count <= (others => '0');
+                            state <= ST_PULL;
+                        else
+                            rti_in_progress <= '0';
+                            rti_step <= (others => '0');
+                            state <= ST_FETCH;
+                        end if;
+                        
+                    when ST_WAI =>
+                        if nmi_pending = '1' or abort_pending = '1' or irq_pending = '1' then
+                            state <= ST_FETCH;
+                        else
+                            state <= ST_WAI;
+                        end if;
+                        
+                    when ST_STOP =>
+                        state <= ST_STOP;
+                        
+                    when ST_BM_READ =>
+                        data_buffer(7 downto 0) <= DATA_IN;
+                        state <= ST_BM_WRITE;
+                        
+                    when ST_BM_WRITE =>
+                        if A_reg = x"00000000" then
+                            block_active <= '0';
+                            state <= ST_FETCH;
+                        else
+                            state <= ST_BM_READ;
+                        end if;
                         
                     when others =>
                         state <= ST_FETCH;
@@ -1254,7 +1435,8 @@ begin
     -- Address Output Mux
     ---------------------------------------------------------------------------
     
-    process(state, PC_reg, VA_out, SP_reg, vector_addr, E_mode, eff_addr, data_byte_count, ADDR_MODE)
+    process(state, PC_reg, VA_out, SP_reg, int_vector_addr, E_mode, eff_addr, data_byte_count, ADDR_MODE,
+            block_src_addr, block_dst_addr)
     begin
         case state is
             when ST_FETCH | ST_DECODE | ST_BRANCH =>
@@ -1289,9 +1471,13 @@ begin
                     ADDR <= PC_reg;
                 end if;
             when ST_VECTOR1 =>
-                ADDR <= x"0000" & VEC_RESET;
+                ADDR <= int_vector_addr;
             when ST_VECTOR2 =>
-                ADDR <= x"0000" & std_logic_vector(unsigned(VEC_RESET) + 1);
+                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 1);
+            when ST_VECTOR3 =>
+                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 2);
+            when ST_VECTOR4 =>
+                ADDR <= std_logic_vector(unsigned(int_vector_addr) + 3);
             when ST_PUSH =>
                 ADDR <= SP_reg;
             when ST_PULL =>
@@ -1304,6 +1490,10 @@ begin
                 else
                     ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
                 end if;
+            when ST_BM_READ =>
+                ADDR <= block_src_addr;
+            when ST_BM_WRITE =>
+                ADDR <= block_dst_addr;
             when ST_WRITE | ST_WRITE2 | ST_WRITE3 | ST_WRITE4 =>
                 -- Writing to effective address
                 ADDR <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
@@ -1318,16 +1508,16 @@ begin
     
     WE <= '1' when state = ST_WRITE or state = ST_WRITE2 or 
                    state = ST_WRITE3 or state = ST_WRITE4 or
-                   state = ST_PUSH else '0';
+                   state = ST_PUSH or state = ST_BM_WRITE else '0';
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg, stack_width, ext_stq)
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff, ext_stq)
         variable write_reg : std_logic_vector(31 downto 0);
     begin
         -- Select source register for stores
         if state = ST_PUSH then
-            write_reg := stack_write_reg;
+            write_reg := stack_write_reg_eff;
         elsif IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" then
             -- RMW writeback uses ALU result
             write_reg := ALU_RES;
@@ -1345,7 +1535,9 @@ begin
             write_reg := A_reg;
         end if;
         
-        if ext_stq = '1' then
+        if state = ST_BM_WRITE then
+            DATA_OUT <= data_buffer(7 downto 0);
+        elsif ext_stq = '1' then
             if data_byte_count(2) = '1' then
                 case data_byte_count(1 downto 0) is
                     when "00" => DATA_OUT <= T_reg(7 downto 0);
@@ -1362,9 +1554,9 @@ begin
                 end case;
             end if;
         elsif state = ST_PUSH then
-            if stack_width = WIDTH_8 then
+            if stack_width_eff = WIDTH_8 then
                 DATA_OUT <= write_reg(7 downto 0);
-            elsif stack_width = WIDTH_16 then
+            elsif stack_width_eff = WIDTH_16 then
                 if data_byte_count = "000" then
                     DATA_OUT <= write_reg(15 downto 8);
                 else
@@ -1596,6 +1788,7 @@ begin
     
     read_width <= WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
                   WIDTH_16 when (IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62")) else
+                  WIDTH_16 when (IS_BLOCK_MOVE = '1') else
                   WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
                   WIDTH_8 when (ext_repe = '1' or ext_sepe = '1' or ext_trap = '1') else
                   WIDTH_32 when (is_extended = '1' and (IR_EXT = x"20" or IR_EXT = x"22" or IR_EXT = x"24")) else
@@ -1664,6 +1857,21 @@ begin
         end if;
     end process;
     
+    stack_width_eff <= int_push_width when int_in_progress = '1'
+                       else rti_pull_width when rti_in_progress = '1'
+                       else stack_width;
+    
+    stack_write_reg_eff <= int_push_reg when int_in_progress = '1'
+                           else stack_write_reg;
+    
+    block_src_addr <= x"00" & block_src_bank & X_reg(15 downto 0);
+    block_dst_addr <= x"00" & block_dst_bank & Y_reg(15 downto 0);
+    block_a_next <= std_logic_vector(unsigned(A_reg) - 1);
+    block_x_next <= std_logic_vector(unsigned(X_reg) - 1) when block_dir = '1'
+                    else std_logic_vector(unsigned(X_reg) + 1);
+    block_y_next <= std_logic_vector(unsigned(Y_reg) - 1) when block_dir = '1'
+                    else std_logic_vector(unsigned(Y_reg) + 1);
+    
     process(IS_RMW_OP, RMW_OP, ALU_OP, M_width, is_bit_op)
     begin
         -- Defaults for ALU ops
@@ -1705,7 +1913,8 @@ begin
     
     -- Accumulator input: data_buffer for loads, ALU result for operations, register for transfers
     -- ALU_OP: 000=ORA, 001=AND, 010=EOR, 011=ADC, 100=STA, 101=LDA, 110=CMP, 111=SBC
-    A_in <= data_buffer when ((IS_ALU_OP = '1' and ALU_OP = "101") or
+    A_in <= block_a_next when (state = ST_BM_WRITE and block_active = '1')
+            else data_buffer when ((IS_ALU_OP = '1' and ALU_OP = "101") or
                                ext_lli = '1' or
                                (stack_is_pull = '1' and IR = x"68"))
             else ldq_low_buffer when (ext_ldq = '1')
@@ -1717,43 +1926,48 @@ begin
     
     -- A loads on: LDA, ALU operations that produce results (not STA, not CMP),
     -- accumulator RMW (ASL A, etc.), or transfers to A (TXA, TYA)
-    A_load <= '1' when state = ST_EXECUTE and 
+    A_load <= '1' when (state = ST_EXECUTE or (state = ST_BM_WRITE and block_active = '1')) and 
               ((IS_ALU_OP = '1' and ALU_OP /= "100" and ALU_OP /= "110" and is_bit_op = '0') or  -- ALU ops except STA, CMP, BIT
                (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "000" and 
                 RMW_OP /= "100" and RMW_OP /= "101") or  -- Accumulator RMW (not stores/loads)
                (IS_TRANSFER = '1' and REG_DST = "000") or  -- Transfers to A (TXA, TYA)
                ext_lli = '1' or ext_lea = '1' or ext_mul = '1' or ext_mulu = '1' or
                ext_div = '1' or ext_divu = '1' or ext_tta = '1' or ext_ldq = '1' or
-               (stack_is_pull = '1' and IR = x"68"))
+               (stack_is_pull = '1' and IR = x"68") or
+               (state = ST_BM_WRITE and block_active = '1'))
               else '0';
     
     -- X register: LDX is RMW_OP = "101" with REG_DST = "001"
     -- Also handle transfers TAX (REG_DST = "001")
     -- Also handle INX/DEX (RMW_OP = "110"/"111" with REG_DST = "001")
-    X_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "001")
+    X_in <= block_x_next when (state = ST_BM_WRITE and block_active = '1')
+            else data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "001")
             else data_buffer when (stack_is_pull = '1' and IR = x"FA")
             else data_buffer when (ext_cas = '1' and cas_match = '0')
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "001")
             else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "001")
             else (others => '0');
-    X_load <= '1' when state = ST_EXECUTE and 
+    X_load <= '1' when (state = ST_EXECUTE or (state = ST_BM_WRITE and block_active = '1')) and 
               ((IS_RMW_OP = '1' and REG_DST = "001" and RMW_OP /= "100") or  -- LDX, INX, DEX
                (IS_TRANSFER = '1' and REG_DST = "001") or
                (stack_is_pull = '1' and IR = x"FA") or
-               (ext_cas = '1' and cas_match = '0'))
+               (ext_cas = '1' and cas_match = '0') or
+               (state = ST_BM_WRITE and block_active = '1'))
               else '0';
     
     -- Y register: LDY is RMW_OP = "101" with REG_DST = "010"
     -- Also handle INY/DEY (RMW_OP = "110"/"111" with REG_DST = "010")
-    Y_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "010")
+    Y_in <= block_y_next when (state = ST_BM_WRITE and block_active = '1')
+            else data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "010")
             else data_buffer when (stack_is_pull = '1' and IR = x"7A")
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "010")
             else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "010")
             else (others => '0');
-    Y_load <= '1' when state = ST_EXECUTE and 
+    Y_load <= '1' when (state = ST_EXECUTE or (state = ST_BM_WRITE and block_active = '1')) and 
               ((IS_RMW_OP = '1' and REG_DST = "010" and RMW_OP /= "100") or  -- LDY, INY, DEY
                (IS_TRANSFER = '1' and REG_DST = "010") or
-               (stack_is_pull = '1' and IR = x"7A"))
+               (stack_is_pull = '1' and IR = x"7A") or
+               (state = ST_BM_WRITE and block_active = '1'))
               else '0';
     
     -- Stack pointer
@@ -1858,12 +2072,31 @@ begin
               when (IS_SEP = '1' or ext_sepe = '1') else
               P_reg;
     
-    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg)
+    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg, int_step, rti_step, IS_XCE)
     begin
         p_override <= P_reg;
         p_override_valid <= '0';
         if state = ST_EXECUTE and stack_is_pull = '1' and IR = x"28" then
             p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            p_override_valid <= '1';
+        elsif state = ST_EXECUTE and IS_XCE = '1' then
+            p_override <= P_reg;
+            p_override(P_C) <= P_reg(P_E);
+            p_override(P_E) <= P_reg(P_C);
+            if P_reg(P_C) = '1' then
+                p_override(P_M0) <= '1';
+                p_override(P_M1) <= '1';
+                p_override(P_X0) <= '1';
+                p_override(P_X1) <= '1';
+            end if;
+            p_override_valid <= '1';
+        elsif state = ST_RTI_NEXT and rti_step = to_unsigned(0, rti_step'length) then
+            p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            p_override_valid <= '1';
+        elsif state = ST_INT_NEXT and int_step = to_unsigned(1, int_step'length) then
+            p_override <= P_reg;
+            p_override(P_I) <= '1';
+            p_override(P_S) <= '1';
             p_override_valid <= '1';
         elsif state = ST_EXECUTE and IS_RSET = '1' then
             p_override <= P_reg(P_WIDTH-1 downto P_R+1) & '1' & P_reg(P_R-1 downto 0);
@@ -1889,9 +2122,10 @@ begin
     end process;
     
     P_in <= p_override when p_override_valid = '1' else p_next;
-    P_load <= '1' when state = ST_EXECUTE and (IS_REP = '1' or IS_SEP = '1' or ext_repe = '1' or
-                                               ext_sepe = '1' or IS_RSET = '1' or IS_RCLR = '1' or
-                                               p_override_valid = '1') else '0';
+    P_load <= '1' when (state = ST_EXECUTE and (IS_REP = '1' or IS_SEP = '1' or ext_repe = '1' or
+                                                ext_sepe = '1' or IS_RSET = '1' or IS_RCLR = '1')) or
+                       p_override_valid = '1'
+              else '0';
     
     ---------------------------------------------------------------------------
     -- Flag Update Logic
@@ -1945,7 +2179,9 @@ begin
     ---------------------------------------------------------------------------
     -- LOAD_PC: 000=hold, 001=increment, 010=load from D_IN:DR, 100=branch offset
     
-    pc_direct <= std_logic_vector(unsigned(jsr_return) + 1);
+    pc_direct <= DATA_IN & data_buffer(23 downto 0) when state = ST_VECTOR4
+                 else data_buffer when (state = ST_RTI_NEXT and rti_step = to_unsigned(1, rti_step'length))
+                 else std_logic_vector(unsigned(jsr_return) + 1);
     
     is_indirect_addr <= '1' when ((ADDR_MODE = "1000" and IS_JMP_d = '0') or
                                   ADDR_MODE = "1001" or ADDR_MODE = "1010" or
@@ -2011,8 +2247,8 @@ begin
         end if;
     end process;
     
-    LOAD_PC <= "010" when (state = ST_VECTOR2 or
-                           (state = ST_ADDR2 and (IS_JSR = '1' or IS_JMP_d = '1'))) -- Load PC from D_IN:DR
+    LOAD_PC <= "111" when (state = ST_VECTOR4 or (state = ST_RTI_NEXT and rti_step = to_unsigned(1, rti_step'length))) else
+               "010" when (state = ST_ADDR2 and (IS_JSR = '1' or IS_JMP_d = '1')) -- Load PC from D_IN:DR
               else "010" when (state = ST_READ2 and IS_JMP_d = '1' and
                                (ADDR_MODE = "1000" or ADDR_MODE = "1001")) -- JMP indirect
               else "010" when (state = ST_ADDR4 and IS_JMP_d = '1' and

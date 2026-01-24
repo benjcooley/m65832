@@ -201,6 +201,39 @@ $02 $88 [dp]       LDQ dp         A:T = [dp..dp+7] (RSET reg window)
 $02 $89 [abs16]    LDQ abs        A:T = [abs..abs+7]
 $02 $8A [dp]       STQ dp         [dp..dp+7] = A:T (RSET reg window)
 $02 $8B [abs16]    STQ abs        [abs..abs+7] = A:T
+$02 $C0            FADD.S         F0 = F1 + F2 (single-precision)
+$02 $C1            FSUB.S         F0 = F1 - F2
+$02 $C2            FMUL.S         F0 = F1 * F2
+$02 $C3            FDIV.S         F0 = F1 / F2
+$02 $C4            FNEG.S         F0 = -F1
+$02 $C5            FABS.S         F0 = abs(F1)
+$02 $C6            FCMP.S         Set flags based on F1 ? F2
+$02 $C7            F2I.S          A = (int32)F1
+$02 $C8            I2F.S          F0 = (float32)A
+$02 $D0            FADD.D         F0 = F1 + F2 (double-precision)
+$02 $D1            FSUB.D         F0 = F1 - F2
+$02 $D2            FMUL.D         F0 = F1 * F2
+$02 $D3            FDIV.D         F0 = F1 / F2
+$02 $D4            FNEG.D         F0 = -F1
+$02 $D5            FABS.D         F0 = abs(F1)
+$02 $D6            FCMP.D         Set flags based on F1 ? F2
+$02 $D7            F2I.D          A = (int32)F1
+$02 $D8            I2F.D          F0 = (float64)A
+$02 $D9            (reserved)     FRND.D (round to int)
+$02 $DA            (reserved)     FCEIL.D (ceil)
+$02 $DB            (reserved)     FFLOOR.D (floor)
+$02 $DC            (reserved)     FSQRT.D (sqrt)
+$02 $DD            (reserved)     FMOD.D (modulo)
+$02 $DE            (reserved)     FPOW.D (power)
+$02 $DF            (reserved)     FSIN.D (sine)
+$02 $E0            (reserved)     FRND.S (round to int)
+$02 $E1            (reserved)     FCEIL.S (ceil)
+$02 $E2            (reserved)     FFLOOR.S (floor)
+$02 $E3            (reserved)     FSQRT.S (sqrt)
+$02 $E4            (reserved)     FMOD.S (modulo)
+$02 $E5            (reserved)     FPOW.S (power)
+$02 $E6            (reserved)     FSIN.S (sine)
+Note: reserved FP opcodes should trap to a software emulation handler.
 
 $02 $90            XCE            Exchange Carry with E flag
 $02 $91            WAI            Wait for Interrupt

@@ -467,8 +467,8 @@ begin
                         when x"DB" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
                         
                         -- Block moves
-                        when x"44" => IS_BLOCK_MOVE <= '1'; INSTR_LEN <= "011";  -- MVN
-                        when x"54" => IS_BLOCK_MOVE <= '1'; INSTR_LEN <= "011";  -- MVP
+                        when x"44" => IS_BLOCK_MOVE <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- MVN
+                        when x"54" => IS_BLOCK_MOVE <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- MVP
                         
                         -- BIT, CPX, CPY, STY, LDY
                         when x"24" => IS_ALU_OP <= '1'; ALU_OP <= "001"; ADDR_MODE <= "0010"; INSTR_LEN <= "010";  -- BIT dp

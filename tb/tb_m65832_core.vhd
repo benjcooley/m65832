@@ -379,7 +379,8 @@ begin
         poke(16#8006#, x"8D");  -- STA abs
         poke(16#8007#, x"04");  -- $04
         poke(16#8008#, x"02");  -- $02  -> $0204
-        poke(16#8009#, x"00");  -- BRK
+        poke(16#8009#, x"02");  -- EXT prefix
+        poke(16#800A#, x"92");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);
@@ -661,7 +662,8 @@ begin
         poke(16#8006#, x"8D");  -- STA abs
         poke(16#8007#, x"12");  -- $12
         poke(16#8008#, x"02");  -- $02  -> $0212
-        poke(16#8009#, x"00");  -- BRK
+        poke(16#8009#, x"02");  -- EXT prefix
+        poke(16#800A#, x"92");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1059,7 +1061,8 @@ begin
         poke(16#800A#, x"8D");  -- STA abs
         poke(16#800B#, x"20");  -- $20
         poke(16#800C#, x"02");  -- $02  -> $0220
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#800D#, x"02");  -- EXT prefix
+        poke(16#800E#, x"92");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1202,7 +1205,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(140);
+        wait_cycles(30);
         
         check_mem(16#022A#, x"78", "32-bit STX byte 0");
         check_mem(16#022B#, x"56", "32-bit STX byte 1");
@@ -1376,7 +1379,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(180);
+        wait_cycles(40);
         
         check_mem(16#023A#, x"FF", "32-bit SBC byte 0");
         check_mem(16#023B#, x"FF", "32-bit SBC byte 1");
@@ -2994,9 +2997,10 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(140);
+        wait_cycles(25);
         
         check_mem(16#01FF#, x"5A", "PHA wrote stack");
+        wait_cycles(15);
         check_mem(16#0310#, x"5A", "PLA restored A");
         
         -----------------------------------------------------------------------
@@ -3019,15 +3023,17 @@ begin
         poke(16#800A#, x"8E");  -- STX abs
         poke(16#800B#, x"12");  -- $12
         poke(16#800C#, x"03");  -- $03 -> $0312/$0313
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#800D#, x"02");  -- EXT prefix
+        poke(16#800E#, x"92");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(180);
+        wait_cycles(30);
         
         check_mem(16#01FF#, x"12", "PHX stack high");
         check_mem(16#01FE#, x"34", "PHX stack low");
+        wait_cycles(15);
         check_mem(16#0312#, x"34", "PLX low");
         check_mem(16#0313#, x"12", "PLX high");
         
@@ -3686,6 +3692,183 @@ begin
         
         check_mem(16#0346#, x"22", "LDQ dp low");
         check_mem(16#0347#, x"11", "LDQ dp high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 100: TRAP vector + RTI
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100: TRAP + RTI";
+        
+        -- Syscall vector -> $00009000
+        poke(16#FFD4#, x"00");
+        poke(16#FFD5#, x"90");
+        poke(16#FFD6#, x"00");
+        poke(16#FFD7#, x"00");
+        
+        -- Handler at $9000: LDA #$AA, STA $0400, RTI
+        poke(16#9000#, x"A9");
+        poke(16#9001#, x"AA");
+        poke(16#9002#, x"8D");
+        poke(16#9003#, x"00");
+        poke(16#9004#, x"04");
+        poke(16#9005#, x"40");  -- RTI
+        
+        -- Program: TRAP #$00, LDA #$55, STA $0401, BRK
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"40");  -- TRAP
+        poke(16#8002#, x"00");  -- vector index
+        poke(16#8003#, x"A9");
+        poke(16#8004#, x"55");
+        poke(16#8005#, x"8D");
+        poke(16#8006#, x"01");
+        poke(16#8007#, x"04");
+        poke(16#8008#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0400#, x"AA", "TRAP handler wrote");
+        check_mem(16#0401#, x"55", "RTI returned to main");
+        
+        -----------------------------------------------------------------------
+        -- TEST 101: BRK vector + RTI
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 101: BRK + RTI";
+        
+        -- BRK vector (E=1 uses IRQ vector at $FFFE, wraps in 64KB memory)
+        -- $FFFE/$FFFF/$0000/$0001 -> $00009010
+        poke(16#FFFE#, x"10");
+        poke(16#FFFF#, x"90");
+        poke(16#0000#, x"00");
+        poke(16#0001#, x"00");
+        
+        -- Handler at $9010: LDA #$CC, STA $0402, RTI
+        poke(16#9010#, x"A9");
+        poke(16#9011#, x"CC");
+        poke(16#9012#, x"8D");
+        poke(16#9013#, x"02");
+        poke(16#9014#, x"04");
+        poke(16#9015#, x"40");  -- RTI
+        
+        -- Program: BRK, LDA #$66, STA $0403, BRK
+        poke(16#8000#, x"00");  -- BRK
+        poke(16#8001#, x"A9");
+        poke(16#8002#, x"66");
+        poke(16#8003#, x"8D");
+        poke(16#8004#, x"03");
+        poke(16#8005#, x"04");
+        poke(16#8006#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0402#, x"CC", "BRK handler wrote");
+        check_mem(16#0403#, x"66", "RTI returned after BRK");
+        
+        -----------------------------------------------------------------------
+        -- TEST 102: MVN block move (increment)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 102: MVN";
+        
+        -- Source bytes at $0020..$0023
+        poke(16#0020#, x"11");
+        poke(16#0021#, x"12");
+        poke(16#0022#, x"13");
+        poke(16#0023#, x"14");
+        
+        -- Program: LDX #$20, LDY #$40, LDA #$03, MVN $00,$00, BRK
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"20");
+        poke(16#8002#, x"A0");  -- LDY #
+        poke(16#8003#, x"40");
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"03");
+        poke(16#8006#, x"44");  -- MVN
+        poke(16#8007#, x"00");  -- dest bank
+        poke(16#8008#, x"00");  -- src bank
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0040#, x"11", "MVN byte0");
+        check_mem(16#0041#, x"12", "MVN byte1");
+        check_mem(16#0042#, x"13", "MVN byte2");
+        check_mem(16#0043#, x"14", "MVN byte3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 103: MVP block move (decrement)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 103: MVP";
+        
+        -- Source bytes at $0030..$0033
+        poke(16#0030#, x"21");
+        poke(16#0031#, x"22");
+        poke(16#0032#, x"23");
+        poke(16#0033#, x"24");
+        
+        -- Program: LDX #$33, LDY #$53, LDA #$03, MVP $00,$00, BRK
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"33");
+        poke(16#8002#, x"A0");  -- LDY #
+        poke(16#8003#, x"53");
+        poke(16#8004#, x"A9");  -- LDA #
+        poke(16#8005#, x"03");
+        poke(16#8006#, x"54");  -- MVP
+        poke(16#8007#, x"00");  -- dest bank
+        poke(16#8008#, x"00");  -- src bank
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0050#, x"21", "MVP byte0");
+        check_mem(16#0051#, x"22", "MVP byte1");
+        check_mem(16#0052#, x"23", "MVP byte2");
+        check_mem(16#0053#, x"24", "MVP byte3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 104: XCE (enter native), 16-bit A immediate
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 104: XCE";
+        
+        poke(16#0410#, x"00");
+        poke(16#0411#, x"00");
+        
+        -- Program: CLC, XCE, REP #$80, SEP #$40, LDA #$1234, STA $0410, BRK
+        poke(16#8000#, x"18");  -- CLC
+        poke(16#8001#, x"FB");  -- XCE
+        poke(16#8002#, x"C2");  -- REP
+        poke(16#8003#, x"80");  -- clear M1
+        poke(16#8004#, x"E2");  -- SEP
+        poke(16#8005#, x"40");  -- set M0 (16-bit)
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"34");
+        poke(16#8008#, x"12");
+        poke(16#8009#, x"8D");  -- STA abs
+        poke(16#800A#, x"10");
+        poke(16#800B#, x"04");
+        poke(16#800C#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0410#, x"34", "XCE LDA low byte");
+        check_mem(16#0411#, x"12", "XCE LDA high byte");
         
         -----------------------------------------------------------------------
         -- Summary
