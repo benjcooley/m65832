@@ -859,6 +859,13 @@ begin
                                         (resize(unsigned(DATA_IN), 16) sll 8) or
                                         resize(unsigned(data_buffer(7 downto 0)), 16),
                                         32));
+                            elsif IS_JML = '1' and ADDR_MODE = "1011" then
+                                -- JML [abs]: pointer address is absolute operand
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 16) sll 8) or
+                                        resize(unsigned(data_buffer(7 downto 0)), 16),
+                                        32));
                             elsif ADDR_MODE = "1111" then
                                 -- Long/Long,X: latch high byte, bank next
                                 null;
@@ -989,6 +996,10 @@ begin
                             null;
                         elsif IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             null;
+                        elsif IS_JML = '1' and ADDR_MODE = "1011" then
+                            -- JML [abs]: read long pointer from eff_addr
+                            data_byte_count <= (others => '0');
+                            state <= ST_READ;
                         elsif ADDR_MODE = "1011" or ADDR_MODE = "1100" then
                             null;
                         elsif ADDR_MODE = "1111" and (IS_JML = '1' or IS_JSL = '1') then
@@ -1463,6 +1474,16 @@ begin
                     elsif IS_JMP_d = '1' and ADDR_MODE = "1000" then
                         -- JMP (abs): pointer reads happen in ST_READ, keep PC here
                         ADDR <= PC_reg;
+                    elsif IS_JML = '1' and ADDR_MODE = "1011" then
+                        if state = ST_ADDR2 then
+                            ADDR <= PC_reg;
+                        elsif state = ST_ADDR3 then
+                            ADDR <= eff_addr;
+                        elsif state = ST_ADDR4 then
+                            ADDR <= std_logic_vector(unsigned(eff_addr) + 1);
+                        else
+                            ADDR <= PC_reg;
+                        end if;
                     else
                         if state = ST_ADDR2 then
                             ADDR <= eff_addr;
@@ -1793,7 +1814,8 @@ begin
                             IR = x"3C" or IR = x"89"))
                 else '0';
     
-    read_width <= WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
+    read_width <= WIDTH_32 when (IS_JML = '1' and ADDR_MODE = "1011") else
+                  WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
                   WIDTH_16 when (IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62")) else
                   WIDTH_16 when (IS_BLOCK_MOVE = '1') else
                   WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
@@ -2201,6 +2223,7 @@ begin
     
     pc_direct <= DATA_IN & data_buffer(23 downto 0) when state = ST_VECTOR4
                  else data_buffer when (state = ST_RTI_NEXT and rti_step = to_unsigned(1, rti_step'length))
+                 else data_buffer when (state = ST_EXECUTE and IS_JML = '1' and ADDR_MODE = "1011")
                  else eff_addr when (state = ST_EXECUTE and (IS_JML = '1' or IS_JSL = '1'))
                  else std_logic_vector(unsigned(jsr_return) + 1);
     
