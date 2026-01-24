@@ -227,6 +227,7 @@ architecture rtl of M65832_Core is
     signal ext_fpu                             : std_logic;
     signal ext_ldf, ext_stf                    : std_logic;
     signal f_reg_sel                           : std_logic_vector(1 downto 0);
+    signal ext_fpu_trap                        : std_logic;
     
     -- Register window (DP-as-registers)
     signal rw_addr1    : std_logic_vector(5 downto 0);
@@ -275,6 +276,7 @@ architecture rtl of M65832_Core is
     signal fpu_flag_c       : std_logic;
     signal fpu_flag_load    : std_logic;
     signal fpu_flag_c_load  : std_logic;
+    signal f_stq_high_reg   : std_logic;
     
     signal stack_is_pull    : std_logic;
     signal stack_width      : std_logic_vector(1 downto 0);
@@ -608,6 +610,7 @@ begin
             ldq_low_buffer <= (others => '0');
             ldq_high_phase <= '0';
             stq_high_reg <= '0';
+            f_stq_high_reg <= '0';
             int_in_progress <= '0';
             int_step <= (others => '0');
             int_vector_addr <= (others => '0');
@@ -754,9 +757,9 @@ begin
                                     dp_reg_index <= dp_reg_index_next;
                                     eff_addr <= D_reg(31 downto 8) & DATA_IN;
                                 end if;
-                                if R_mode = '1' and ext_ldf = '0' and ext_stf = '0' then
+                                if R_mode = '1' then
                                     -- DP-as-registers: use reg window instead of memory
-                                    if ext_ldq = '1' then
+                                    if ext_ldq = '1' or ext_ldf = '1' then
                                         data_buffer <= rw_data1;
                                         ldq_low_buffer <= rw_data1;
                                         ldq_high_buffer <= rw_data2;
@@ -764,6 +767,9 @@ begin
                                         state <= ST_EXECUTE;
                                     elsif ext_stq = '1' then
                                         stq_high_reg <= '1';
+                                        state <= ST_EXECUTE;
+                                    elsif ext_stf = '1' then
+                                        f_stq_high_reg <= '1';
                                         state <= ST_EXECUTE;
                                     elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                         state <= ST_FETCH;
@@ -1223,7 +1229,10 @@ begin
                         
                     when ST_EXECUTE =>
                         -- Execute instruction
-                        if stq_high_reg = '1' then
+                        if f_stq_high_reg = '1' then
+                            f_stq_high_reg <= '0';
+                            state <= ST_FETCH;
+                        elsif stq_high_reg = '1' then
                             stq_high_reg <= '0';
                             state <= ST_FETCH;
                         elsif ext_lli = '1' then
@@ -1241,6 +1250,14 @@ begin
                             else
                                 int_vector_addr <= x"0000" & VEC_BRK_N;
                             end if;
+                            state <= ST_PUSH;
+                        elsif ext_fpu_trap = '1' then
+                            int_in_progress <= '1';
+                            int_step <= (others => '0');
+                            int_push_reg <= PC_reg;
+                            int_push_width <= WIDTH_32;
+                            data_byte_count <= (others => '0');
+                            int_vector_addr <= std_logic_vector(unsigned(VEC_SYSCALL) + (resize(unsigned(IR_EXT), 32) sll 2));
                             state <= ST_PUSH;
                         elsif ext_trap = '1' then
                             int_in_progress <= '1';
@@ -1827,7 +1844,7 @@ begin
                             fpu_flag_n <= '0';
                         end if;
                     when x"C7" =>
-                        int32_res := to_signed(to_integer(f1_s), 32);
+                        int32_res := to_signed(to_integer(f1_s, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
                         fpu_flag_load <= '1';
@@ -1879,7 +1896,7 @@ begin
                             fpu_flag_n <= '0';
                         end if;
                     when x"D7" =>
-                        int32_res := to_signed(to_integer(f1_d), 32);
+                        int32_res := to_signed(to_integer(f1_d, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
                         fpu_flag_load <= '1';
@@ -1914,7 +1931,7 @@ begin
             f1_reg <= (others => '0');
             f2_reg <= (others => '0');
         elsif rising_edge(CLK) then
-            if EN = '1' then
+            if CE = '1' and RDY = '1' then
                 if state = ST_EXECUTE then
                     if ext_ldf = '1' then
                         case f_reg_sel is
@@ -2220,10 +2237,10 @@ begin
     rw_addr1 <= dp_reg_index_next when (state = ST_ADDR1 and
                                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
-    rw_addr2 <= dp_reg_index_next_plus1 when (ext_ldq = '1' and R_mode = '1' and state = ST_ADDR1 and
+    rw_addr2 <= dp_reg_index_next_plus1 when ((ext_ldq = '1' or ext_ldf = '1') and R_mode = '1' and state = ST_ADDR1 and
                                               (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else (others => '0');
-    rw_waddr <= dp_reg_index_next_plus1 when (stq_high_reg = '1' and state = ST_EXECUTE)
+    rw_waddr <= dp_reg_index_next_plus1 when ((stq_high_reg = '1' or f_stq_high_reg = '1') and state = ST_EXECUTE)
                 else dp_reg_index_next when (state = ST_ADDR1 and
                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
@@ -2234,9 +2251,21 @@ begin
                 M_width;
     rw_byte_sel <= "00";
     
-    process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg)
+    process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
+            f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg)
+        variable f_reg : std_logic_vector(63 downto 0);
     begin
-        if stq_high_reg = '1' then
+        case f_reg_sel is
+            when "00" => f_reg := f0_reg;
+            when "01" => f_reg := f1_reg;
+            when others => f_reg := f2_reg;
+        end case;
+
+        if f_stq_high_reg = '1' then
+            rw_wdata <= f_reg(63 downto 32);
+        elsif ext_stf = '1' then
+            rw_wdata <= f_reg(31 downto 0);
+        elsif stq_high_reg = '1' then
             rw_wdata <= T_reg;
         elsif IS_ALU_OP = '1' and ALU_OP = "100" then
             rw_wdata <= A_reg;
@@ -2257,16 +2286,21 @@ begin
                        ((state = ST_ADDR1 and (IS_ALU_OP = '1' and ALU_OP = "100")) or
                         (state = ST_ADDR1 and (IS_RMW_OP = '1' and RMW_OP = "100")) or
                         (state = ST_ADDR1 and ext_stq = '1') or
+                        (state = ST_ADDR1 and ext_stf = '1') or
                         (stq_high_reg = '1' and state = ST_EXECUTE) or
+                        (f_stq_high_reg = '1' and state = ST_EXECUTE) or
                         (state = ST_EXECUTE and IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" and
                          (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))))
              else '0';
 
-    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index)
+    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index, R_mode, ext_ldf, ext_stf)
     begin
         dp_reg_index_next <= dp_reg_index;
         if state = ST_ADDR1 and (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") then
-            if ADDR_MODE = "0011" then
+            if R_mode = '1' and (ext_ldf = '1' or ext_stf = '1') then
+                -- 16-byte alignment for F register pairs in R-mode (Rk/Rk+1)
+                dp_reg_index_next <= DATA_IN(5 downto 2) & "00";
+            elsif ADDR_MODE = "0011" then
                 dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)), 6));
             elsif ADDR_MODE = "0100" then
                 dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)), 6));
@@ -2440,6 +2474,11 @@ begin
                           IR_EXT = x"C8" or IR_EXT = x"D0" or IR_EXT = x"D1" or IR_EXT = x"D2" or
                           IR_EXT = x"D3" or IR_EXT = x"D4" or IR_EXT = x"D5" or IR_EXT = x"D6" or
                           IR_EXT = x"D7" or IR_EXT = x"D8")) else '0';
+    ext_fpu_trap <= '1' when (is_extended = '1' and
+                              (IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
+                               IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
+                               IR_EXT = x"E1" or IR_EXT = x"E2" or IR_EXT = x"E3" or IR_EXT = x"E4" or
+                               IR_EXT = x"E5" or IR_EXT = x"E6")) else '0';
     
     ext_repe <= '1' when (is_extended = '1' and IR_EXT = x"60") else '0';
     ext_sepe <= '1' when (is_extended = '1' and IR_EXT = x"61") else '0';

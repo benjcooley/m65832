@@ -1205,6 +1205,12 @@ XCE             ; E = 1 (emulation), C = old E
 
 **Description**: Moves 64-bit values between memory and the floating-point registers. Single-precision ops use the low 32 bits of F0/F1/F2, while double-precision ops use the full 64 bits.
 
+**Register Window (R=1)**:
+- `LDF*/STF* dp` accesses the register window, not memory.
+- The DP offset selects `Rk` (low dword) and `Rk+1` (high dword).
+- DP offset must select a register index that is a **multiple of 4** (16-byte alignment).
+- Software FP context saves should keep SP **4-byte aligned**.
+
 ### 3.91 FPU Operations (NEW)
 
 **Registers**: F0 (destination), F1/F2 (sources)
@@ -1217,7 +1223,7 @@ XCE             ; E = 1 (emulation), C = old E
 - `FADD/FSUB/FMUL/FDIV/FNEG/FABS/I2F.*`: Z/N from result, V = 0
 - `F2I.*`: Z/N from integer result
 
-**Note**: Reserved FP opcodes should trap to software emulation for future expansion.
+**Note**: Reserved FP opcodes trap to the software emulation handler using the TRAP vector with an index equal to the FP opcode byte.
 
 ---
 
