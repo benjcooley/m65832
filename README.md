@@ -83,7 +83,13 @@ LDA $1234           ; Loads from $90001234 (3-byte instruction!)
 
 ### Classic Coprocessor: Cycle-Accurate 6502 Emulation
 
-The M65832 includes a **two-core interleaved architecture** that enables cycle-accurate execution of classic 6502 games while running Linux:
+The M65832 includes a **dedicated 6502 compatibility coprocessor** (one at a time) for classic platform emulation.
+
+This coprocessor is separate from the normal 8/16/32-bit process model: 8-bit 6502-compatible processes can multitask like any other task but are not cycle-accurate and run at native clockrate.
+
+In coprocessor mode, cycle-accurate beam tracing is supported, and the 6502 runs at a software-selectable cycle rate via time-sliced scheduling alongside the main core.
+
+Both the compatibility core and the regular M65832 core can also connect to FPGA/external coprocessors or chips that emulate classic machines or provide newer accelerators (e.g., VIC/SID, a SID99 with advanced sampling and wavetable synth, or enhanced 2D sprite/video display chips with richer palettes and animation):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
