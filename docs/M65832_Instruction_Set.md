@@ -1225,6 +1225,8 @@ XCE             ; E = 1 (emulation), C = old E
 
 **Note**: Reserved FP opcodes trap to the software emulation handler using the TRAP vector with an index equal to the FP opcode byte.
 
+**TODO (later)**: Add edge-case FP tests (NaN/Inf/subnormals/div-by-zero/rounding).
+
 ---
 
 ## 4. Instruction Timing Details

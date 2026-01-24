@@ -139,7 +139,13 @@ Next Steps
 - Decide early RAM (SDRAM vs LPDDR4) and add controller stub.
 - Add a ROM image build step and test a "Hello" console.
 - Decide MMU interface and page table format.
-- Define minimal FPU opcode set and coprocessor interface.
+- Define minimal FPU opcode set and coprocessor interface. (done)
+
+FPU Alignment Notes (DE25)
+--------------------------
+- FP registers live in the CPU register pool (F0-F2 = Rk/Rk+1 pairs).
+- `LDF*/STF* dp` use the register window when `R=1`; DP offset must be 16-byte aligned.
+- Reserved FP opcodes trap via `TRAP` (vector index = FP opcode byte) for software emulation.
 
 Toolchain Bootstrap (Later Stage)
 ---------------------------------
