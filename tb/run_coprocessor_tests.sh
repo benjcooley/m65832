@@ -15,10 +15,14 @@ ghdl -a --std=08 \
   rtl/m65832_6502_coprocessor.vhd \
   rtl/m65832_coprocessor_top.vhd \
   tb/tb_m65832_coprocessor.vhd \
-  tb/tb_m65832_interleave.vhd
+  tb/tb_m65832_interleave.vhd \
+  tb/tb_m65832_coprocessor_soak.vhd
 
 ghdl -e --std=08 tb_M65832_Coprocessor
 ghdl -r --std=08 tb_M65832_Coprocessor --stop-time=3ms
 
 ghdl -e --std=08 tb_M65832_Interleave
 ghdl -r --std=08 tb_M65832_Interleave --stop-time=2us
+
+ghdl -e --std=08 tb_M65832_Coprocessor_Soak
+ghdl -r --std=08 tb_M65832_Coprocessor_Soak --stop-time=10ms
