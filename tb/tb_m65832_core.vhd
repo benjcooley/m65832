@@ -3697,6 +3697,174 @@ begin
         check_mem(16#0347#, x"11", "LDQ dp high");
         
         -----------------------------------------------------------------------
+        -- TEST 100A: LDF/STF + FADD.S
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100A: LDF/STF + FADD.S";
+        
+        -- F1 = 1.5 (0x3FC00000), F2 = 2.25 (0x40100000)
+        poke(16#0600#, x"00");
+        poke(16#0601#, x"00");
+        poke(16#0602#, x"C0");
+        poke(16#0603#, x"3F");
+        poke(16#0604#, x"00");
+        poke(16#0605#, x"00");
+        poke(16#0606#, x"00");
+        poke(16#0607#, x"00");
+        poke(16#0608#, x"00");
+        poke(16#0609#, x"00");
+        poke(16#060A#, x"10");
+        poke(16#060B#, x"40");
+        poke(16#060C#, x"00");
+        poke(16#060D#, x"00");
+        poke(16#060E#, x"00");
+        poke(16#060F#, x"00");
+        
+        -- Program: LDF F1 abs $0600, LDF F2 abs $0608, FADD.S, STF F0 abs $0620, BRK
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"B5");  -- LDF F1 abs
+        poke(16#8002#, x"00");
+        poke(16#8003#, x"06");
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"B9");  -- LDF F2 abs
+        poke(16#8006#, x"08");
+        poke(16#8007#, x"06");
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"C0");  -- FADD.S
+        poke(16#800A#, x"02");  -- EXT prefix
+        poke(16#800B#, x"B3");  -- STF F0 abs
+        poke(16#800C#, x"20");
+        poke(16#800D#, x"06");
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(520);
+        
+        -- 3.75 (0x40700000) little-endian at $0620
+        check_mem(16#0620#, x"00", "FADD.S byte0");
+        check_mem(16#0621#, x"00", "FADD.S byte1");
+        check_mem(16#0622#, x"70", "FADD.S byte2");
+        check_mem(16#0623#, x"40", "FADD.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100B: F2I.S and I2F.S
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100B: F2I.S/I2F.S";
+        
+        -- F1 = 5.5 (0x40B00000)
+        poke(16#0630#, x"00");
+        poke(16#0631#, x"00");
+        poke(16#0632#, x"B0");
+        poke(16#0633#, x"40");
+        poke(16#0634#, x"00");
+        poke(16#0635#, x"00");
+        poke(16#0636#, x"00");
+        poke(16#0637#, x"00");
+        
+        -- Program: set M=32, LDF F1 abs $0630, F2I.S, STA $0640,
+        --          LDA #$07, I2F.S, STF F0 abs $0650, BRK
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"B5");  -- LDF F1 abs
+        poke(16#8006#, x"30");
+        poke(16#8007#, x"06");
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"C7");  -- F2I.S
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"40");
+        poke(16#800C#, x"06");
+        poke(16#800D#, x"42");  -- WID prefix
+        poke(16#800E#, x"A9");  -- LDA #imm32
+        poke(16#800F#, x"07");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"00");
+        poke(16#8013#, x"02");  -- EXT prefix
+        poke(16#8014#, x"C8");  -- I2F.S
+        poke(16#8015#, x"02");  -- EXT prefix
+        poke(16#8016#, x"B3");  -- STF F0 abs
+        poke(16#8017#, x"50");
+        poke(16#8018#, x"06");
+        poke(16#8019#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(560);
+        
+        check_mem(16#0640#, x"05", "F2I.S A low byte");
+        check_mem(16#0650#, x"00", "I2F.S byte0");
+        check_mem(16#0651#, x"00", "I2F.S byte1");
+        check_mem(16#0652#, x"E0", "I2F.S byte2");
+        check_mem(16#0653#, x"40", "I2F.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100C: RSET LDF/STF dp (register window)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100C: RSET LDF/STF dp";
+        
+        -- Program: set M=32, RSET, write R0/R1, LDF0 dp $00, STF0 dp $08,
+        --          LDA $08 -> STA $0700, LDA $0C -> STA $0704, BRK
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"30");  -- RSET
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"44");
+        poke(16#8008#, x"33");
+        poke(16#8009#, x"22");
+        poke(16#800A#, x"11");
+        poke(16#800B#, x"85");  -- STA dp
+        poke(16#800C#, x"00");  -- R0
+        poke(16#800D#, x"A9");  -- LDA #
+        poke(16#800E#, x"88");
+        poke(16#800F#, x"77");
+        poke(16#8010#, x"66");
+        poke(16#8011#, x"55");
+        poke(16#8012#, x"85");  -- STA dp
+        poke(16#8013#, x"01");  -- R1
+        poke(16#8014#, x"02");  -- EXT prefix
+        poke(16#8015#, x"B0");  -- LDF0 dp
+        poke(16#8016#, x"00");
+        poke(16#8017#, x"02");  -- EXT prefix
+        poke(16#8018#, x"B2");  -- STF0 dp
+        poke(16#8019#, x"08");  -- R2/R3
+        poke(16#801A#, x"A5");  -- LDA dp
+        poke(16#801B#, x"08");  -- R2
+        poke(16#801C#, x"8D");  -- STA abs
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"07");
+        poke(16#801F#, x"A5");  -- LDA dp
+        poke(16#8020#, x"09");  -- R9
+        poke(16#8021#, x"8D");  -- STA abs
+        poke(16#8022#, x"04");
+        poke(16#8023#, x"07");
+        poke(16#8024#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(600);
+        
+        check_mem(16#0700#, x"44", "RSET LDF/STF low byte0");
+        check_mem(16#0701#, x"33", "RSET LDF/STF low byte1");
+        check_mem(16#0702#, x"22", "RSET LDF/STF low byte2");
+        check_mem(16#0703#, x"11", "RSET LDF/STF low byte3");
+        check_mem(16#0704#, x"88", "RSET LDF/STF high byte0");
+        check_mem(16#0705#, x"77", "RSET LDF/STF high byte1");
+        check_mem(16#0706#, x"66", "RSET LDF/STF high byte2");
+        check_mem(16#0707#, x"55", "RSET LDF/STF high byte3");
+
+        -----------------------------------------------------------------------
         -- TEST 100: TRAP vector + RTI
         -----------------------------------------------------------------------
         report "";

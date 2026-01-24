@@ -7,6 +7,7 @@
 library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
+use IEEE.float_pkg.all;
 library work;
 use work.M65832_pkg.all;
 
@@ -223,6 +224,10 @@ architecture rtl of M65832_Core is
     signal ext_sb, ext_svbr, ext_sd             : std_logic;
     signal ext_lea, ext_trap                    : std_logic;
     signal ext_tta, ext_tat                     : std_logic;
+    signal ext_fpu                             : std_logic;
+    signal ext_ldf, ext_stf                    : std_logic;
+    signal f_reg_sel                           : std_logic_vector(1 downto 0);
+    signal ext_fpu_trap                        : std_logic;
     
     -- Register window (DP-as-registers)
     signal rw_addr1    : std_logic_vector(5 downto 0);
@@ -256,6 +261,22 @@ architecture rtl of M65832_Core is
     signal ext_flag_n       : std_logic;
     signal ext_flag_v       : std_logic;
     signal ext_flag_load    : std_logic;
+
+    -- FPU coprocessor registers (64-bit)
+    signal f0_reg           : std_logic_vector(63 downto 0);
+    signal f1_reg           : std_logic_vector(63 downto 0);
+    signal f2_reg           : std_logic_vector(63 downto 0);
+    signal fpu_result       : std_logic_vector(63 downto 0);
+    signal fpu_int_result   : std_logic_vector(31 downto 0);
+    signal fpu_write_f0     : std_logic;
+    signal fpu_write_a      : std_logic;
+    signal fpu_flag_z       : std_logic;
+    signal fpu_flag_n       : std_logic;
+    signal fpu_flag_v       : std_logic;
+    signal fpu_flag_c       : std_logic;
+    signal fpu_flag_load    : std_logic;
+    signal fpu_flag_c_load  : std_logic;
+    signal f_stq_high_reg   : std_logic;
     
     signal stack_is_pull    : std_logic;
     signal stack_width      : std_logic_vector(1 downto 0);
@@ -589,6 +610,7 @@ begin
             ldq_low_buffer <= (others => '0');
             ldq_high_phase <= '0';
             stq_high_reg <= '0';
+            f_stq_high_reg <= '0';
             int_in_progress <= '0';
             int_step <= (others => '0');
             int_vector_addr <= (others => '0');
@@ -737,7 +759,7 @@ begin
                                 end if;
                                 if R_mode = '1' then
                                     -- DP-as-registers: use reg window instead of memory
-                                    if ext_ldq = '1' then
+                                    if ext_ldq = '1' or ext_ldf = '1' then
                                         data_buffer <= rw_data1;
                                         ldq_low_buffer <= rw_data1;
                                         ldq_high_buffer <= rw_data2;
@@ -745,6 +767,9 @@ begin
                                         state <= ST_EXECUTE;
                                     elsif ext_stq = '1' then
                                         stq_high_reg <= '1';
+                                        state <= ST_EXECUTE;
+                                    elsif ext_stf = '1' then
+                                        f_stq_high_reg <= '1';
                                         state <= ST_EXECUTE;
                                     elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                         state <= ST_FETCH;
@@ -759,7 +784,7 @@ begin
                                 elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                     -- Store operation
                                     state <= ST_WRITE;
-                                elsif ext_stq = '1' then
+                                elsif ext_stq = '1' or ext_stf = '1' then
                                     data_byte_count <= (others => '0');
                                     ldq_high_phase <= '0';
                                     state <= ST_WRITE;
@@ -767,7 +792,7 @@ begin
                                     -- STX/STY
                                     state <= ST_WRITE;
                                 else
-                                    if ext_ldq = '1' then
+                                    if ext_ldq = '1' or ext_ldf = '1' then
                                         data_byte_count <= (others => '0');
                                         ldq_high_phase <= '0';
                                     end if;
@@ -899,13 +924,13 @@ begin
                                         state <= ST_EXECUTE;
                                     elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                         state <= ST_WRITE;
-                                    elsif ext_stq = '1' then
+                                    elsif ext_stq = '1' or ext_stf = '1' then
                                         data_byte_count <= (others => '0');
                                         state <= ST_WRITE;
                                     elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                         state <= ST_WRITE;
                                     else
-                                        if ext_ldq = '1' then
+                                        if ext_ldq = '1' or ext_ldf = '1' then
                                             data_byte_count <= (others => '0');
                                             ldq_high_phase <= '0';
                                         end if;
@@ -1037,7 +1062,7 @@ begin
                                 state <= ST_EXECUTE;
                             elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                 state <= ST_WRITE;
-                            elsif ext_stq = '1' then
+                            elsif ext_stq = '1' or ext_stf = '1' then
                                 state <= ST_WRITE;
                             elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                 state <= ST_WRITE;
@@ -1085,7 +1110,7 @@ begin
                         
                     when ST_READ =>
                         -- Read data byte
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
                                     when "00" => data_buffer(7 downto 0) <= DATA_IN;
@@ -1110,7 +1135,7 @@ begin
                         data_byte_count <= data_byte_count + 1;
                         
                         -- Check if we need more bytes based on width
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             state <= ST_READ2;
                         elsif read_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_EXECUTE;
@@ -1121,7 +1146,7 @@ begin
                         end if;
                         
                     when ST_READ2 =>
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
                                     when "00" => data_buffer(7 downto 0) <= DATA_IN;
@@ -1143,7 +1168,7 @@ begin
                         data_byte_count <= data_byte_count + 1;
                         if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
                             state <= ST_FETCH;
-                        elsif ext_ldq = '1' then
+                        elsif ext_ldq = '1' or ext_ldf = '1' then
                             state <= ST_READ3;
                         elsif read_width = WIDTH_16 then
                             state <= ST_EXECUTE;
@@ -1152,7 +1177,7 @@ begin
                         end if;
                         
                     when ST_READ3 =>
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
                                     when "00" => data_buffer(7 downto 0) <= DATA_IN;
@@ -1175,7 +1200,7 @@ begin
                         state <= ST_READ4;
                         
                     when ST_READ4 =>
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
                                     when "00" => data_buffer(7 downto 0) <= DATA_IN;
@@ -1194,7 +1219,7 @@ begin
                         else
                             data_buffer(31 downto 24) <= DATA_IN;
                         end if;
-                        if ext_ldq = '1' then
+                        if ext_ldq = '1' or ext_ldf = '1' then
                             if data_byte_count = "011" and ldq_high_phase = '0' then
                                 ldq_high_phase <= '1';
                                 data_byte_count <= (others => '0');
@@ -1215,7 +1240,10 @@ begin
                         
                     when ST_EXECUTE =>
                         -- Execute instruction
-                        if stq_high_reg = '1' then
+                        if f_stq_high_reg = '1' then
+                            f_stq_high_reg <= '0';
+                            state <= ST_FETCH;
+                        elsif stq_high_reg = '1' then
                             stq_high_reg <= '0';
                             state <= ST_FETCH;
                         elsif ext_lli = '1' then
@@ -1233,6 +1261,14 @@ begin
                             else
                                 int_vector_addr <= x"0000" & VEC_BRK_N;
                             end if;
+                            state <= ST_PUSH;
+                        elsif ext_fpu_trap = '1' then
+                            int_in_progress <= '1';
+                            int_step <= (others => '0');
+                            int_push_reg <= PC_reg;
+                            int_push_width <= WIDTH_32;
+                            data_byte_count <= (others => '0');
+                            int_vector_addr <= std_logic_vector(unsigned(VEC_SYSCALL) + (resize(unsigned(IR_EXT), 32) sll 2));
                             state <= ST_PUSH;
                         elsif ext_trap = '1' then
                             int_in_progress <= '1';
@@ -1289,7 +1325,7 @@ begin
                     when ST_WRITE =>
                         link_valid <= '0';
                         data_byte_count <= data_byte_count + 1;
-                        if ext_stq = '1' then
+                        if ext_stq = '1' or ext_stf = '1' then
                             state <= ST_WRITE2;
                         elsif write_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_FETCH;
@@ -1301,7 +1337,7 @@ begin
                         
                     when ST_WRITE2 =>
                         data_byte_count <= data_byte_count + 1;
-                        if ext_stq = '1' then
+                        if ext_stq = '1' or ext_stf = '1' then
                             state <= ST_WRITE3;
                         elsif write_width = WIDTH_16 then
                             state <= ST_FETCH;
@@ -1314,7 +1350,7 @@ begin
                         state <= ST_WRITE4;
                         
                     when ST_WRITE4 =>
-                        if ext_stq = '1' then
+                        if ext_stq = '1' or ext_stf = '1' then
                             if data_byte_count = "111" then
                                 state <= ST_FETCH;
                             else
@@ -1540,9 +1576,17 @@ begin
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff, ext_stq)
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, f0_reg, f1_reg, f2_reg, f_reg_sel,
+            IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff,
+            ext_stq, ext_stf)
         variable write_reg : std_logic_vector(31 downto 0);
+        variable f_reg     : std_logic_vector(63 downto 0);
     begin
+        case f_reg_sel is
+            when "00" => f_reg := f0_reg;
+            when "01" => f_reg := f1_reg;
+            when others => f_reg := f2_reg;
+        end case;
         -- Select source register for stores
         if state = ST_PUSH then
             write_reg := stack_write_reg_eff;
@@ -1579,6 +1623,22 @@ begin
                     when "01" => DATA_OUT <= A_reg(15 downto 8);
                     when "10" => DATA_OUT <= A_reg(23 downto 16);
                     when others => DATA_OUT <= A_reg(31 downto 24);
+                end case;
+            end if;
+        elsif ext_stf = '1' then
+            if data_byte_count(2) = '1' then
+                case data_byte_count(1 downto 0) is
+                    when "00" => DATA_OUT <= f_reg(39 downto 32);
+                    when "01" => DATA_OUT <= f_reg(47 downto 40);
+                    when "10" => DATA_OUT <= f_reg(55 downto 48);
+                    when others => DATA_OUT <= f_reg(63 downto 56);
+                end case;
+            else
+                case data_byte_count(1 downto 0) is
+                    when "00" => DATA_OUT <= f_reg(7 downto 0);
+                    when "01" => DATA_OUT <= f_reg(15 downto 8);
+                    when "10" => DATA_OUT <= f_reg(23 downto 16);
+                    when others => DATA_OUT <= f_reg(31 downto 24);
                 end case;
             end if;
         elsif state = ST_PUSH then
@@ -1749,6 +1809,162 @@ begin
             end if;
             ext_result <= std_logic_vector(q_u32);
             ext_remainder <= std_logic_vector(r_u32);
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
+    -- FPU Coprocessor Operations (F0, F1, F2)
+    ---------------------------------------------------------------------------
+
+    process(IR_EXT, ext_fpu, f0_reg, f1_reg, f2_reg, A_reg)
+        variable f1_s, f2_s : float32;
+        variable f1_d, f2_d : float64;
+        variable s_res      : float32;
+        variable d_res      : float64;
+        variable int32_res  : signed(31 downto 0);
+        variable a_int      : integer;
+        variable s_bits     : std_logic_vector(31 downto 0);
+        variable d_bits     : std_logic_vector(63 downto 0);
+    begin
+        fpu_result     <= (others => '0');
+        fpu_int_result <= (others => '0');
+        fpu_write_f0   <= '0';
+        fpu_write_a    <= '0';
+        fpu_flag_load  <= '0';
+        fpu_flag_c_load <= '0';
+        fpu_flag_z     <= '0';
+        fpu_flag_n     <= '0';
+        fpu_flag_v     <= '0';
+        fpu_flag_c     <= '0';
+
+        if ext_fpu = '1' then
+            if IR_EXT(7 downto 4) = x"C" then
+                f1_s := to_float(f1_reg(31 downto 0), 8, 23);
+                f2_s := to_float(f2_reg(31 downto 0), 8, 23);
+                case IR_EXT is
+                    when x"C0" => s_res := f1_s + f2_s;
+                    when x"C1" => s_res := f1_s - f2_s;
+                    when x"C2" => s_res := f1_s * f2_s;
+                    when x"C3" => s_res := f1_s / f2_s;
+                    when x"C4" => s_res := -f1_s;
+                    when x"C5" => s_res := abs(f1_s);
+                    when x"C6" =>
+                        fpu_flag_load <= '1';
+                        fpu_flag_c_load <= '1';
+                        if f1_s = f2_s then
+                            fpu_flag_z <= '1';
+                            fpu_flag_c <= '1';
+                            fpu_flag_n <= '0';
+                        elsif f1_s < f2_s then
+                            fpu_flag_z <= '0';
+                            fpu_flag_c <= '0';
+                            fpu_flag_n <= '1';
+                        else
+                            fpu_flag_z <= '0';
+                            fpu_flag_c <= '1';
+                            fpu_flag_n <= '0';
+                        end if;
+                    when x"C7" =>
+                        int32_res := to_signed(to_integer(f1_s, IEEE.fixed_float_types.round_zero), 32);
+                        fpu_int_result <= std_logic_vector(int32_res);
+                        fpu_write_a <= '1';
+                        fpu_flag_load <= '1';
+                        if int32_res = 0 then
+                            fpu_flag_z <= '1';
+                        end if;
+                        fpu_flag_n <= int32_res(31);
+                    when x"C8" =>
+                        a_int := to_integer(signed(A_reg));
+                        s_res := to_float(a_int, 8, 23);
+                    when others => null;
+                end case;
+
+                if IR_EXT /= x"C6" and IR_EXT /= x"C7" then
+                    s_bits := to_slv(s_res);
+                    fpu_result(31 downto 0) <= s_bits;
+                    fpu_write_f0 <= '1';
+                    fpu_flag_load <= '1';
+                    if s_bits = x"00000000" then
+                        fpu_flag_z <= '1';
+                    end if;
+                    fpu_flag_n <= s_bits(31);
+                end if;
+
+            elsif IR_EXT(7 downto 4) = x"D" then
+                f1_d := to_float(f1_reg, 11, 52);
+                f2_d := to_float(f2_reg, 11, 52);
+                case IR_EXT is
+                    when x"D0" => d_res := f1_d + f2_d;
+                    when x"D1" => d_res := f1_d - f2_d;
+                    when x"D2" => d_res := f1_d * f2_d;
+                    when x"D3" => d_res := f1_d / f2_d;
+                    when x"D4" => d_res := -f1_d;
+                    when x"D5" => d_res := abs(f1_d);
+                    when x"D6" =>
+                        fpu_flag_load <= '1';
+                        fpu_flag_c_load <= '1';
+                        if f1_d = f2_d then
+                            fpu_flag_z <= '1';
+                            fpu_flag_c <= '1';
+                            fpu_flag_n <= '0';
+                        elsif f1_d < f2_d then
+                            fpu_flag_z <= '0';
+                            fpu_flag_c <= '0';
+                            fpu_flag_n <= '1';
+                        else
+                            fpu_flag_z <= '0';
+                            fpu_flag_c <= '1';
+                            fpu_flag_n <= '0';
+                        end if;
+                    when x"D7" =>
+                        int32_res := to_signed(to_integer(f1_d, IEEE.fixed_float_types.round_zero), 32);
+                        fpu_int_result <= std_logic_vector(int32_res);
+                        fpu_write_a <= '1';
+                        fpu_flag_load <= '1';
+                        if int32_res = 0 then
+                            fpu_flag_z <= '1';
+                        end if;
+                        fpu_flag_n <= int32_res(31);
+                    when x"D8" =>
+                        a_int := to_integer(signed(A_reg));
+                        d_res := to_float(a_int, 11, 52);
+                    when others => null;
+                end case;
+
+                if IR_EXT /= x"D6" and IR_EXT /= x"D7" then
+                    d_bits := to_slv(d_res);
+                    fpu_result <= d_bits;
+                    fpu_write_f0 <= '1';
+                    fpu_flag_load <= '1';
+                    if d_bits = x"0000000000000000" then
+                        fpu_flag_z <= '1';
+                    end if;
+                    fpu_flag_n <= d_bits(63);
+                end if;
+            end if;
+        end if;
+    end process;
+
+    process(CLK, RST_N)
+    begin
+        if RST_N = '0' then
+            f0_reg <= (others => '0');
+            f1_reg <= (others => '0');
+            f2_reg <= (others => '0');
+        elsif rising_edge(CLK) then
+            if CE = '1' and RDY = '1' then
+                if state = ST_EXECUTE then
+                    if ext_ldf = '1' then
+                        case f_reg_sel is
+                            when "00" => f0_reg <= ldq_high_buffer & ldq_low_buffer;
+                            when "01" => f1_reg <= ldq_high_buffer & ldq_low_buffer;
+                            when others => f2_reg <= ldq_high_buffer & ldq_low_buffer;
+                        end case;
+                    elsif fpu_write_f0 = '1' then
+                        f0_reg <= fpu_result;
+                    end if;
+                end if;
+            end if;
         end if;
     end process;
     
@@ -1952,6 +2168,7 @@ begin
                                (stack_is_pull = '1' and IR = x"68"))
             else ldq_low_buffer when (ext_ldq = '1')
             else T_reg when (ext_tta = '1')
+            else fpu_int_result when (fpu_write_a = '1')
             else X_reg when (IS_TRANSFER = '1' and REG_SRC = "001" and REG_DST = "000")  -- TXA
             else Y_reg when (IS_TRANSFER = '1' and REG_SRC = "010" and REG_DST = "000")  -- TYA
             else eff_addr when (ext_lea = '1')
@@ -1966,6 +2183,7 @@ begin
                (IS_TRANSFER = '1' and REG_DST = "000") or  -- Transfers to A (TXA, TYA)
                ext_lli = '1' or ext_lea = '1' or ext_mul = '1' or ext_mulu = '1' or
                ext_div = '1' or ext_divu = '1' or ext_tta = '1' or ext_ldq = '1' or
+               fpu_write_a = '1' or
                (stack_is_pull = '1' and IR = x"68") or
                (state = ST_BM_WRITE and block_active = '1'))
               else '0';
@@ -2041,10 +2259,10 @@ begin
     rw_addr1 <= dp_reg_index_next when (state = ST_ADDR1 and
                                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
-    rw_addr2 <= dp_reg_index_next_plus1 when (ext_ldq = '1' and R_mode = '1' and state = ST_ADDR1 and
+    rw_addr2 <= dp_reg_index_next_plus1 when ((ext_ldq = '1' or ext_ldf = '1') and R_mode = '1' and state = ST_ADDR1 and
                                               (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else (others => '0');
-    rw_waddr <= dp_reg_index_next_plus1 when (stq_high_reg = '1' and state = ST_EXECUTE)
+    rw_waddr <= dp_reg_index_next_plus1 when ((stq_high_reg = '1' or f_stq_high_reg = '1') and state = ST_EXECUTE)
                 else dp_reg_index_next when (state = ST_ADDR1 and
                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
@@ -2055,9 +2273,21 @@ begin
                 M_width;
     rw_byte_sel <= "00";
     
-    process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg)
+    process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
+            f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg)
+        variable f_reg : std_logic_vector(63 downto 0);
     begin
-        if stq_high_reg = '1' then
+        case f_reg_sel is
+            when "00" => f_reg := f0_reg;
+            when "01" => f_reg := f1_reg;
+            when others => f_reg := f2_reg;
+        end case;
+
+        if f_stq_high_reg = '1' then
+            rw_wdata <= f_reg(63 downto 32);
+        elsif ext_stf = '1' then
+            rw_wdata <= f_reg(31 downto 0);
+        elsif stq_high_reg = '1' then
             rw_wdata <= T_reg;
         elsif IS_ALU_OP = '1' and ALU_OP = "100" then
             rw_wdata <= A_reg;
@@ -2078,16 +2308,21 @@ begin
                        ((state = ST_ADDR1 and (IS_ALU_OP = '1' and ALU_OP = "100")) or
                         (state = ST_ADDR1 and (IS_RMW_OP = '1' and RMW_OP = "100")) or
                         (state = ST_ADDR1 and ext_stq = '1') or
+                        (state = ST_ADDR1 and ext_stf = '1') or
                         (stq_high_reg = '1' and state = ST_EXECUTE) or
+                        (f_stq_high_reg = '1' and state = ST_EXECUTE) or
                         (state = ST_EXECUTE and IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" and
                          (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))))
              else '0';
 
-    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index)
+    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index, R_mode, ext_ldf, ext_stf)
     begin
         dp_reg_index_next <= dp_reg_index;
         if state = ST_ADDR1 and (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") then
-            if ADDR_MODE = "0011" then
+            if R_mode = '1' and (ext_ldf = '1' or ext_stf = '1') then
+                -- 16-byte alignment for F register pairs in R-mode (Rk/Rk+1)
+                dp_reg_index_next <= DATA_IN(5 downto 2) & "00";
+            elsif ADDR_MODE = "0011" then
                 dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)), 6));
             elsif ADDR_MODE = "0100" then
                 dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)), 6));
@@ -2165,7 +2400,8 @@ begin
     ---------------------------------------------------------------------------
     
     -- Carry flag input: ALU carry for arithmetic, or explicit set/clear for CLC/SEC
-    flag_c_in <= '0' when (IS_FLAG_OP = '1' and IR = x"18") else  -- CLC
+    flag_c_in <= fpu_flag_c when fpu_flag_c_load = '1' else
+                 '0' when (IS_FLAG_OP = '1' and IR = x"18") else  -- CLC
                  '1' when (IS_FLAG_OP = '1' and IR = x"38") else  -- SEC
                  ALU_CO;
     
@@ -2176,7 +2412,8 @@ begin
     
     -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
     flag_c_load <= '1' when state = ST_EXECUTE and 
-                   ((IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
+                   (fpu_flag_c_load = '1' or
+                    (IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
                     (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
                     (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 
                                           RMW_OP = "010" or RMW_OP = "011")))  -- ASL, ROL, LSR, ROR
@@ -2187,12 +2424,16 @@ begin
                    else '0';
     
     -- N, Z, V flags load: most ALU operations and RMW operations
-    flag_z_in <= ext_flag_z when ext_flag_load = '1' else ALU_ZO;
-    flag_n_in <= ext_flag_n when ext_flag_load = '1' else ALU_SO;
-    flag_v_in <= ext_flag_v when ext_flag_load = '1' else ALU_VO;
+    flag_z_in <= fpu_flag_z when fpu_flag_load = '1' else
+                 ext_flag_z when ext_flag_load = '1' else ALU_ZO;
+    flag_n_in <= fpu_flag_n when fpu_flag_load = '1' else
+                 ext_flag_n when ext_flag_load = '1' else ALU_SO;
+    flag_v_in <= fpu_flag_v when fpu_flag_load = '1' else
+                 ext_flag_v when ext_flag_load = '1' else ALU_VO;
     
     flag_nzv_load <= '1' when state = ST_EXECUTE and
-                     (ext_flag_load = '1' or
+                     (fpu_flag_load = '1' or
+                      ext_flag_load = '1' or
                       (IS_ALU_OP = '1' and ALU_OP /= "100") or  -- All ALU except STA
                       (IS_RMW_OP = '1' and RMW_OP /= "100"))    -- All RMW except STX/STY
                      else '0';
@@ -2250,6 +2491,17 @@ begin
     ext_fence   <= '1' when (is_extended = '1' and IR_EXT = x"50") else '0';
     ext_fencer  <= '1' when (is_extended = '1' and IR_EXT = x"51") else '0';
     ext_fencew  <= '1' when (is_extended = '1' and IR_EXT = x"52") else '0';
+    ext_fpu <= '1' when (is_extended = '1' and
+                         (IR_EXT = x"C0" or IR_EXT = x"C1" or IR_EXT = x"C2" or IR_EXT = x"C3" or
+                          IR_EXT = x"C4" or IR_EXT = x"C5" or IR_EXT = x"C6" or IR_EXT = x"C7" or
+                          IR_EXT = x"C8" or IR_EXT = x"D0" or IR_EXT = x"D1" or IR_EXT = x"D2" or
+                          IR_EXT = x"D3" or IR_EXT = x"D4" or IR_EXT = x"D5" or IR_EXT = x"D6" or
+                          IR_EXT = x"D7" or IR_EXT = x"D8")) else '0';
+    ext_fpu_trap <= '1' when (is_extended = '1' and
+                              (IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
+                               IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
+                               IR_EXT = x"E1" or IR_EXT = x"E2" or IR_EXT = x"E3" or IR_EXT = x"E4" or
+                               IR_EXT = x"E5" or IR_EXT = x"E6")) else '0';
     
     ext_repe <= '1' when (is_extended = '1' and IR_EXT = x"60") else '0';
     ext_sepe <= '1' when (is_extended = '1' and IR_EXT = x"61") else '0';
@@ -2263,6 +2515,14 @@ begin
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"87") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"88" or IR_EXT = x"89")) else '0';
     ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"8A" or IR_EXT = x"8B")) else '0';
+    ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or
+                                         IR_EXT = x"B5" or IR_EXT = x"B8" or IR_EXT = x"B9")) else '0';
+    ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3" or IR_EXT = x"B6" or
+                                         IR_EXT = x"B7" or IR_EXT = x"BA" or IR_EXT = x"BB")) else '0';
+    f_reg_sel <= "00" when (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B2" or IR_EXT = x"B3") else
+                 "01" when (IR_EXT = x"B4" or IR_EXT = x"B5" or IR_EXT = x"B6" or IR_EXT = x"B7") else
+                 "10" when (IR_EXT = x"B8" or IR_EXT = x"B9" or IR_EXT = x"BA" or IR_EXT = x"BB") else
+                 "00";
     
     stack_is_pull <= '1' when (IS_STACK = '1' and
                                (IR = x"28" or IR = x"68" or IR = x"FA" or IR = x"7A" or
