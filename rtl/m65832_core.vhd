@@ -229,6 +229,25 @@ architecture rtl of M65832_Core is
     signal f_reg_sel                           : std_logic_vector(1 downto 0);
     signal ext_fpu_trap                        : std_logic;
     
+    -- MMU control registers (MMIO)
+    signal mmu_mmucr       : std_logic_vector(31 downto 0);
+    signal mmu_asid        : std_logic_vector(15 downto 0);
+    signal mmu_faultva     : std_logic_vector(31 downto 0);
+    signal mmu_ptbr        : std_logic_vector(64 downto 0);
+    signal mmu_tlbinval    : std_logic_vector(31 downto 0);
+    signal mmu_asid_inval  : std_logic_vector(15 downto 0);
+    signal mmu_tlb_flush   : std_logic;
+    signal mmu_tlb_flush_asid : std_logic;
+    signal mmu_tlb_flush_va : std_logic;
+    
+    signal mmio_read_hit   : std_logic;
+    signal mmio_read_data  : std_logic_vector(7 downto 0);
+    signal data_in_read    : std_logic_vector(7 downto 0);
+    signal mmio_addr_read  : std_logic_vector(31 downto 0);
+    signal mmio_addr_write : std_logic_vector(31 downto 0);
+    signal mmio_addr_read_lo  : std_logic_vector(15 downto 0);
+    signal mmio_addr_write_lo : std_logic_vector(15 downto 0);
+    
     -- Register window (DP-as-registers)
     signal rw_addr1    : std_logic_vector(5 downto 0);
     signal rw_data1    : std_logic_vector(31 downto 0);
@@ -623,6 +642,15 @@ begin
             block_dir <= '0';
             block_src_bank <= (others => '0');
             block_dst_bank <= (others => '0');
+            mmu_mmucr <= (others => '0');
+            mmu_asid <= (others => '0');
+            mmu_faultva <= (others => '0');
+            mmu_ptbr <= (others => '0');
+            mmu_tlbinval <= (others => '0');
+            mmu_asid_inval <= (others => '0');
+            mmu_tlb_flush <= '0';
+            mmu_tlb_flush_asid <= '0';
+            mmu_tlb_flush_va <= '0';
         elsif rising_edge(CLK) then
             if CE = '1' and RDY = '1' then
                 case state is
@@ -687,6 +715,7 @@ begin
                         else
                             wid_active <= wid_prefix;
                             wid_prefix <= '0';
+                            data_byte_count <= (others => '0');
                             
                             -- Determine next state based on instruction
                             if IS_WAI = '1' then
@@ -1113,24 +1142,24 @@ begin
                         if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
-                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => data_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => data_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => data_buffer(23 downto 16) <= data_in_read;
+                                    when others => data_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             else
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
-                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => ldq_low_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= data_in_read;
+                                    when others => ldq_low_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             end if;
                         else
-                            data_buffer(7 downto 0) <= DATA_IN;
+                            data_buffer(7 downto 0) <= data_in_read;
                         end if;
                         if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
-                            DR <= DATA_IN;  -- latch indirect low byte
+                            DR <= data_in_read;  -- latch indirect low byte
                         end if;
                         data_byte_count <= data_byte_count + 1;
                         
@@ -1149,21 +1178,21 @@ begin
                         if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
-                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => data_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => data_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => data_buffer(23 downto 16) <= data_in_read;
+                                    when others => data_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             else
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
-                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => ldq_low_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= data_in_read;
+                                    when others => ldq_low_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             end if;
                         else
-                            data_buffer(15 downto 8) <= DATA_IN;
+                            data_buffer(15 downto 8) <= data_in_read;
                         end if;
                         data_byte_count <= data_byte_count + 1;
                         if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
@@ -1180,21 +1209,21 @@ begin
                         if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
-                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => data_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => data_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => data_buffer(23 downto 16) <= data_in_read;
+                                    when others => data_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             else
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
-                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => ldq_low_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= data_in_read;
+                                    when others => ldq_low_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             end if;
                         else
-                            data_buffer(23 downto 16) <= DATA_IN;
+                            data_buffer(23 downto 16) <= data_in_read;
                         end if;
                         data_byte_count <= data_byte_count + 1;
                         state <= ST_READ4;
@@ -1203,21 +1232,21 @@ begin
                         if ext_ldq = '1' or ext_ldf = '1' then
                             if ldq_high_phase = '1' then
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
-                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => data_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => data_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => data_buffer(23 downto 16) <= data_in_read;
+                                    when others => data_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             else
                                 case data_byte_count(1 downto 0) is
-                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
-                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
-                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
-                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                    when "00" => ldq_low_buffer(7 downto 0) <= data_in_read;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= data_in_read;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= data_in_read;
+                                    when others => ldq_low_buffer(31 downto 24) <= data_in_read;
                                 end case;
                             end if;
                         else
-                            data_buffer(31 downto 24) <= DATA_IN;
+                            data_buffer(31 downto 24) <= data_in_read;
                         end if;
                         if ext_ldq = '1' or ext_ldf = '1' then
                             if data_byte_count = "011" and ldq_high_phase = '0' then
@@ -1567,6 +1596,115 @@ begin
     end process;
     
     ---------------------------------------------------------------------------
+    -- MMIO Read Decode (MMU control registers)
+    ---------------------------------------------------------------------------
+    
+    mmio_addr_read <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+    mmio_addr_read_lo <= mmio_addr_read(15 downto 0);
+    
+    process(state, ADDR_MODE, mmio_addr_read, mmu_mmucr, mmu_asid, mmu_faultva, mmu_ptbr, mmu_tlbinval, mmu_asid_inval)
+    begin
+        mmio_read_hit <= '0';
+        mmio_read_data <= (others => '0');
+        
+        if (state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
+           ADDR_MODE /= "0001" then
+            case mmio_addr_read_lo is
+                when MMIO_MMUCR(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_mmucr(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_mmucr(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_mmucr(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_mmucr(31 downto 24);
+                
+                when MMIO_ASID(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_asid(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_asid(15 downto 8);
+                
+                when MMIO_ASIDINVAL(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_asid_inval(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_asid_inval(15 downto 8);
+                
+                when MMIO_FAULTVA(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_faultva(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_faultva(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_faultva(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_faultva(31 downto 24);
+                
+                when MMIO_PTBR_LO(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(31 downto 24);
+                
+                when MMIO_PTBR_HI(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(39 downto 32);
+                when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(47 downto 40);
+                when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(55 downto 48);
+                when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_ptbr(63 downto 56);
+                
+                when MMIO_TLBINVAL(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_tlbinval(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_tlbinval(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_tlbinval(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= mmu_tlbinval(31 downto 24);
+                
+                when others =>
+                    null;
+            end case;
+        end if;
+    end process;
+    
+    process(mmio_read_hit, mmio_read_data, DATA_IN)
+    begin
+        if mmio_read_hit = '1' then
+            data_in_read <= mmio_read_data;
+        else
+            data_in_read <= DATA_IN;
+        end if;
+    end process;
+    
+    ---------------------------------------------------------------------------
     -- Write Enable and Data Output
     ---------------------------------------------------------------------------
     
@@ -1667,6 +1805,85 @@ begin
                 when "011" => DATA_OUT <= write_reg(31 downto 24);
                 when others => DATA_OUT <= write_reg(7 downto 0);
             end case;
+        end if;
+    end process;
+    
+    ---------------------------------------------------------------------------
+    -- MMU MMIO Write Handling
+    ---------------------------------------------------------------------------
+    
+    mmio_addr_write <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
+    mmio_addr_write_lo <= mmio_addr_write(15 downto 0);
+    
+    process(CLK, RST_N)
+    begin
+        if RST_N = '0' then
+            null;
+        elsif rising_edge(CLK) then
+            if CE = '1' and RDY = '1' then
+                mmu_tlb_flush <= '0';
+                mmu_tlb_flush_asid <= '0';
+                mmu_tlb_flush_va <= '0';
+                
+                if state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4 then
+                    case mmio_addr_write_lo is
+                        when MMIO_MMUCR(15 downto 0) =>
+                            mmu_mmucr(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
+                            mmu_mmucr(15 downto 8) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
+                            mmu_mmucr(23 downto 16) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
+                            mmu_mmucr(31 downto 24) <= DATA_OUT;
+                        
+                        when MMIO_ASID(15 downto 0) =>
+                            mmu_asid(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
+                            mmu_asid(15 downto 8) <= DATA_OUT;
+                        
+                        when MMIO_ASIDINVAL(15 downto 0) =>
+                            mmu_asid_inval(7 downto 0) <= DATA_OUT;
+                            mmu_tlb_flush_asid <= '1';
+                        when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
+                            mmu_asid_inval(15 downto 8) <= DATA_OUT;
+                            mmu_tlb_flush_asid <= '1';
+                        
+                        when MMIO_TLBINVAL(15 downto 0) =>
+                            mmu_tlbinval(7 downto 0) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
+                            mmu_tlbinval(15 downto 8) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
+                            mmu_tlbinval(23 downto 16) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
+                            mmu_tlbinval(31 downto 24) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        
+                        when MMIO_PTBR_LO(15 downto 0) =>
+                            mmu_ptbr(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
+                            mmu_ptbr(15 downto 8) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
+                            mmu_ptbr(23 downto 16) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
+                            mmu_ptbr(31 downto 24) <= DATA_OUT;
+                        
+                        when MMIO_PTBR_HI(15 downto 0) =>
+                            mmu_ptbr(39 downto 32) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
+                            mmu_ptbr(47 downto 40) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
+                            mmu_ptbr(55 downto 48) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
+                            mmu_ptbr(63 downto 56) <= DATA_OUT;
+                        
+                        when others =>
+                            null;
+                    end case;
+                end if;
+            end if;
         end if;
     end process;
     

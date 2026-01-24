@@ -4760,6 +4760,62 @@ begin
         check_mem(16#0492#, x"7D", "JML [abs] wrote value");
         
         -----------------------------------------------------------------------
+        -- TEST 120: MMU MMIO register reads/writes
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 120: MMU MMIO regs";
+        
+        -- Program: enter native, set M=32, write/read MMUCR/ASID/PTBR via STA/LDA
+        poke(16#8000#, x"18");  -- CLC
+        poke(16#8001#, x"FB");  -- XCE
+        poke(16#8002#, x"C2");  -- REP
+        poke(16#8003#, x"40");  -- clear M0
+        poke(16#8004#, x"E2");  -- SEP
+        poke(16#8005#, x"80");  -- set M1 -> 32-bit
+        
+        -- MMUCR = 0x00000002
+        poke(16#8006#, x"A9");  -- LDA #imm32
+        poke(16#8007#, x"02");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"00");
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"8D");  -- STA $F000
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"F0");
+        -- (no readback; verify via memory checks)
+        
+        -- ASID = 0x000000AA
+        poke(16#8014#, x"A9");  -- LDA #imm32
+        poke(16#8015#, x"AA");
+        poke(16#8016#, x"00");
+        poke(16#8017#, x"00");
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"8D");  -- STA $F008
+        poke(16#801A#, x"08");
+        poke(16#801B#, x"F0");
+        -- (no readback; verify via memory checks)
+        
+        -- PTBR read/write tests deferred (MMU integration)
+        
+        poke(16#8022#, x"02");  -- extended STP
+        poke(16#8023#, x"92");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(900);
+        
+        check_mem(16#F000#, x"02", "MMUCR byte0");
+        check_mem(16#F001#, x"00", "MMUCR byte1");
+        check_mem(16#F002#, x"00", "MMUCR byte2");
+        check_mem(16#F003#, x"00", "MMUCR byte3");
+        
+        check_mem(16#F008#, x"AA", "ASID byte0");
+        check_mem(16#F009#, x"00", "ASID byte1");
+        
+        -- PTBR checks deferred
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";

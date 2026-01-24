@@ -203,6 +203,18 @@ package M65832_pkg is
     constant VEC_SYSCALL : std_logic_vector(31 downto 0) := x"0000FFD4";
     
     ---------------------------------------------------------------------------
+    -- MMU Control Registers (MMIO)
+    ---------------------------------------------------------------------------
+    
+    constant MMIO_MMUCR      : std_logic_vector(31 downto 0) := x"FFFFF000";
+    constant MMIO_TLBINVAL   : std_logic_vector(31 downto 0) := x"FFFFF004";
+    constant MMIO_ASID       : std_logic_vector(31 downto 0) := x"FFFFF008";
+    constant MMIO_ASIDINVAL  : std_logic_vector(31 downto 0) := x"FFFFF00C";
+    constant MMIO_FAULTVA    : std_logic_vector(31 downto 0) := x"FFFFF010";
+    constant MMIO_PTBR_LO    : std_logic_vector(31 downto 0) := x"FFFFF014";
+    constant MMIO_PTBR_HI    : std_logic_vector(31 downto 0) := x"FFFFF018";
+    
+    ---------------------------------------------------------------------------
     -- Helper Functions
     ---------------------------------------------------------------------------
     

@@ -261,6 +261,8 @@ $02 $A3 [abs16]    LEA abs,X      A = B + abs16 + X
 
 The WID prefix extends the following operand to 32-bits:
 
+**Note**: Use WID only when a 32-bit immediate or 32-bit absolute address is required. Emitting WID unnecessarily can misalign the instruction stream and lead to unexpected behavior.
+
 ```
 $42 $A9 [imm32]    WID LDA #imm   Load A with 32-bit immediate
 $42 $A2 [imm32]    WID LDX #imm   Load X with 32-bit immediate  
