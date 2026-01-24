@@ -43,9 +43,11 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 
 GHDL testbenches:
 
-- Full core testbench:
+- Core/MMU suite (fast iteration): `tb/run_core_tests.sh`
+- Coprocessor suite (fast iteration): `tb/run_coprocessor_tests.sh`
+- Manual core testbench:
   `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_core.vhd && ghdl -e --std=08 tb_M65832_Core && ghdl -r --std=08 tb_M65832_Core --stop-time=1ms`
-- MMU-only testbench (faster iteration):
+- Manual MMU-only testbench:
   `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_mmu.vhd && ghdl -e --std=08 tb_M65832_MMU && ghdl -r --std=08 tb_M65832_MMU --stop-time=1ms`
 
 ## Architecture Highlights
@@ -81,7 +83,7 @@ LDA $1234           ; Loads from $90001234 (3-byte instruction!)
 
 ### Classic Coprocessor: Cycle-Accurate 6502 Emulation
 
-The M65832 includes a unique **three-core interleaved architecture** that enables cycle-accurate execution of classic 6502 games while running Linux:
+The M65832 includes a **two-core interleaved architecture** that enables cycle-accurate execution of classic 6502 games while running Linux:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -93,16 +95,16 @@ The M65832 includes a unique **three-core interleaved architecture** that enable
 │  │   Generates tick every ~49 cycles for exact 6502 timing     │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              │                                      │
-│        ┌─────────────────────┼─────────────────────┐               │
-│        ▼                     ▼                     ▼               │
-│  ┌──────────┐         ┌──────────┐         ┌──────────┐           │
-│  │ M65832   │         │  6502    │         │ Servicer │           │
-│  │ Main Core│         │Game Core │         │   Core   │           │
-│  │ (Linux)  │         │(Classic) │         │  (I/O)   │           │
-│  │  ~90%    │         │   ~2%    │         │ on-demand│           │
-│  └──────────┘         └──────────┘         └──────────┘           │
-│       │                     │                     │                │
-│       └─────────────────────┴─────────────────────┘                │
+│           ┌──────────────────┼──────────────────┐                  │
+│           ▼                  ▼                  │                  │
+│     ┌──────────┐       ┌──────────┐             │                  │
+│     │ M65832   │       │  6502    │             │                  │
+│     │ Main Core│       │Game Core │             │                  │
+│     │ (Linux)  │       │(Classic) │             │                  │
+│     │  ~90%    │       │   ~2%    │             │                  │
+│     └──────────┘       └──────────┘             │                  │
+│          │                  │                   │                  │
+│          └──────────────────┴───────────────────┘                  │
 │                              │                                      │
 │                    ┌─────────▼─────────┐                           │
 │                    │   Shared Memory   │                           │
@@ -111,7 +113,7 @@ The M65832 includes a unique **three-core interleaved architecture** that enable
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Why three cores?**
+**Why two cores?**
 
 Classic games like those for C64, NES, and Atari rely on *exact* cycle timing:
 - **Raster racing**: Code that changes graphics mid-scanline
@@ -122,9 +124,9 @@ Software emulation can't match this while Linux handles interrupts. The solution
 
 **How it works:**
 
-1. **M65832 Main Core** (~90% of cycles): Runs Linux, apps, and game rendering
+1. **M65832 Main Core** (~90% of cycles): Runs Linux, apps, and device drivers
 2. **6502 Game Core** (~2% of cycles): Executes classic game code at exact original speed
-3. **Servicer Core** (on-demand): Handles I/O reads that need computed responses
+3. **MMIO handling**: Uses main CPU IRQ handlers for computed reads when needed
 
 The **fractional clock divider** uses Bresenham-style scheduling to generate precise 6502 timing even when the master clock isn't an exact multiple:
 
@@ -137,16 +139,7 @@ The divider alternates 49/48 cycle gaps to maintain
 long-term frequency accuracy within 0.001%
 ```
 
-**Servicer core** has extended instructions for fast I/O:
-
-| Opcode | Mnemonic | Description |
-|--------|----------|-------------|
-| $03 | LDBY | A = beam_y (current scanline) |
-| $13 | LDBX | A = beam_x (position in line) |
-| $43 | BBOX | Z=1 if sprite bounding boxes overlap |
-| $83 | RTS_SVC | Fast return from service routine |
-
-**Shadow registers** capture all classic chip writes with cycle timestamps, letting Linux render the frame accurately while the 6502 runs at real speed.
+**Shadow registers** capture classic chip writes with cycle timestamps, letting Linux render the frame accurately while the 6502 runs at real speed. Computed MMIO reads raise an IRQ to the main core instead of running a dedicated servicer core.
 
 See [Classic Coprocessor](docs/M65832_Classic_Coprocessor.md) for complete details.
 
