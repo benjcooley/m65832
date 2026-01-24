@@ -201,6 +201,18 @@ $02 $88 [dp]       LDQ dp         A:T = [dp..dp+7] (RSET reg window)
 $02 $89 [abs16]    LDQ abs        A:T = [abs..abs+7]
 $02 $8A [dp]       STQ dp         [dp..dp+7] = A:T (RSET reg window)
 $02 $8B [abs16]    STQ abs        [abs..abs+7] = A:T
+$02 $B0 [dp]       LDF0 dp        F0 = [dp..dp+7]
+$02 $B1 [abs16]    LDF0 abs       F0 = [abs..abs+7]
+$02 $B2 [dp]       STF0 dp        [dp..dp+7] = F0
+$02 $B3 [abs16]    STF0 abs       [abs..abs+7] = F0
+$02 $B4 [dp]       LDF1 dp        F1 = [dp..dp+7]
+$02 $B5 [abs16]    LDF1 abs       F1 = [abs..abs+7]
+$02 $B6 [dp]       STF1 dp        [dp..dp+7] = F1
+$02 $B7 [abs16]    STF1 abs       [abs..abs+7] = F1
+$02 $B8 [dp]       LDF2 dp        F2 = [dp..dp+7]
+$02 $B9 [abs16]    LDF2 abs       F2 = [abs..abs+7]
+$02 $BA [dp]       STF2 dp        [dp..dp+7] = F2
+$02 $BB [abs16]    STF2 abs       [abs..abs+7] = F2
 $02 $C0            FADD.S         F0 = F1 + F2 (single-precision)
 $02 $C1            FSUB.S         F0 = F1 - F2
 $02 $C2            FMUL.S         F0 = F1 * F2
@@ -1169,6 +1181,43 @@ XCE             ; E = 0 (native), C = old E
 SEC             ; C = 1
 XCE             ; E = 1 (emulation), C = old E
 ```
+
+### 3.90 LDF/STF - Load/Store Floating-Point Registers (NEW)
+
+**Operation**: Load/store 64-bit F0-F2 registers.
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Direct Page | LDF0 dp | $02 $B0 | 3 | 6+ |
+| Absolute | LDF0 abs | $02 $B1 | 4 | 7+ |
+| Direct Page | STF0 dp | $02 $B2 | 3 | 6+ |
+| Absolute | STF0 abs | $02 $B3 | 4 | 7+ |
+| Direct Page | LDF1 dp | $02 $B4 | 3 | 6+ |
+| Absolute | LDF1 abs | $02 $B5 | 4 | 7+ |
+| Direct Page | STF1 dp | $02 $B6 | 3 | 6+ |
+| Absolute | STF1 abs | $02 $B7 | 4 | 7+ |
+| Direct Page | LDF2 dp | $02 $B8 | 3 | 6+ |
+| Absolute | LDF2 abs | $02 $B9 | 4 | 7+ |
+| Direct Page | STF2 dp | $02 $BA | 3 | 6+ |
+| Absolute | STF2 abs | $02 $BB | 4 | 7+ |
+
+**Flags Affected**: None
+
+**Description**: Moves 64-bit values between memory and the floating-point registers. Single-precision ops use the low 32 bits of F0/F1/F2, while double-precision ops use the full 64 bits.
+
+### 3.91 FPU Operations (NEW)
+
+**Registers**: F0 (destination), F1/F2 (sources)
+
+**Single-precision ops**: use low 32 bits of F registers.
+**Double-precision ops**: use full 64 bits of F registers.
+
+**Flags**:
+- `FCMP.*`: Z = 1 if equal, C = 1 if F1 >= F2, N = 1 if F1 < F2, V = 0
+- `FADD/FSUB/FMUL/FDIV/FNEG/FABS/I2F.*`: Z/N from result, V = 0
+- `F2I.*`: Z/N from integer result
+
+**Note**: Reserved FP opcodes should trap to software emulation for future expansion.
 
 ---
 

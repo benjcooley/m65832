@@ -26,6 +26,7 @@ package M65832_pkg is
     constant VA_WIDTH  : integer := 32;  -- Virtual address width
     constant PA_WIDTH  : integer := 65;  -- Physical address width (via paging)
     constant PAGE_BITS : integer := 12;  -- 4KB pages
+
     
     -- Register window
     constant REG_COUNT : integer := 64;  -- 64 x 32-bit registers in window

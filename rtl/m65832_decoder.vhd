@@ -258,6 +258,12 @@ begin
                 when x"8A" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
                 when x"8B" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
                 
+                -- FPU load/store (64-bit)
+                when x"B0" | x"B2" | x"B4" | x"B6" | x"B8" | x"BA" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDF/STF dp
+                when x"B1" | x"B3" | x"B5" | x"B7" | x"B9" | x"BB" =>
+                    ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDF/STF abs
+                
                 -- WAI/STP (extended)
                 when x"91" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
                 when x"92" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
@@ -271,6 +277,11 @@ begin
                     ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LEA abs
                 when x"A3" =>
                     ADDR_MODE <= "0110"; INSTR_LEN <= "100";  -- LEA abs,X
+                
+                -- FPU coprocessor ops (implied)
+                when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" |
+                     x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
+                    INSTR_LEN <= "010";
                 when others => null;
             end case;
             
