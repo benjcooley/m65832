@@ -1,13 +1,12 @@
 -- M65832 Classic Coprocessor Interleaver
--- Manages cycle-accurate 6502 and servicer core interleaving
+-- Manages cycle-accurate 6502 and main core interleaving
 --
 -- Copyright (c) 2026 M65832 Project
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- This implements the three-core interleaved architecture:
+-- This implements the two-core interleaved architecture:
 -- 1. M65832 main core (Linux, ~90% of cycles)
 -- 2. 6502 game core (cycle-accurate classic, ~2% of cycles)
--- 3. Servicer core (I/O handling, runs on-demand)
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -32,9 +31,6 @@ entity M65832_Interleave is
         MASTER_FREQ     : in  std_logic_vector(31 downto 0);
         -- Enable classic coprocessor
         ENABLE          : in  std_logic;
-        -- Servicer trigger (I/O access detected)
-        SERVICER_REQ    : in  std_logic;
-        
         ---------------------------------------------------------------------------
         -- Core Select Outputs
         ---------------------------------------------------------------------------
@@ -42,13 +38,12 @@ entity M65832_Interleave is
         CORE_SEL        : out std_logic_vector(1 downto 0);
         -- "00" = M65832 main core
         -- "01" = 6502 game core  
-        -- "10" = Servicer core
+        -- "10" = Reserved
         -- "11" = Reserved
         
         -- Clock enables for each core
         CE_M65832       : out std_logic;  -- M65832 clock enable
         CE_6502         : out std_logic;  -- 6502 clock enable
-        CE_SERVICER     : out std_logic;  -- Servicer clock enable
         
         ---------------------------------------------------------------------------
         -- Timing Outputs (for cycle-accurate emulation)
@@ -64,8 +59,6 @@ entity M65832_Interleave is
         ---------------------------------------------------------------------------
         -- 6502 is active (for debugging)
         ACTIVE_6502     : out std_logic;
-        -- Servicer is active
-        ACTIVE_SERVICER : out std_logic;
         -- Cycles since last 6502 tick
         CYCLES_SINCE    : out std_logic_vector(7 downto 0)
     );
@@ -88,20 +81,6 @@ architecture rtl of M65832_Interleave is
     signal tick_6502        : std_logic;
     
     ---------------------------------------------------------------------------
-    -- Servicer State
-    ---------------------------------------------------------------------------
-    
-    type servicer_state_t is (
-        SVC_IDLE,           -- Waiting for I/O request
-        SVC_ACTIVE,         -- Servicer running
-        SVC_DONE            -- Servicer complete, resume 6502
-    );
-    
-    signal svc_state        : servicer_state_t;
-    signal svc_cycles       : unsigned(5 downto 0);  -- Max 63 cycles per service
-    signal svc_pending      : std_logic;
-    
-    ---------------------------------------------------------------------------
     -- Cycle Counting
     ---------------------------------------------------------------------------
     
@@ -121,7 +100,6 @@ architecture rtl of M65832_Interleave is
     
     signal core_sel_reg     : std_logic_vector(1 downto 0);
     signal active_6502_reg  : std_logic;
-    signal active_svc_reg   : std_logic;
 
 begin
 
@@ -156,58 +134,9 @@ begin
     end process;
     
     ---------------------------------------------------------------------------
-    -- Servicer State Machine
-    ---------------------------------------------------------------------------
-    -- Servicer runs when:
-    -- 1. 6502 performs I/O read that needs computed response
-    -- 2. Servicer stretches the 6502's read cycle
-    -- 3. Servicer computes response (e.g., collision detection)
-    -- 4. Response is ready, 6502 read completes
-    
-    process(CLK, RST_N)
-    begin
-        if RST_N = '0' then
-            svc_state <= SVC_IDLE;
-            svc_cycles <= (others => '0');
-            svc_pending <= '0';
-        elsif rising_edge(CLK) then
-            -- Latch servicer requests
-            if SERVICER_REQ = '1' then
-                svc_pending <= '1';
-            end if;
-            
-            case svc_state is
-                when SVC_IDLE =>
-                    if svc_pending = '1' and tick_6502 = '1' then
-                        -- Start servicer on next 6502 slot
-                        svc_state <= SVC_ACTIVE;
-                        svc_cycles <= (others => '0');
-                        svc_pending <= '0';
-                    end if;
-                    
-                when SVC_ACTIVE =>
-                    if tick_6502 = '1' then
-                        svc_cycles <= svc_cycles + 1;
-                        -- Servicer runs for up to 48 cycles (fits in one 6502 slot)
-                        -- Most operations complete in < 10 cycles
-                        if svc_cycles >= 47 then
-                            svc_state <= SVC_DONE;
-                        end if;
-                    end if;
-                    
-                when SVC_DONE =>
-                    svc_state <= SVC_IDLE;
-                    
-                when others =>
-                    svc_state <= SVC_IDLE;
-            end case;
-        end if;
-    end process;
-    
-    ---------------------------------------------------------------------------
     -- Core Selection Logic
     ---------------------------------------------------------------------------
-    -- Priority: Servicer > 6502 > M65832
+    -- Priority: 6502 > M65832
     -- This implements "cycle stealing" from M65832
     
     process(CLK, RST_N)
@@ -215,19 +144,13 @@ begin
         if RST_N = '0' then
             core_sel_reg <= "00";
             active_6502_reg <= '0';
-            active_svc_reg <= '0';
         elsif rising_edge(CLK) then
             -- Default: M65832 runs
             core_sel_reg <= "00";
             active_6502_reg <= '0';
-            active_svc_reg <= '0';
             
             if ENABLE = '1' then
-                if svc_state = SVC_ACTIVE then
-                    -- Servicer takes priority
-                    core_sel_reg <= "10";
-                    active_svc_reg <= '1';
-                elsif tick_6502 = '1' then
+                if tick_6502 = '1' then
                     -- 6502 gets this cycle
                     core_sel_reg <= "01";
                     active_6502_reg <= '1';
@@ -245,7 +168,6 @@ begin
     
     CE_M65832   <= '1' when core_sel_reg = "00" else '0';
     CE_6502     <= '1' when core_sel_reg = "01" else '0';
-    CE_SERVICER <= '1' when core_sel_reg = "10" else '0';
     
     ---------------------------------------------------------------------------
     -- Cycle Counter and Beam Position
@@ -302,7 +224,6 @@ begin
     BEAM_X          <= std_logic_vector(beam_x_reg);
     BEAM_Y          <= std_logic_vector(beam_y_reg);
     ACTIVE_6502     <= active_6502_reg;
-    ACTIVE_SERVICER <= active_svc_reg;
     CYCLES_SINCE    <= std_logic_vector(cycles_since_tick);
 
 end rtl;
