@@ -6,5 +6,5 @@
 - [x] Core smoke test added (reset, LDA/STA/JMP)
 - [x] Core/MMU suite runnable via `tb/run_core_tests.sh`
 - [x] Coprocessor suite runnable via `tb/run_coprocessor_tests.sh`
-- [ ] Integrate coprocessor IRQ request into system IRQ routing
+- [x] Integrate coprocessor IRQ request into system IRQ routing
 - [ ] Add longer-running soak test with mixed core/coprocessor traffic
