@@ -256,6 +256,25 @@ Invocation:
     TRAP #0
 ```
 
+### 4.4 FP Trap ABI (Software Emulation)
+
+Reserved FP opcodes trap through the TRAP vector table using the opcode byte as the index:
+`handler = VEC_SYSCALL + (FP_OPCODE * 4)`.
+
+**Inputs (on entry)**:
+- `F0/F1/F2` contain the FP operands (single uses low 32 bits, double uses full 64 bits).
+- `A` contains the last integer operand for `I2F.*` (if used).
+- `P` flags reflect the pre-trap state.
+
+**Outputs (before RTI)**:
+- `F0` holds the result for FP ops that return a float/double.
+- `A` holds the result for `F2I.*`.
+- Flags are set to match the FP op semantics (Z/N/V/C as documented).
+
+**Notes**:
+- The trap handler should preserve non-argument registers and return via `RTI`.
+- For `R=1`, software saves/restores `F0–F2` by reading `Rk/Rk+1` pairs (DP aligned to 16 bytes).
+
 ### 4.2 System Call Handler
 
 ```asm

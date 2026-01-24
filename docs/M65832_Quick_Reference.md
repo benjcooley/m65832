@@ -219,6 +219,23 @@ SEP #$20
 | XCE | Exchange C with E |
 | LEA dp | A = D + dp (load effective address) |
 
+### Floating Point
+| Instruction | Operation |
+|-------------|-----------|
+| LDF0/1/2 dp | Load F0/F1/F2 from dp (64-bit) |
+| STF0/1/2 dp | Store F0/F1/F2 to dp (64-bit) |
+| FADD.S/D | F0 = F1 + F2 |
+| FSUB.S/D | F0 = F1 - F2 |
+| FMUL.S/D | F0 = F1 * F2 |
+| FDIV.S/D | F0 = F1 / F2 |
+| FNEG.S/D | F0 = -F1 |
+| FABS.S/D | F0 = abs(F1) |
+| FCMP.S/D | Set Z/N/C from F1 ? F2 |
+| F2I.S/D | A = (int32)F1 |
+| I2F.S/D | F0 = (float)A |
+
+Note: reserved FP opcodes trap via `TRAP` using the opcode byte as the vector index.
+
 ### WID Prefix ($42)
 ```asm
 WID LDA #$12345678    ; 32-bit immediate
