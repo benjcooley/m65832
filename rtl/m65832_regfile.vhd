@@ -191,7 +191,7 @@ begin
             Br   <= (others => '0');
             VBRr <= (others => '0');
             Tr   <= (others => '0');
-            Pr   <= "0010000001100";  -- E=1, S=0, R=0, M1:M0=00, X1:X0=00, D=1, I=1, Z=0, C=0
+            Pr   <= "0110000001100";  -- E=1, S=1, R=0, M1:M0=00, X1:X0=00, D=1, I=1, Z=0, C=0
             
         elsif rising_edge(CLK) then
             if EN = '1' then

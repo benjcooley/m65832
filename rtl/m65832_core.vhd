@@ -266,6 +266,10 @@ architecture rtl of M65832_Core is
     signal mmu_pa_hold     : std_logic;
     signal mmu_fault_hold  : std_logic;
     signal mmu_bypass      : std_logic;
+    signal priv_op         : std_logic;
+    signal priv_mmio       : std_logic;
+    signal priv_stp        : std_logic;
+    signal priv_violation  : std_logic;
     signal mmu_ptw_req     : std_logic;
     signal mmu_ptw_ack     : std_logic;
     signal mmu_ptw_addr    : std_logic_vector(64 downto 0);
@@ -279,6 +283,8 @@ architecture rtl of M65832_Core is
     signal ptw_addr_armed  : std_logic;
     signal ptw_req_latched : std_logic;
     signal ptw_cooldown    : std_logic;
+
+    constant PRIV_TRAP_CODE : std_logic_vector(7 downto 0) := x"FF";
     
     -- Register window (DP-as-registers)
     signal rw_addr1    : std_logic_vector(5 downto 0);
@@ -773,6 +779,16 @@ begin
     mmu_wp <= mmu_mmucr(1);
     mmu_nx <= '1';
     mmu_bypass <= '1' when mem_addr_virt(15 downto 8) = x"F0" else '0';
+    priv_op <= '1' when S_mode = '0' and
+                        (IS_SVBR = '1' or IS_SB = '1' or IS_RSET = '1' or
+                         IS_RCLR = '1' or IS_XCE = '1') else '0';
+    priv_stp <= '1' when S_mode = '0' and IS_STP = '1' else '0';
+    priv_mmio <= '1' when S_mode = '0' and mmu_bypass = '1' and
+                         mmu_translate = '1' else '0';
+    priv_violation <= '1' when (state = ST_EXECUTE and priv_op = '1') or
+                               (state = ST_DECODE and priv_stp = '1') or
+                               priv_mmio = '1'
+                      else '0';
     
     process(state, ADDR_MODE)
     begin
@@ -847,6 +863,15 @@ begin
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
                     state <= ST_PUSH;
+                elsif priv_violation = '1' and int_in_progress = '0' and rti_in_progress = '0' then
+                    int_in_progress <= '1';
+                    int_step <= (others => '0');
+                    int_push_reg <= PC_reg;
+                    int_push_width <= WIDTH_32;
+                    data_byte_count <= (others => '0');
+                    int_vector_addr <= std_logic_vector(unsigned(VEC_SYSCALL) +
+                                      (resize(unsigned(PRIV_TRAP_CODE), 32) sll 2));
+                    state <= ST_PUSH;
                 else
                     case state is
                     when ST_RESET =>
@@ -916,7 +941,18 @@ begin
                             if IS_WAI = '1' then
                                 state <= ST_WAI;
                             elsif IS_STP = '1' then
-                                state <= ST_STOP;
+                                if priv_stp = '1' then
+                                    int_in_progress <= '1';
+                                    int_step <= (others => '0');
+                                    int_push_reg <= PC_reg;
+                                    int_push_width <= WIDTH_32;
+                                    data_byte_count <= (others => '0');
+                                    int_vector_addr <= std_logic_vector(unsigned(VEC_SYSCALL) +
+                                                      (resize(unsigned(PRIV_TRAP_CODE), 32) sll 2));
+                                    state <= ST_PUSH;
+                                else
+                                    state <= ST_STOP;
+                                end if;
                             elsif IS_CONTROL = '1' and IS_BRK = '0' and IS_COP = '0' then
                                 -- Simple control instruction (NOP, etc.)
                                 state <= ST_FETCH;
@@ -1505,7 +1541,7 @@ begin
                         elsif IS_RTI = '1' then
                             rti_in_progress <= '1';
                             rti_step <= (others => '0');
-                            rti_pull_width <= WIDTH_8;
+                            rti_pull_width <= WIDTH_16;
                             data_byte_count <= (others => '0');
                             state <= ST_PULL;
                         elsif IS_BLOCK_MOVE = '1' then
@@ -1612,7 +1648,13 @@ begin
                             when others => null;
                         end case;
                         data_byte_count <= data_byte_count + 1;
-                        if stack_width_eff = WIDTH_8 or data_byte_count = "011" then
+                        if rti_in_progress = '1' and rti_step = to_unsigned(0, rti_step'length) then
+                            if data_byte_count = "001" then
+                                state <= ST_RTI_NEXT;
+                            else
+                                state <= ST_PULL;
+                            end if;
+                        elsif stack_width_eff = WIDTH_8 or data_byte_count = "011" then
                             if rti_in_progress = '1' then
                                 state <= ST_RTI_NEXT;
                             else
@@ -1658,8 +1700,8 @@ begin
                     when ST_INT_NEXT =>
                         if int_step = to_unsigned(0, int_step'length) then
                             int_step <= to_unsigned(1, int_step'length);
-                            int_push_reg <= x"000000" & P_reg(7 downto 0);
-                            int_push_width <= WIDTH_8;
+                            int_push_reg <= x"0000" & std_logic_vector(resize(unsigned(P_reg), 16));
+                            int_push_width <= WIDTH_16;
                             data_byte_count <= (others => '0');
                             state <= ST_PUSH;
                         else
@@ -1906,7 +1948,8 @@ begin
     
 WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or 
                 state = ST_WRITE3 or state = ST_WRITE4 or
-                state = ST_PUSH or state = ST_BM_WRITE) and ptw_active = '0'
+                state = ST_PUSH or state = ST_BM_WRITE) and ptw_active = '0' and
+                priv_mmio = '0'
       else '0';
     
     -- Write data based on byte count and instruction
@@ -2035,63 +2078,66 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     mmu_mmucr(4 downto 2) <= mmu_fault_type;
                 end if;
                 
-                if state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4 then
-                    case mmio_addr_write_lo is
-                        when MMIO_MMUCR(15 downto 0) =>
-                            mmu_mmucr(7 downto 0) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
-                            mmu_mmucr(15 downto 8) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
-                            mmu_mmucr(23 downto 16) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
-                            mmu_mmucr(31 downto 24) <= DATA_OUT;
-                        
-                        when MMIO_ASID(15 downto 0) =>
-                            mmu_asid(7 downto 0) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
-                            mmu_asid(15 downto 8) <= DATA_OUT;
-                        
-                        when MMIO_ASIDINVAL(15 downto 0) =>
-                            mmu_asid_inval(7 downto 0) <= DATA_OUT;
-                            mmu_tlb_flush_asid <= '1';
-                        when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
-                            mmu_asid_inval(15 downto 8) <= DATA_OUT;
-                            mmu_tlb_flush_asid <= '1';
-                        
-                        when MMIO_TLBINVAL(15 downto 0) =>
-                            mmu_tlbinval(7 downto 0) <= DATA_OUT;
-                            mmu_tlb_flush_va <= '1';
-                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
-                            mmu_tlbinval(15 downto 8) <= DATA_OUT;
-                            mmu_tlb_flush_va <= '1';
-                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
-                            mmu_tlbinval(23 downto 16) <= DATA_OUT;
-                            mmu_tlb_flush_va <= '1';
-                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
-                            mmu_tlbinval(31 downto 24) <= DATA_OUT;
-                            mmu_tlb_flush_va <= '1';
-                        
-                        when MMIO_PTBR_LO(15 downto 0) =>
-                            mmu_ptbr(7 downto 0) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
-                            mmu_ptbr(15 downto 8) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
-                            mmu_ptbr(23 downto 16) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
-                            mmu_ptbr(31 downto 24) <= DATA_OUT;
-                        
-                        when MMIO_PTBR_HI(15 downto 0) =>
-                            mmu_ptbr(39 downto 32) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
-                            mmu_ptbr(47 downto 40) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
-                            mmu_ptbr(55 downto 48) <= DATA_OUT;
-                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
-                            mmu_ptbr(63 downto 56) <= DATA_OUT;
-                        
-                        when others =>
-                            null;
-                    end case;
+                if (state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4) and
+                   priv_mmio = '0' then
+                    if S_mode = '1' then
+                        case mmio_addr_write_lo is
+                            when MMIO_MMUCR(15 downto 0) =>
+                                mmu_mmucr(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
+                                mmu_mmucr(15 downto 8) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
+                                mmu_mmucr(23 downto 16) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
+                                mmu_mmucr(31 downto 24) <= DATA_OUT;
+                            
+                            when MMIO_ASID(15 downto 0) =>
+                                mmu_asid(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
+                                mmu_asid(15 downto 8) <= DATA_OUT;
+                            
+                            when MMIO_ASIDINVAL(15 downto 0) =>
+                                mmu_asid_inval(7 downto 0) <= DATA_OUT;
+                                mmu_tlb_flush_asid <= '1';
+                            when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
+                                mmu_asid_inval(15 downto 8) <= DATA_OUT;
+                                mmu_tlb_flush_asid <= '1';
+                            
+                            when MMIO_TLBINVAL(15 downto 0) =>
+                                mmu_tlbinval(7 downto 0) <= DATA_OUT;
+                                mmu_tlb_flush_va <= '1';
+                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
+                                mmu_tlbinval(15 downto 8) <= DATA_OUT;
+                                mmu_tlb_flush_va <= '1';
+                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
+                                mmu_tlbinval(23 downto 16) <= DATA_OUT;
+                                mmu_tlb_flush_va <= '1';
+                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
+                                mmu_tlbinval(31 downto 24) <= DATA_OUT;
+                                mmu_tlb_flush_va <= '1';
+                            
+                            when MMIO_PTBR_LO(15 downto 0) =>
+                                mmu_ptbr(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
+                                mmu_ptbr(15 downto 8) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
+                                mmu_ptbr(23 downto 16) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
+                                mmu_ptbr(31 downto 24) <= DATA_OUT;
+                            
+                            when MMIO_PTBR_HI(15 downto 0) =>
+                                mmu_ptbr(39 downto 32) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
+                                mmu_ptbr(47 downto 40) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
+                                mmu_ptbr(55 downto 48) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
+                                mmu_ptbr(63 downto 56) <= DATA_OUT;
+                            
+                            when others =>
+                                null;
+                        end case;
+                    end if;
                 end if;
             end if;
         end if;
@@ -2534,7 +2580,9 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
     
     stack_width_eff <= int_push_width when int_in_progress = '1'
-                       else rti_pull_width when rti_in_progress = '1'
+                       else WIDTH_16 when (rti_in_progress = '1' and rti_step = to_unsigned(0, rti_step'length))
+                       else WIDTH_32 when (rti_in_progress = '1' and rti_step = to_unsigned(1, rti_step'length))
+                       else rti_pull_width when IS_RTI = '1'
                        else stack_width;
     
     stack_write_reg_eff <= int_push_reg when int_in_progress = '1'
@@ -2786,7 +2834,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             end if;
             p_override_valid <= '1';
         elsif state = ST_RTI_NEXT and rti_step = to_unsigned(0, rti_step'length) then
-            p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            p_override <= data_buffer(P_WIDTH-1 downto 0);
             p_override_valid <= '1';
         elsif state = ST_INT_NEXT and int_step = to_unsigned(1, int_step'length) then
             p_override <= P_reg;
