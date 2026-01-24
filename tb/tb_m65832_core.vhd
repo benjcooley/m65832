@@ -5064,6 +5064,115 @@ begin
         check_mem(16#0604#, x"00", "MMUCR reset baseline");
         
         -----------------------------------------------------------------------
+        -- TEST 123: Privilege trap on MMIO read in user mode
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 123: Privilege trap (user MMIO read)";
+        
+        -- Trap vector for privilege violation (TRAP code 0xFF)
+        poke(16#03D0#, x"00");  -- handler = $00008200
+        poke(16#03D1#, x"82");
+        poke(16#03D2#, x"00");
+        poke(16#03D3#, x"00");
+        
+        -- Clear backing memory at MMIO address for sanity
+        poke(16#F000#, x"00");
+        
+        -- Trap handler at $8200: write marker + MMUCR value, RTI
+        poke(16#8200#, x"A9");  -- LDA #$A6
+        poke(16#8201#, x"A6");
+        poke(16#8202#, x"8D");  -- STA $0610
+        poke(16#8203#, x"10");
+        poke(16#8204#, x"06");
+        poke(16#8205#, x"AD");  -- LDA $F000 (MMUCR)
+        poke(16#8206#, x"00");
+        poke(16#8207#, x"F0");
+        poke(16#8208#, x"8D");  -- STA $0611
+        poke(16#8209#, x"11");
+        poke(16#820A#, x"06");
+        poke(16#820B#, x"AD");  -- LDA $01FB (P high from trap frame)
+        poke(16#820C#, x"FB");
+        poke(16#820D#, x"01");
+        poke(16#820E#, x"8D");  -- STA $0613
+        poke(16#820F#, x"13");
+        poke(16#8210#, x"06");
+        poke(16#8211#, x"40");  -- RTI
+        
+        -- User program at $9100: mark, attempt MMIO read, TRAP #$FF
+        poke(16#9100#, x"A9");  -- LDA #$66
+        poke(16#9101#, x"66");
+        poke(16#9102#, x"8D");  -- STA $0612 (user marker)
+        poke(16#9103#, x"12");
+        poke(16#9104#, x"06");
+        poke(16#9105#, x"AD");  -- LDA $F000 (MMUCR) - should trap
+        poke(16#9106#, x"00");
+        poke(16#9107#, x"F0");
+        poke(16#9108#, x"02");  -- EXT prefix
+        poke(16#9109#, x"40");  -- TRAP #imm8
+        poke(16#910A#, x"FF");
+        poke(16#910B#, x"4C");  -- JMP $910B (idle)
+        poke(16#910C#, x"0B");
+        poke(16#910D#, x"91");
+        
+        -- Supervisor setup: push 6 bytes to move SP, then prepare RTI frame for user mode at $9100
+        poke(16#8000#, x"A9");  -- LDA #$00
+        poke(16#8001#, x"00");
+        poke(16#8002#, x"48");  -- PHA x6 (SP from $01FF -> $01F9)
+        poke(16#8003#, x"48");
+        poke(16#8004#, x"48");
+        poke(16#8005#, x"48");
+        poke(16#8006#, x"48");
+        poke(16#8007#, x"48");
+        poke(16#8008#, x"A9");  -- LDA #$04 (P: I=1, S=0, E=0)
+        poke(16#8009#, x"04");
+        poke(16#800A#, x"8D");  -- STA $01FA (P low)
+        poke(16#800B#, x"FA");
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"A9");  -- LDA #$00 (P high)
+        poke(16#800E#, x"00");
+        poke(16#800F#, x"8D");  -- STA $01FB
+        poke(16#8010#, x"FB");
+        poke(16#8011#, x"01");
+        poke(16#8012#, x"A9");  -- LDA #$00 (PC byte0)
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"8D");  -- STA $01FC
+        poke(16#8015#, x"FC");
+        poke(16#8016#, x"01");
+        poke(16#8017#, x"A9");  -- LDA #$91 (PC byte1)
+        poke(16#8018#, x"91");
+        poke(16#8019#, x"8D");  -- STA $01FD
+        poke(16#801A#, x"FD");
+        poke(16#801B#, x"01");
+        poke(16#801C#, x"A9");  -- LDA #$00 (PC byte2)
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"8D");  -- STA $01FE
+        poke(16#801F#, x"FE");
+        poke(16#8020#, x"01");
+        poke(16#8021#, x"A9");  -- LDA #$00 (PC byte3)
+        poke(16#8022#, x"00");
+        poke(16#8023#, x"8D");  -- STA $01FF
+        poke(16#8024#, x"FF");
+        poke(16#8025#, x"01");
+        poke(16#8026#, x"AD");  -- LDA $F000 (MMUCR baseline)
+        poke(16#8027#, x"00");
+        poke(16#8028#, x"F0");
+        poke(16#8029#, x"8D");  -- STA $0614
+        poke(16#802A#, x"14");
+        poke(16#802B#, x"06");
+        poke(16#802C#, x"40");  -- RTI -> user
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(600);
+        
+        check_mem(16#0612#, x"66", "User mode ran (read)");
+        check_mem(16#0610#, x"A6", "Trap handler marker (read)");
+        check_mem(16#0611#, x"00", "MMUCR unchanged by user read");
+        check_mem(16#0613#, x"00", "User P high byte (read)");
+        check_mem(16#0614#, x"00", "MMUCR reset baseline (read)");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";
