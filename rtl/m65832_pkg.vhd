@@ -119,9 +119,10 @@ package M65832_pkg is
     --   [7]  M1 - Accumulator width bit 1
     --   [8]  V  - Overflow
     --   [9]  N  - Negative
-    --   [10] E  - Emulation (6502 mode)
-    --   [11] S  - Supervisor (privilege level)
-    --   [12] R  - Register window enable
+--   [10] E  - Emulation (6502 mode)
+--   [11] S  - Supervisor (privilege level)
+--   [12] R  - Register window enable
+--   [13] K  - Compatibility (illegal opcodes as NOP in 8/16-bit)
     
     constant P_C  : integer := 0;
     constant P_Z  : integer := 1;
@@ -136,8 +137,9 @@ package M65832_pkg is
     constant P_E  : integer := 10;
     constant P_S  : integer := 11;
     constant P_R  : integer := 12;
+constant P_K  : integer := 13;
     
-    constant P_WIDTH : integer := 13;
+constant P_WIDTH : integer := 14;
     
     ---------------------------------------------------------------------------
     -- Register File
@@ -201,6 +203,7 @@ package M65832_pkg is
     -- M65832 extended vectors (for page faults, syscalls, etc.)
     constant VEC_PGFAULT : std_logic_vector(31 downto 0) := x"0000FFD0";
     constant VEC_SYSCALL : std_logic_vector(31 downto 0) := x"0000FFD4";
+constant VEC_ILLEGAL : std_logic_vector(31 downto 0) := x"0000FFF8";
     
     ---------------------------------------------------------------------------
     -- MMU Control Registers (MMIO)

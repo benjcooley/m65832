@@ -164,6 +164,7 @@ architecture rtl of M65832_Core is
     signal USE_BASE_VBR     : std_logic;
     signal GOT_INTERRUPT    : std_logic;
     signal W_mode           : std_logic;
+    signal compat_mode      : std_logic;
     
     ---------------------------------------------------------------------------
     -- Decoder Signals
@@ -188,6 +189,7 @@ architecture rtl of M65832_Core is
     signal IS_EXT_OP, IS_WID                      : std_logic;
     signal IS_RSET, IS_RCLR, IS_SB, IS_SVBR       : std_logic;
     signal IS_CAS, IS_LLI, IS_SCI                 : std_logic;
+    signal ILLEGAL_OP                              : std_logic;
     
     ---------------------------------------------------------------------------
     -- Interrupt Handling
@@ -551,6 +553,7 @@ begin
         E_MODE          => E_mode,
         M_WIDTH         => M_width,
         X_WIDTH         => X_width,
+        COMPAT_MODE     => compat_mode,
         
         IS_ALU_OP       => IS_ALU_OP,
         IS_RMW_OP       => IS_RMW_OP,
@@ -595,7 +598,8 @@ begin
         IS_SVBR         => IS_SVBR,
         IS_CAS          => IS_CAS,
         IS_LLI          => IS_LLI,
-        IS_SCI          => IS_SCI
+        IS_SCI          => IS_SCI,
+        ILLEGAL_OP      => ILLEGAL_OP
     );
     
     ---------------------------------------------------------------------------
@@ -603,6 +607,7 @@ begin
     ---------------------------------------------------------------------------
     
     W_mode <= '1' when M_width = WIDTH_32 else '0';
+    compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
 
     ---------------------------------------------------------------------------
     -- MMU Integration
@@ -862,6 +867,15 @@ begin
                     int_push_width <= WIDTH_32;
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
+                    state <= ST_PUSH;
+                elsif ILLEGAL_OP = '1' and ext_fpu_trap = '0' and state = ST_DECODE and
+                      int_in_progress = '0' and rti_in_progress = '0' then
+                    int_in_progress <= '1';
+                    int_step <= (others => '0');
+                    int_push_reg <= PC_reg;
+                    int_push_width <= WIDTH_32;
+                    data_byte_count <= (others => '0');
+                    int_vector_addr <= VEC_ILLEGAL;
                     state <= ST_PUSH;
                 elsif priv_violation = '1' and int_in_progress = '0' and rti_in_progress = '0' then
                     int_in_progress <= '1';

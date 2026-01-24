@@ -207,7 +207,7 @@ The status register is extended from 65816:
 Extended Status (directly follows P in push/pop):
  Bit 7   6   5   4   3   2   1   0
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
-    │M1 │M0 │X1 │X0 │ E │ S │ R │ W │  Extended P
+    │M1 │M0 │X1 │X0 │ E │ S │ R │ K │  Extended P
     └───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
@@ -233,7 +233,7 @@ Extended Status (directly follows P in push/pop):
 | E | Emulation | 1=6502 mode, 0=Native mode |
 | S | Supervisor | 1=Supervisor, 0=User |
 | R | Register Window | 1=DP→Registers, 0=DP→Memory |
-| W | Wide Stack | 1=32-bit S, 0=16-bit S |
+| K | Compat | 1=illegal opcodes become NOP in 8/16-bit; 32-bit always treats illegal ops as NOP |
 
 ### 3.3 Register Window (R0-R63)
 

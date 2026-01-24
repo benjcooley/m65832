@@ -5173,6 +5173,256 @@ begin
         check_mem(16#0614#, x"00", "MMUCR reset baseline (read)");
         
         -----------------------------------------------------------------------
+        -- TEST 124: Illegal opcode trap (16-bit, K=0)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 124: Illegal opcode trap (16-bit, K=0)";
+        
+        -- Illegal vector -> handler at $9200
+        poke(16#FFF8#, x"00");
+        poke(16#FFF9#, x"92");
+        poke(16#FFFA#, x"00");
+        poke(16#FFFB#, x"00");
+        
+        -- Handler at $9200: LDA #$00A7, STA $0620, RTI
+        poke(16#9200#, x"A9");
+        poke(16#9201#, x"A7");
+        poke(16#9202#, x"00");
+        poke(16#9203#, x"8D");
+        poke(16#9204#, x"20");
+        poke(16#9205#, x"06");
+        poke(16#9206#, x"40");
+        
+        -- Program at $9000: illegal ext op, then LDA #$005A, STA $0622, BRK
+        poke(16#9000#, x"02");
+        poke(16#9001#, x"99");  -- illegal extended opcode
+        poke(16#9002#, x"A9");
+        poke(16#9003#, x"5A");
+        poke(16#9004#, x"00");
+        poke(16#9005#, x"8D");
+        poke(16#9006#, x"22");
+        poke(16#9007#, x"06");
+        poke(16#9008#, x"00");
+        
+        -- Supervisor setup: RTI to $9000 with 16-bit P, K=0
+        poke(16#8000#, x"A9");  -- LDA #$00
+        poke(16#8001#, x"00");
+        poke(16#8002#, x"48");  -- PHA x6 (SP from $01FF -> $01F9)
+        poke(16#8003#, x"48");
+        poke(16#8004#, x"48");
+        poke(16#8005#, x"48");
+        poke(16#8006#, x"48");
+        poke(16#8007#, x"48");
+        poke(16#8008#, x"A9");  -- P low = $54 (M=16, X=16, I=1)
+        poke(16#8009#, x"54");
+        poke(16#800A#, x"8D");  -- STA $01FA
+        poke(16#800B#, x"FA");
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"A9");  -- P high = $08 (E=0, S=1, R=0, K=0)
+        poke(16#800E#, x"08");
+        poke(16#800F#, x"8D");  -- STA $01FB
+        poke(16#8010#, x"FB");
+        poke(16#8011#, x"01");
+        poke(16#8012#, x"A9");  -- PC byte0
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"8D");
+        poke(16#8015#, x"FC");
+        poke(16#8016#, x"01");
+        poke(16#8017#, x"A9");  -- PC byte1 ($90)
+        poke(16#8018#, x"90");
+        poke(16#8019#, x"8D");
+        poke(16#801A#, x"FD");
+        poke(16#801B#, x"01");
+        poke(16#801C#, x"A9");  -- PC byte2
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"8D");
+        poke(16#801F#, x"FE");
+        poke(16#8020#, x"01");
+        poke(16#8021#, x"A9");  -- PC byte3
+        poke(16#8022#, x"00");
+        poke(16#8023#, x"8D");
+        poke(16#8024#, x"FF");
+        poke(16#8025#, x"01");
+        poke(16#8026#, x"40");  -- RTI
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(600);
+        
+        check_mem(16#0620#, x"A7", "Illegal trap handler wrote (K=0)");
+        check_mem(16#0622#, x"5A", "Returned after illegal trap (K=0)");
+        
+        -----------------------------------------------------------------------
+        -- TEST 125: Illegal opcode NOP (16-bit, K=1)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 125: Illegal opcode NOP (16-bit, K=1)";
+        
+        -- Illegal vector -> handler at $9300 (should NOT run)
+        poke(16#FFF8#, x"00");
+        poke(16#FFF9#, x"93");
+        poke(16#FFFA#, x"00");
+        poke(16#FFFB#, x"00");
+        
+        -- Handler at $9300: LDA #$00A8, STA $0630, RTI
+        poke(16#9300#, x"A9");
+        poke(16#9301#, x"A8");
+        poke(16#9302#, x"00");
+        poke(16#9303#, x"8D");
+        poke(16#9304#, x"30");
+        poke(16#9305#, x"06");
+        poke(16#9306#, x"40");
+        
+        -- Program at $9100: illegal ext op, then LDA #$005B, STA $0632, BRK
+        poke(16#9100#, x"02");
+        poke(16#9101#, x"99");  -- illegal extended opcode
+        poke(16#9102#, x"A9");
+        poke(16#9103#, x"5B");
+        poke(16#9104#, x"00");
+        poke(16#9105#, x"8D");
+        poke(16#9106#, x"32");
+        poke(16#9107#, x"06");
+        poke(16#9108#, x"00");
+        
+        -- Supervisor setup: RTI to $9100 with 16-bit P, K=1
+        poke(16#8000#, x"A9");  -- LDA #$00
+        poke(16#8001#, x"00");
+        poke(16#8002#, x"48");  -- PHA x6
+        poke(16#8003#, x"48");
+        poke(16#8004#, x"48");
+        poke(16#8005#, x"48");
+        poke(16#8006#, x"48");
+        poke(16#8007#, x"48");
+        poke(16#8008#, x"A9");  -- P low = $54 (M=16, X=16, I=1)
+        poke(16#8009#, x"54");
+        poke(16#800A#, x"8D");
+        poke(16#800B#, x"FA");
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"A9");  -- P high = $28 (E=0, S=1, R=0, K=1)
+        poke(16#800E#, x"28");
+        poke(16#800F#, x"8D");
+        poke(16#8010#, x"FB");
+        poke(16#8011#, x"01");
+        poke(16#8012#, x"A9");  -- PC byte0
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"8D");
+        poke(16#8015#, x"FC");
+        poke(16#8016#, x"01");
+        poke(16#8017#, x"A9");  -- PC byte1 ($91)
+        poke(16#8018#, x"91");
+        poke(16#8019#, x"8D");
+        poke(16#801A#, x"FD");
+        poke(16#801B#, x"01");
+        poke(16#801C#, x"A9");  -- PC byte2
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"8D");
+        poke(16#801F#, x"FE");
+        poke(16#8020#, x"01");
+        poke(16#8021#, x"A9");  -- PC byte3
+        poke(16#8022#, x"00");
+        poke(16#8023#, x"8D");
+        poke(16#8024#, x"FF");
+        poke(16#8025#, x"01");
+        poke(16#8026#, x"40");  -- RTI
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(600);
+        
+        check_mem(16#0630#, x"00", "Illegal trap not taken (K=1)");
+        check_mem(16#0632#, x"5B", "Illegal op treated as NOP (K=1)");
+        
+        -----------------------------------------------------------------------
+        -- TEST 126: Illegal opcode NOP (32-bit always compat)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 126: Illegal opcode NOP (32-bit)";
+        
+        -- Illegal vector -> handler at $9400 (should NOT run)
+        poke(16#FFF8#, x"00");
+        poke(16#FFF9#, x"94");
+        poke(16#FFFA#, x"00");
+        poke(16#FFFB#, x"00");
+        
+        -- Clear trap marker
+        poke(16#0640#, x"00");
+        
+        -- Handler at $9400: LDA #$000000A9, STA $0640, RTI
+        poke(16#9400#, x"A9");
+        poke(16#9401#, x"A9");
+        poke(16#9402#, x"00");
+        poke(16#9403#, x"00");
+        poke(16#9404#, x"00");
+        poke(16#9405#, x"8D");
+        poke(16#9406#, x"40");
+        poke(16#9407#, x"06");
+        poke(16#9408#, x"40");
+        
+        -- Program at $9500: illegal ext op, then LDA #$0000005C, STA $0644, BRK
+        poke(16#9500#, x"02");
+        poke(16#9501#, x"99");  -- illegal extended opcode
+        poke(16#9502#, x"A9");
+        poke(16#9503#, x"5C");
+        poke(16#9504#, x"00");
+        poke(16#9505#, x"00");
+        poke(16#9506#, x"00");
+        poke(16#9507#, x"8D");
+        poke(16#9508#, x"44");
+        poke(16#9509#, x"06");
+        poke(16#950A#, x"00");
+        
+        -- Supervisor setup: RTI to $9500 with 32-bit P (K ignored)
+        poke(16#8000#, x"A9");  -- LDA #$00
+        poke(16#8001#, x"00");
+        poke(16#8002#, x"48");  -- PHA x6
+        poke(16#8003#, x"48");
+        poke(16#8004#, x"48");
+        poke(16#8005#, x"48");
+        poke(16#8006#, x"48");
+        poke(16#8007#, x"48");
+        poke(16#8008#, x"A9");  -- P low = $A4 (M=32, X=32, I=1)
+        poke(16#8009#, x"A4");
+        poke(16#800A#, x"8D");
+        poke(16#800B#, x"FA");
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"A9");  -- P high = $08 (E=0, S=1, R=0, K=0)
+        poke(16#800E#, x"08");
+        poke(16#800F#, x"8D");
+        poke(16#8010#, x"FB");
+        poke(16#8011#, x"01");
+        poke(16#8012#, x"A9");  -- PC byte0
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"8D");
+        poke(16#8015#, x"FC");
+        poke(16#8016#, x"01");
+        poke(16#8017#, x"A9");  -- PC byte1 ($95)
+        poke(16#8018#, x"95");
+        poke(16#8019#, x"8D");
+        poke(16#801A#, x"FD");
+        poke(16#801B#, x"01");
+        poke(16#801C#, x"A9");  -- PC byte2
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"8D");
+        poke(16#801F#, x"FE");
+        poke(16#8020#, x"01");
+        poke(16#8021#, x"A9");  -- PC byte3
+        poke(16#8022#, x"00");
+        poke(16#8023#, x"8D");
+        poke(16#8024#, x"FF");
+        poke(16#8025#, x"01");
+        poke(16#8026#, x"40");  -- RTI
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(600);
+        
+        check_mem(16#0640#, x"00", "Illegal trap not taken (32-bit)");
+        check_mem(16#0644#, x"5C", "Illegal op treated as NOP (32-bit)");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";

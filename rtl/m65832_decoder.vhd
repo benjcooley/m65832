@@ -24,6 +24,7 @@ entity M65832_Decoder is
         E_MODE          : in  std_logic;  -- Emulation mode
         M_WIDTH         : in  std_logic_vector(1 downto 0);  -- Accumulator width
         X_WIDTH         : in  std_logic_vector(1 downto 0);  -- Index width
+        COMPAT_MODE     : in  std_logic;
         
         -- Decoded instruction class
         IS_ALU_OP       : out std_logic;  -- ALU operation (ORA, AND, EOR, ADC, STA, LDA, CMP, SBC)
@@ -131,7 +132,8 @@ entity M65832_Decoder is
         IS_SVBR         : out std_logic;  -- Set VBR
         IS_CAS          : out std_logic;  -- Compare and swap
         IS_LLI          : out std_logic;  -- Load linked
-        IS_SCI          : out std_logic   -- Store conditional
+        IS_SCI          : out std_logic;  -- Store conditional
+        ILLEGAL_OP      : out std_logic
     );
 end M65832_Decoder;
 
@@ -156,7 +158,7 @@ begin
     -- Main Instruction Decoder
     ---------------------------------------------------------------------------
     
-    process(IR, IR_EXT, IS_EXTENDED, E_MODE, M_WIDTH, X_WIDTH, cc, bbb, aaa)
+    process(IR, IR_EXT, IS_EXTENDED, E_MODE, M_WIDTH, X_WIDTH, COMPAT_MODE, cc, bbb, aaa)
     begin
         -- Default outputs
         IS_ALU_OP     <= '0';
@@ -203,6 +205,7 @@ begin
         IS_CAS    <= '0';
         IS_LLI    <= '0';
         IS_SCI    <= '0';
+        ILLEGAL_OP <= '0';
         
         if IS_EXTENDED = '1' then
             -- Extended opcode page (after $02 prefix)
@@ -282,7 +285,21 @@ begin
                 when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" |
                      x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
                     INSTR_LEN <= "010";
-                when others => null;
+                when others =>
+                    if IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
+                       IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
+                       IR_EXT = x"E1" or IR_EXT = x"E2" or IR_EXT = x"E3" or IR_EXT = x"E4" or
+                       IR_EXT = x"E5" or IR_EXT = x"E6" then
+                        -- Reserved FP opcodes trap via TRAP vector
+                        INSTR_LEN <= "010";
+                    elsif COMPAT_MODE = '1' then
+                        IS_CONTROL <= '1';  -- Unknown extended op = NOP in compat
+                        INSTR_LEN <= "010";
+                    else
+                        ILLEGAL_OP <= '1';
+                        IS_CONTROL <= '1';
+                        INSTR_LEN <= "010";
+                    end if;
             end case;
             
         else
@@ -554,8 +571,11 @@ begin
                         when x"88" => IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_DST <= "010"; INSTR_LEN <= "001";  -- DEY
                         
                         when others => 
-                            IS_CONTROL <= '1';  -- Unknown = NOP
+                            IS_CONTROL <= '1';  -- Unknown opcode
                             INSTR_LEN <= "001";
+                            if COMPAT_MODE = '0' then
+                                ILLEGAL_OP <= '1';
+                            end if;
                     end case;
                     
                 when "11" =>
