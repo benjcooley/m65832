@@ -305,7 +305,11 @@ begin
                 when "10" =>
                     -- Group 2: ASL, ROL, LSR, ROR, STX, LDX, DEC, INC
                     -- plus implied/register transfers that share cc="10"
-                    if IR = x"B2" then
+                    if IR = x"22" then
+                        IS_JSL <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- JSL long
+                    elsif IR = x"62" then
+                        IS_PER <= '1'; IS_STACK <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- PER
+                    elsif IR = x"B2" then
                         IS_ALU_OP <= '1'; ALU_OP <= "101"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- LDA (dp)
                     elsif IR = x"92" then
                         IS_ALU_OP <= '1'; ALU_OP <= "100"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- STA (dp)
@@ -397,9 +401,9 @@ begin
                         
                         -- JSR, JMP
                         when x"20" => IS_JSR <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- JSR abs
-                        when x"22" => IS_JSL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "100";  -- JSL long
+                        when x"22" => IS_JSL <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- JSL long
                         when x"4C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "0101"; INSTR_LEN <= "011";  -- JMP abs
-                        when x"5C" => IS_JML <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "100";  -- JML long
+                        when x"5C" => IS_JML <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- JML long
                         when x"6C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1000"; INSTR_LEN <= "011";  -- JMP (abs)
                         when x"7C" => IS_JMP <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1001"; INSTR_LEN <= "011";  -- JMP (abs,X)
                         when x"DC" => IS_JML <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1011"; INSTR_LEN <= "011";  -- JML [abs]
@@ -430,7 +434,7 @@ begin
                         when x"8B" => IS_STACK <= '1'; REG_SRC <= "101"; INSTR_LEN <= "001";  -- PHB
                         when x"AB" => IS_STACK <= '1'; REG_DST <= "101"; INSTR_LEN <= "001";  -- PLB
                         when x"4B" => IS_STACK <= '1'; REG_SRC <= "111"; INSTR_LEN <= "001";  -- PHK
-                        when x"62" => IS_PER <= '1'; IS_STACK <= '1'; INSTR_LEN <= "011";     -- PER
+                        when x"62" => IS_PER <= '1'; IS_STACK <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011";     -- PER
                         when x"D4" => IS_STACK <= '1'; ADDR_MODE <= "0010"; INSTR_LEN <= "010"; -- PEI (dp)
                         when x"F4" => IS_STACK <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011"; -- PEA #imm16
                         
@@ -545,23 +549,31 @@ begin
                     
                 when "11" =>
                     -- Group 3: 65816 new addressing modes
-                    IS_ALU_OP <= '1';
-                    ALU_OP <= aaa;
-                    
-                    if IR = x"8F" then
-                        ALU_OP <= "100"; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- STA long
-                    elsif IR = x"9F" then
-                        ALU_OP <= "100"; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- STA long,X
+                    if IR = x"CB" then
+                        IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- WAI
+                    elsif IR = x"DB" then
+                        IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
+                    elsif IR = x"6B" then
+                        IS_RTL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";  -- RTL
                     else
-                        case bbb is
-                            when "000" => ADDR_MODE <= "1101"; INSTR_LEN <= "010";  -- sr,S
-                            when "001" => ADDR_MODE <= "1011"; INSTR_LEN <= "010";  -- [dp]
-                            when "010" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long
-                            when "011" => ADDR_MODE <= "1110"; INSTR_LEN <= "010";  -- (sr,S),Y
-                            when "100" => ADDR_MODE <= "1100"; INSTR_LEN <= "010";  -- [dp],Y
-                            when "111" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long,X
-                            when others => null;
-                        end case;
+                        IS_ALU_OP <= '1';
+                        ALU_OP <= aaa;
+                        
+                        if IR = x"8F" then
+                            ALU_OP <= "100"; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- STA long
+                        elsif IR = x"9F" then
+                            ALU_OP <= "100"; ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- STA long,X
+                        else
+                            case bbb is
+                                when "000" => ADDR_MODE <= "1101"; INSTR_LEN <= "010";  -- sr,S
+                                when "001" => ADDR_MODE <= "1011"; INSTR_LEN <= "010";  -- [dp]
+                                when "010" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long
+                                when "011" => ADDR_MODE <= "1110"; INSTR_LEN <= "010";  -- (sr,S),Y
+                                when "100" => ADDR_MODE <= "1100"; INSTR_LEN <= "010";  -- [dp],Y
+                                when "111" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long,X
+                                when others => null;
+                            end case;
+                        end if;
                     end if;
                     
                 when others => null;

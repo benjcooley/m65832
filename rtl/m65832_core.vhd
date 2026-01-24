@@ -308,6 +308,8 @@ architecture rtl of M65832_Core is
     -- Flag update control signals
     signal flag_c_in        : std_logic;
     signal flag_c_load      : std_logic;
+    signal flag_i_in        : std_logic;
+    signal flag_i_load      : std_logic;
     signal flag_nzv_load    : std_logic;
     signal flag_z_in        : std_logic;
     signal flag_n_in        : std_logic;
@@ -378,8 +380,8 @@ begin
         FLAG_C_LOAD => flag_c_load,
         FLAG_Z_IN   => flag_z_in,
         FLAG_Z_LOAD => flag_nzv_load,
-        FLAG_I_IN   => '0',
-        FLAG_I_LOAD => '0',
+        FLAG_I_IN   => flag_i_in,
+        FLAG_I_LOAD => flag_i_load,
         FLAG_D_IN   => '0',
         FLAG_D_LOAD => '0',
         FLAG_V_IN   => flag_v_in,
@@ -972,6 +974,9 @@ begin
                                         resize(unsigned(data_buffer(15 downto 0)), 24),
                                         32));
                             end if;
+                            if IS_JSL = '1' then
+                                jsr_return <= PC_reg;
+                            end if;
                         else
                             data_buffer(23 downto 16) <= DATA_IN;
                             eff_addr <= std_logic_vector(
@@ -986,6 +991,8 @@ begin
                             null;
                         elsif ADDR_MODE = "1011" or ADDR_MODE = "1100" then
                             null;
+                        elsif ADDR_MODE = "1111" and (IS_JML = '1' or IS_JSL = '1') then
+                            state <= ST_EXECUTE;
                         elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                             state <= ST_WRITE;
                         else
@@ -1850,7 +1857,11 @@ begin
             stack_write_reg <= B_reg;
         elsif IR = x"4B" then
             stack_write_reg <= x"000000" & PC_reg(23 downto 16);
-        elsif IR = x"F4" or IR = x"D4" or IR = x"62" then
+        elsif IR = x"62" then
+            -- PER: push PC-relative address (signed 16-bit offset)
+            stack_write_reg <= std_logic_vector(
+                signed(PC_reg) + resize(signed(data_buffer(15 downto 0)), 32));
+        elsif IR = x"F4" or IR = x"D4" then
             stack_write_reg <= data_buffer;
         else
             stack_write_reg <= A_reg;
@@ -2136,12 +2147,21 @@ begin
                  '1' when (IS_FLAG_OP = '1' and IR = x"38") else  -- SEC
                  ALU_CO;
     
+    -- Interrupt disable flag input: CLI/SEI
+    flag_i_in <= '0' when (IS_FLAG_OP = '1' and IR = x"58") else  -- CLI
+                 '1' when (IS_FLAG_OP = '1' and IR = x"78") else  -- SEI
+                 P_reg(P_I);
+    
     -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
     flag_c_load <= '1' when state = ST_EXECUTE and 
                    ((IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
                     (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
                     (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 
                                           RMW_OP = "010" or RMW_OP = "011")))  -- ASL, ROL, LSR, ROR
+                   else '0';
+    
+    flag_i_load <= '1' when state = ST_EXECUTE and
+                   (IS_FLAG_OP = '1' and (IR = x"58" or IR = x"78"))  -- CLI, SEI
                    else '0';
     
     -- N, Z, V flags load: most ALU operations and RMW operations
@@ -2181,6 +2201,7 @@ begin
     
     pc_direct <= DATA_IN & data_buffer(23 downto 0) when state = ST_VECTOR4
                  else data_buffer when (state = ST_RTI_NEXT and rti_step = to_unsigned(1, rti_step'length))
+                 else eff_addr when (state = ST_EXECUTE and (IS_JML = '1' or IS_JSL = '1'))
                  else std_logic_vector(unsigned(jsr_return) + 1);
     
     is_indirect_addr <= '1' when ((ADDR_MODE = "1000" and IS_JMP_d = '0') or
@@ -2263,7 +2284,8 @@ begin
                            ((state = ST_DECODE) and IR = x"02" and is_extended = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
-               else "111" when (state = ST_EXECUTE and IS_RTS = '1') -- RTS uses stored return
+               else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSL = '1'))
+                   -- RTS/RTL uses stored return, JML/JSL use eff_addr via pc_direct
                else "000";
     PC_DEC <= '0';
     ADDR_CTRL <= (others => '0');
