@@ -7,8 +7,8 @@
 -- This module:
 -- 1. Shadows hardware register writes from the 6502 core
 -- 2. Records writes with cycle timestamps for frame-accurate rendering
--- 3. Provides immediate read values for the servicer
--- 4. Signals the servicer when I/O reads need computed responses
+-- 3. Provides immediate read values for the main CPU
+-- 4. Signals the main CPU IRQ handler when I/O reads need computed responses
 
 library IEEE;
 use IEEE.std_logic_1164.all;
@@ -36,6 +36,7 @@ entity M65832_Shadow_IO is
         IO_WE           : in  std_logic;                      -- Write enable
         IO_RE           : in  std_logic;                      -- Read enable
         IO_ACK          : out std_logic;                      -- Access complete
+        IO_HIT          : out std_logic;                      -- Address hit (decoded)
         
         ---------------------------------------------------------------------------
         -- Cycle Timing
@@ -44,14 +45,14 @@ entity M65832_Shadow_IO is
         FRAME_NUMBER    : in  std_logic_vector(15 downto 0);  -- Current frame
         
         ---------------------------------------------------------------------------
-        -- Servicer Interface
+        -- Main CPU IRQ Interface
         ---------------------------------------------------------------------------
-        -- Signal servicer when read needs computed response
-        SERVICER_REQ    : out std_logic;
-        SERVICER_ADDR   : out std_logic_vector(15 downto 0);
-        -- Servicer provides computed read value
-        SERVICER_DATA   : in  std_logic_vector(7 downto 0);
-        SERVICER_VALID  : in  std_logic;
+        -- Signal main CPU when read needs computed response
+        IRQ_REQ         : out std_logic;
+        IRQ_ADDR        : out std_logic_vector(15 downto 0);
+        -- Main CPU provides computed read value
+        IRQ_DATA        : in  std_logic_vector(7 downto 0);
+        IRQ_VALID       : in  std_logic;
         
         ---------------------------------------------------------------------------
         -- Linux/M65832 Read Interface (for rendering process)
@@ -114,11 +115,11 @@ architecture rtl of M65832_Shadow_IO is
     
     signal bank_select  : integer range 0 to NUM_BANKS-1;
     signal reg_select   : std_logic_vector(5 downto 0);
-    signal io_hit       : std_logic;
+    signal io_hit_r     : std_logic;
     signal needs_service: std_logic;
     
     ---------------------------------------------------------------------------
-    -- Registers that need servicer computation on read
+    -- Registers that need computed response on read
     ---------------------------------------------------------------------------
     -- VIC-II sprite collision registers, raster counter, etc.
     
@@ -147,28 +148,28 @@ begin
     process(IO_ADDR, BANK0_BASE, BANK1_BASE, BANK2_BASE, BANK3_BASE)
         variable addr_offset : unsigned(15 downto 0);
     begin
-        io_hit <= '0';
+        io_hit_r <= '0';
         bank_select <= 0;
         reg_select <= (others => '0');
         
         -- Check Bank 0 (VIC-II: $D000-$D03F)
         if IO_ADDR(15 downto 6) = BANK0_BASE(15 downto 6) then
-            io_hit <= '1';
+            io_hit_r <= '1';
             bank_select <= 0;
             reg_select <= IO_ADDR(5 downto 0);
         -- Check Bank 1 (SID: $D400-$D43F)
         elsif IO_ADDR(15 downto 6) = BANK1_BASE(15 downto 6) then
-            io_hit <= '1';
+            io_hit_r <= '1';
             bank_select <= 1;
             reg_select <= IO_ADDR(5 downto 0);
         -- Check Bank 2 (CIA1: $DC00-$DC3F)
         elsif IO_ADDR(15 downto 6) = BANK2_BASE(15 downto 6) then
-            io_hit <= '1';
+            io_hit_r <= '1';
             bank_select <= 2;
             reg_select <= IO_ADDR(5 downto 0);
         -- Check Bank 3 (CIA2: $DD00-$DD3F)
         elsif IO_ADDR(15 downto 6) = BANK3_BASE(15 downto 6) then
-            io_hit <= '1';
+            io_hit_r <= '1';
             bank_select <= 3;
             reg_select <= IO_ADDR(5 downto 0);
         end if;
@@ -226,9 +227,9 @@ begin
         end if;
     end process;
     
-    -- Does current read need servicer?
+    -- Does current read need main CPU IRQ?
     needs_service <= service_masks(bank_select)(to_integer(unsigned(reg_select))) 
-                     when io_hit = '1' else '0';
+                     when io_hit_r = '1' else '0';
     
     ---------------------------------------------------------------------------
     -- Write Handling
@@ -251,7 +252,7 @@ begin
         elsif rising_edge(CLK) then
             overflow_r <= '0';
             
-            if IO_WE = '1' and io_hit = '1' then
+            if IO_WE = '1' and io_hit_r = '1' then
                 -- Update shadow register
                 shadow_regs(bank_select)(to_integer(unsigned(reg_select))) <= IO_DATA_IN;
                 
@@ -273,7 +274,7 @@ begin
     end process;
     
     ---------------------------------------------------------------------------
-    -- Read Handling with Servicer
+    -- Read Handling with Main CPU IRQ
     ---------------------------------------------------------------------------
     
     process(CLK, RST_N)
@@ -281,35 +282,35 @@ begin
         if RST_N = '0' then
             read_state <= RD_IDLE;
             read_data_r <= (others => '0');
-            SERVICER_REQ <= '0';
-            SERVICER_ADDR <= (others => '0');
+            IRQ_REQ <= '0';
+            IRQ_ADDR <= (others => '0');
             IO_ACK <= '0';
             
         elsif rising_edge(CLK) then
             IO_ACK <= '0';
-            SERVICER_REQ <= '0';
+            IRQ_REQ <= '0';
             
             case read_state is
                 when RD_IDLE =>
-                    if IO_RE = '1' and io_hit = '1' then
+                    if IO_RE = '1' and io_hit_r = '1' then
                         if needs_service = '1' then
-                            -- Need servicer to compute value
-                            SERVICER_REQ <= '1';
-                            SERVICER_ADDR <= IO_ADDR;
+                            -- Need main CPU to compute value
+                            IRQ_REQ <= '1';
+                            IRQ_ADDR <= IO_ADDR;
                             read_state <= RD_SERVICE_WAIT;
                         else
                             -- Return shadow register value immediately
                             read_data_r <= shadow_regs(bank_select)(to_integer(unsigned(reg_select)));
                             IO_ACK <= '1';
                         end if;
-                    elsif IO_WE = '1' and io_hit = '1' then
+                    elsif IO_WE = '1' and io_hit_r = '1' then
                         -- Write acknowledged immediately
                         IO_ACK <= '1';
                     end if;
                     
                 when RD_SERVICE_WAIT =>
-                    if SERVICER_VALID = '1' then
-                        read_data_r <= SERVICER_DATA;
+                    if IRQ_VALID = '1' then
+                        read_data_r <= IRQ_DATA;
                         IO_ACK <= '1';
                         read_state <= RD_IDLE;
                     end if;
@@ -337,7 +338,7 @@ begin
             
         elsif rising_edge(CLK) then
             -- Update count
-            if IO_WE = '1' and io_hit = '1' and fifo_full = '0' then
+            if IO_WE = '1' and io_hit_r = '1' and fifo_full = '0' then
                 if FIFO_RD = '1' and fifo_count_r > 0 then
                     -- Write and read: count unchanged
                     fifo_rd_ptr <= fifo_rd_ptr + 1;
@@ -365,5 +366,7 @@ begin
     
     SHADOW_DATA <= shadow_regs(to_integer(unsigned(SHADOW_BANK)))
                               (to_integer(unsigned(SHADOW_REG)));
+
+    IO_HIT <= io_hit_r;
 
 end rtl;

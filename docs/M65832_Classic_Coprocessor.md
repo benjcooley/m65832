@@ -1,20 +1,21 @@
 # M65832 Classic Coprocessor Architecture
 
-**Three-Core Design for Authentic Classic System Emulation**
+**Two-Core Design for Authentic Classic System Emulation**
 
 ---
 
 ## 1. Overview
 
-The M65832 SoC includes three interleaved processor cores:
+The M65832 SoC includes two interleaved processor cores:
 
 | Core | Purpose | ISA | Execution |
 |------|---------|-----|-----------|
 | **M65832** | Linux, modern apps | Full M65832 (32-bit) | 49/50 cycles |
-| **Servicer** | I/O handling, chip emulation | Extended 6502 | On-demand |
 | **6502** | Classic game code | Pure 6502 | 1/50 cycles (1 MHz) |
 
 This enables running classic 6502 software with cycle-accurate timing while Linux runs concurrently.
+
+**Note:** The original servicer core design is now replaced by main-CPU IRQ handling for computed MMIO reads. The sections below that describe the servicer core are kept for historical context and will be updated or removed as the IRQ path is finalized.
 
 ---
 
@@ -26,23 +27,22 @@ This enables running classic 6502 software with cycle-accurate timing while Linu
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          M65832 SoC                                  │
 │                                                                      │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            │
-│  │    M65832     │  │   Servicer    │  │     6502      │            │
-│  │    (Main)     │  │  (Extended)   │  │    (Game)     │            │
-│  │               │  │               │  │               │            │
-│  │ ┌───────────┐ │  │ ┌───────────┐ │  │ ┌───────────┐ │            │
-│  │ │A X Y (32b)│ │  │ │A X Y (8b) │ │  │ │A X Y (8b) │ │            │
-│  │ │S PC D B   │ │  │ │S PC P     │ │  │ │S PC P     │ │            │
-│  │ │R0-R63     │ │  │ │Extensions │ │  │ │Pure 6502  │ │            │
-│  │ └───────────┘ │  │ └───────────┘ │  │ └───────────┘ │            │
-│  │               │  │               │  │               │            │
-│  │  32-bit ALU   │  │  8-bit ALU    │  │  8-bit ALU    │            │
-│  │  Full decode  │  │  +BBOX,LDBY   │  │  6502 decode  │            │
-│  │               │  │               │  │               │            │
-│  └───────┬───────┘  └───────┬───────┘  └───────┬───────┘            │
-│          │                  │                  │                     │
-│          │                  │                  │                     │
-│          └──────────────────┼──────────────────┘                     │
+│  ┌───────────────┐  ┌───────────────┐                               │
+│  │    M65832     │  │     6502      │                               │
+│  │    (Main)     │  │    (Game)     │                               │
+│  │               │  │               │                               │
+│  │ ┌───────────┐ │  │ ┌───────────┐ │                               │
+│  │ │A X Y (32b)│ │  │ │A X Y (8b) │ │                               │
+│  │ │S PC D B   │ │  │ │S PC P     │ │                               │
+│  │ │R0-R63     │ │  │ │Pure 6502  │ │                               │
+│  │ └───────────┘ │  │ └───────────┘ │                               │
+│  │               │  │               │                               │
+│  │  32-bit ALU   │  │  8-bit ALU    │                               │
+│  │  Full decode  │  │  6502 decode  │                               │
+│  │               │  │               │                               │
+│  └───────┬───────┘  └───────┬───────┘                               │
+│          │                  │                                       │
+│          └──────────────────┘                                       │
 │                             │                                        │
 │                      ┌──────▼──────┐                                 │
 │                      │Memory Arbiter│                                │
@@ -64,14 +64,14 @@ This enables running classic 6502 software with cycle-accurate timing while Linu
 No context switching needed - each core has its own complete register set:
 
 ```
-M65832 Core:              Servicer Core:           6502 Core:
-├── A (32-bit)            ├── A (8-bit)            ├── A (8-bit)
-├── X (32-bit)            ├── X (8-bit)            ├── X (8-bit)
-├── Y (32-bit)            ├── Y (8-bit)            ├── Y (8-bit)
-├── S (32-bit)            ├── S (8-bit)            ├── S (8-bit)
-├── PC (32-bit)           ├── PC (16-bit)          ├── PC (16-bit)
-├── P (16-bit)            ├── P (8-bit)            ├── P (8-bit)
-├── D (32-bit)            └── (extensions)         └── VBR (32-bit)
+M65832 Core:              6502 Core:
+├── A (32-bit)            ├── A (8-bit)
+├── X (32-bit)            ├── X (8-bit)
+├── Y (32-bit)            ├── Y (8-bit)
+├── S (32-bit)            ├── S (8-bit)
+├── PC (32-bit)           ├── PC (16-bit)
+├── P (16-bit)            ├── P (8-bit)
+├── D (32-bit)            └── VBR (32-bit)
 ├── B (32-bit)
 ├── VBR (32-bit)
 └── R0-R63 (32-bit each)
