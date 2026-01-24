@@ -3865,6 +3865,44 @@ begin
         check_mem(16#0707#, x"55", "RSET LDF/STF high byte3");
 
         -----------------------------------------------------------------------
+        -- TEST 100D: FPU reserved opcode trap
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100D: FPU reserved trap";
+        
+        -- Trap vector for FP opcode $D9 -> VEC_SYSCALL + $D9*4 (wraps to $0338)
+        poke(16#0338#, x"00");
+        poke(16#0339#, x"90");
+        poke(16#033A#, x"00");
+        poke(16#033B#, x"00");
+        
+        -- Handler at $9000: LDA #$A5, STA $0709, RTI
+        poke(16#9000#, x"A9");
+        poke(16#9001#, x"A5");
+        poke(16#9002#, x"8D");
+        poke(16#9003#, x"09");
+        poke(16#9004#, x"07");
+        poke(16#9005#, x"40");
+        
+        -- Program: execute reserved FP opcode, then write $0708 and BRK
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"D9");  -- reserved FP opcode -> trap
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"5A");
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"08");
+        poke(16#8006#, x"07");
+        poke(16#8007#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0709#, x"A5", "FP trap handler wrote");
+        check_mem(16#0708#, x"5A", "Returned after FP trap");
+
+        -----------------------------------------------------------------------
         -- TEST 100: TRAP vector + RTI
         -----------------------------------------------------------------------
         report "";
