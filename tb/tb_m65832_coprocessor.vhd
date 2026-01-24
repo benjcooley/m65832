@@ -46,6 +46,7 @@ architecture sim of tb_M65832_Coprocessor is
     signal mem : mem_t := (others => x"00");
     signal init_done : std_logic := '0';
     signal write_seen : std_logic := '0';
+    signal irq_read_seen : std_logic := '0';
     signal slot_count : unsigned(31 downto 0) := (others => '0');
     signal write_count : unsigned(31 downto 0) := (others => '0');
 begin
@@ -99,9 +100,15 @@ begin
                 mem(16#0002#) <= x"8D";
                 mem(16#0003#) <= x"00";
                 mem(16#0004#) <= x"04";
-                mem(16#0005#) <= x"4C";
-                mem(16#0006#) <= x"00";
-                mem(16#0007#) <= x"00";
+                mem(16#0005#) <= x"AD";
+                mem(16#0006#) <= x"12";
+                mem(16#0007#) <= x"D0";
+                mem(16#0008#) <= x"8D";
+                mem(16#0009#) <= x"01";
+                mem(16#000A#) <= x"04";
+                mem(16#000B#) <= x"4C";
+                mem(16#000C#) <= x"00";
+                mem(16#000D#) <= x"00";
                 mem(16#FFFC#) <= x"00";
                 mem(16#FFFD#) <= x"00";
                 init_done <= '1';
@@ -120,7 +127,25 @@ begin
                     if bus_data_out = x"42" then
                         write_seen <= '1';
                     end if;
+                elsif bus_addr(15 downto 0) = x"0401" then
+                    if bus_data_out = x"5A" then
+                        irq_read_seen <= '1';
+                    end if;
                 end if;
+            end if;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
+    -- IRQ response (simulate main CPU computed read)
+    ---------------------------------------------------------------------------
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            irq_valid <= '0';
+            if irq_req = '1' then
+                irq_data <= x"5A";
+                irq_valid <= '1';
             end if;
         end if;
     end process;
@@ -151,6 +176,9 @@ begin
             severity failure;
         assert write_seen = '1'
             report "6502 did not write expected value to $0400"
+            severity failure;
+        assert irq_read_seen = '1'
+            report "6502 did not receive expected IRQ MMIO data at $0401"
             severity failure;
 
         report "Coprocessor integration test PASSED" severity note;
