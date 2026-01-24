@@ -97,6 +97,8 @@ architecture rtl of M65832_Core is
     signal IR           : std_logic_vector(7 downto 0);
     signal IR_EXT       : std_logic_vector(7 downto 0);
     signal is_extended  : std_logic;
+    signal wid_prefix   : std_logic;
+    signal wid_active   : std_logic;
     
     ---------------------------------------------------------------------------
     -- Register File Signals
@@ -121,6 +123,7 @@ architecture rtl of M65832_Core is
     
     signal E_mode, S_mode, R_mode : std_logic;
     signal M_width, X_width       : std_logic_vector(1 downto 0);
+    signal M_width_eff            : std_logic_vector(1 downto 0);
     
     ---------------------------------------------------------------------------
     -- ALU Signals
@@ -207,10 +210,61 @@ architecture rtl of M65832_Core is
     signal is_indirect_addr : std_logic;
     signal is_long_x        : std_logic;
     signal is_bit_op        : std_logic;
+    
+    -- Extended op helpers
+    signal ext_mul, ext_mulu, ext_div, ext_divu : std_logic;
+    signal ext_cas, ext_lli, ext_sci            : std_logic;
+    signal ext_sb, ext_svbr, ext_sd             : std_logic;
+    signal ext_lea, ext_trap                    : std_logic;
+    signal ext_tta, ext_tat                     : std_logic;
+    
+    -- Register window (DP-as-registers)
+    signal rw_addr1    : std_logic_vector(5 downto 0);
+    signal rw_data1    : std_logic_vector(31 downto 0);
+    signal rw_addr2    : std_logic_vector(5 downto 0);
+    signal rw_data2    : std_logic_vector(31 downto 0);
+    signal rw_waddr    : std_logic_vector(5 downto 0);
+    signal rw_wdata    : std_logic_vector(31 downto 0);
+    signal rw_we       : std_logic;
+    signal rw_width    : std_logic_vector(1 downto 0);
+    signal rw_byte_sel : std_logic_vector(1 downto 0);
+    signal dp_reg_index: std_logic_vector(5 downto 0);
+    signal dp_reg_index_next: std_logic_vector(5 downto 0);
+    signal dp_reg_index_next_plus1: std_logic_vector(5 downto 0);
+    
+    signal ext_ldq, ext_stq               : std_logic;
+    signal ldq_high_buffer                : std_logic_vector(31 downto 0);
+    signal ldq_low_buffer                 : std_logic_vector(31 downto 0);
+    signal ldq_high_phase                 : std_logic;
+    signal stq_high_reg                   : std_logic;
+    signal ext_repe, ext_sepe                   : std_logic;
+    signal ext_fence, ext_fencer, ext_fencew    : std_logic;
+    signal ext_stack32_push, ext_stack32_pull   : std_logic;
+    
+    signal ext_result       : std_logic_vector(31 downto 0);
+    signal ext_result_valid : std_logic;
+    signal exec_result      : std_logic_vector(31 downto 0);
+    signal ext_remainder    : std_logic_vector(31 downto 0);
+    signal ext_rem_valid    : std_logic;
+    signal ext_flag_z       : std_logic;
+    signal ext_flag_n       : std_logic;
+    signal ext_flag_v       : std_logic;
+    signal ext_flag_load    : std_logic;
+    
+    signal stack_is_pull    : std_logic;
+    signal stack_width      : std_logic_vector(1 downto 0);
+    signal stack_write_reg  : std_logic_vector(31 downto 0);
+    
+    signal link_valid       : std_logic;
+    signal link_addr        : std_logic_vector(31 downto 0);
+    signal cas_match        : std_logic;
+    signal sci_success      : std_logic;
     signal read_width       : std_logic_vector(1 downto 0);
     signal write_width      : std_logic_vector(1 downto 0);
     signal alu_width_eff    : std_logic_vector(1 downto 0);
     signal p_next           : std_logic_vector(P_WIDTH-1 downto 0);
+    signal p_override       : std_logic_vector(P_WIDTH-1 downto 0);
+    signal p_override_valid : std_logic;
     
     -- DR (data register) for address generation
     signal DR               : std_logic_vector(7 downto 0);
@@ -226,6 +280,9 @@ architecture rtl of M65832_Core is
     signal flag_c_in        : std_logic;
     signal flag_c_load      : std_logic;
     signal flag_nzv_load    : std_logic;
+    signal flag_z_in        : std_logic;
+    signal flag_n_in        : std_logic;
+    signal flag_v_in        : std_logic;
 
 begin
 
@@ -274,15 +331,15 @@ begin
         T_OUT       => T_reg,
         
         REG_WIN_EN  => R_mode,
-        RW_ADDR1    => (others => '0'),
-        RW_DATA1    => open,
-        RW_ADDR2    => (others => '0'),
-        RW_DATA2    => open,
-        RW_WADDR    => (others => '0'),
-        RW_WDATA    => (others => '0'),
-        RW_WE       => '0',
-        RW_WIDTH    => M_width,
-        RW_BYTE_SEL => "00",
+        RW_ADDR1    => rw_addr1,
+        RW_DATA1    => rw_data1,
+        RW_ADDR2    => rw_addr2,
+        RW_DATA2    => rw_data2,
+        RW_WADDR    => rw_waddr,
+        RW_WDATA    => rw_wdata,
+        RW_WE       => rw_we,
+        RW_WIDTH    => rw_width,
+        RW_BYTE_SEL => rw_byte_sel,
         
         P_IN        => P_in,
         P_LOAD      => P_load,
@@ -290,15 +347,15 @@ begin
         
         FLAG_C_IN   => flag_c_in,
         FLAG_C_LOAD => flag_c_load,
-        FLAG_Z_IN   => ALU_ZO,
+        FLAG_Z_IN   => flag_z_in,
         FLAG_Z_LOAD => flag_nzv_load,
         FLAG_I_IN   => '0',
         FLAG_I_LOAD => '0',
         FLAG_D_IN   => '0',
         FLAG_D_LOAD => '0',
-        FLAG_V_IN   => ALU_VO,
+        FLAG_V_IN   => flag_v_in,
         FLAG_V_LOAD => flag_nzv_load,
-        FLAG_N_IN   => ALU_SO,
+        FLAG_N_IN   => flag_n_in,
         FLAG_N_LOAD => flag_nzv_load,
         
         E_MODE      => E_mode,
@@ -307,7 +364,7 @@ begin
         M_WIDTH     => M_width,
         X_WIDTH     => X_width,
         
-        WIDTH_M     => M_width,
+        WIDTH_M     => M_width_eff,
         WIDTH_X     => X_width
     );
     
@@ -487,11 +544,20 @@ begin
             IR <= x"00";
             IR_EXT <= x"00";
             is_extended <= '0';
+            wid_prefix <= '0';
+            wid_active <= '0';
             data_buffer <= (others => '0');
             data_byte_count <= (others => '0');
             DR <= (others => '0');
             eff_addr <= (others => '0');
             jsr_return <= (others => '0');
+            link_valid <= '0';
+            link_addr <= (others => '0');
+            dp_reg_index <= (others => '0');
+            ldq_high_buffer <= (others => '0');
+            ldq_low_buffer <= (others => '0');
+            ldq_high_phase <= '0';
+            stq_high_reg <= '0';
         elsif rising_edge(CLK) then
             if CE = '1' and RDY = '1' then
                 case state is
@@ -509,33 +575,61 @@ begin
                         
                     when ST_DECODE =>
                         -- Check for extended opcode prefix
-                        if IR = x"02" and E_mode = '0' then
+                        if IR = x"02" and is_extended = '0' then
                             -- Extended opcode - fetch next byte
                             is_extended <= '1';
                             IR_EXT <= DATA_IN;
+                            state <= ST_DECODE;
+                            data_byte_count <= (others => '0');
                         end if;
                         
-                        -- Determine next state based on instruction
-                        if IS_CONTROL = '1' and IS_BRK = '0' and IS_COP = '0' then
-                            -- Simple control instruction (NOP, etc.)
+                        -- WID prefix ($42) extends next operand to 32-bit
+                        if IR = x"02" and is_extended = '0' then
+                            null;
+                        elsif IS_WID = '1' then
+                            wid_prefix <= '1';
+                            wid_active <= '0';
                             state <= ST_FETCH;
-                        elsif IS_TRANSFER = '1' then
-                            state <= ST_EXECUTE;
-                        elsif IS_FLAG_OP = '1' and IS_REP = '0' and IS_SEP = '0' then
-                            state <= ST_EXECUTE;
-                        elsif IS_BRANCH = '1' then
-                            state <= ST_BRANCH;
-                        elsif ADDR_MODE = "0000" then
-                            -- Implied/Accumulator
-                            state <= ST_EXECUTE;
-                        elsif ADDR_MODE = "0001" then
-                            -- Immediate
-                            state <= ST_READ;
-                            data_byte_count <= (others => '0');
                         else
-                            -- Need to compute address
-                            state <= ST_ADDR1;
-                            data_byte_count <= (others => '0');
+                            wid_active <= wid_prefix;
+                            wid_prefix <= '0';
+                            
+                            -- Determine next state based on instruction
+                            if IS_CONTROL = '1' and IS_BRK = '0' and IS_COP = '0' then
+                                -- Simple control instruction (NOP, etc.)
+                                state <= ST_FETCH;
+                            elsif IS_TRANSFER = '1' then
+                                state <= ST_EXECUTE;
+                            elsif IS_FLAG_OP = '1' and IS_REP = '0' and IS_SEP = '0' then
+                                state <= ST_EXECUTE;
+                            elsif IS_BRANCH = '1' then
+                                state <= ST_BRANCH;
+                            elsif IS_STACK = '1' then
+                                if IR = x"F4" or IR = x"D4" or IR = x"62" then
+                                    -- PEA/PEI/PER need operand read before push
+                                    if ADDR_MODE = "0001" then
+                                        state <= ST_READ;
+                                    else
+                                        state <= ST_ADDR1;
+                                    end if;
+                                elsif stack_is_pull = '1' then
+                                    state <= ST_PULL;
+                                else
+                                    state <= ST_PUSH;
+                                end if;
+                                data_byte_count <= (others => '0');
+                            elsif ADDR_MODE = "0000" then
+                                -- Implied/Accumulator
+                                state <= ST_EXECUTE;
+                            elsif ADDR_MODE = "0001" then
+                                -- Immediate
+                                state <= ST_READ;
+                                data_byte_count <= (others => '0');
+                            else
+                                -- Need to compute address
+                                state <= ST_ADDR1;
+                                data_byte_count <= (others => '0');
+                            end if;
                         end if;
                         
                     when ST_ADDR1 =>
@@ -548,21 +642,56 @@ begin
                                 -- Direct page modes - done after 1 byte
                                 -- Effective address = D + offset (with index if needed)
                                 if ADDR_MODE = "0011" then
+                                    -- Register window ignores D_reg; use offset + X low byte
+                                    dp_reg_index <= dp_reg_index_next;
                                     eff_addr <= D_reg(31 downto 8) &
                                                 std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
                                 elsif ADDR_MODE = "0100" then
+                                    -- Register window ignores D_reg; use offset + Y low byte
+                                    dp_reg_index <= dp_reg_index_next;
                                     eff_addr <= D_reg(31 downto 8) &
                                                 std_logic_vector(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)));
                                 else
+                                    -- Register window ignores D_reg; use offset
+                                    dp_reg_index <= dp_reg_index_next;
                                     eff_addr <= D_reg(31 downto 8) & DATA_IN;
                                 end if;
-                                if IS_ALU_OP = '1' and ALU_OP = "100" then
+                                if R_mode = '1' then
+                                    -- DP-as-registers: use reg window instead of memory
+                                    if ext_ldq = '1' then
+                                        data_buffer <= rw_data1;
+                                        ldq_low_buffer <= rw_data1;
+                                        ldq_high_buffer <= rw_data2;
+                                        ldq_high_phase <= '0';
+                                        state <= ST_EXECUTE;
+                                    elsif ext_stq = '1' then
+                                        stq_high_reg <= '1';
+                                        state <= ST_EXECUTE;
+                                    elsif IS_ALU_OP = '1' and ALU_OP = "100" then
+                                        state <= ST_FETCH;
+                                    elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+                                        state <= ST_FETCH;
+                                    else
+                                        data_buffer <= rw_data1;
+                                        state <= ST_EXECUTE;
+                                    end if;
+                                elsif ext_lea = '1' then
+                                    state <= ST_EXECUTE;
+                                elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                     -- Store operation
+                                    state <= ST_WRITE;
+                                elsif ext_stq = '1' then
+                                    data_byte_count <= (others => '0');
+                                    ldq_high_phase <= '0';
                                     state <= ST_WRITE;
                                 elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                     -- STX/STY
                                     state <= ST_WRITE;
                                 else
+                                    if ext_ldq = '1' then
+                                        data_byte_count <= (others => '0');
+                                        ldq_high_phase <= '0';
+                                    end if;
                                     state <= ST_READ;
                                 end if;
                             when "1001" =>
@@ -612,14 +741,18 @@ begin
                     when ST_ADDR2 =>
                         -- Second address byte
                         data_buffer(15 downto 8) <= DATA_IN;
+                        -- WID absolute addressing uses 32-bit operand
+                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                            state <= ST_ADDR3;
                         -- Compute absolute address: high byte : low byte (with index if needed)
-                        if ADDR_MODE = "0110" then
+                        elsif ADDR_MODE = "0110" then
                             -- Absolute,X
                             eff_addr <= std_logic_vector(
                                 resize(
                                     (resize(unsigned(DATA_IN), 16) sll 8) or
                                     resize(unsigned(data_buffer(7 downto 0)), 16),
                                     32) +
+                                unsigned(B_reg) +
                                 unsigned(X_reg));
                         elsif ADDR_MODE = "0111" then
                             -- Absolute,Y
@@ -628,6 +761,7 @@ begin
                                     (resize(unsigned(DATA_IN), 16) sll 8) or
                                     resize(unsigned(data_buffer(7 downto 0)), 16),
                                     32) +
+                                unsigned(B_reg) +
                                 unsigned(Y_reg));
                         elsif ADDR_MODE = "1000" or ADDR_MODE = "1001" or ADDR_MODE = "1010" or ADDR_MODE = "1011" or
                               ADDR_MODE = "1100" or ADDR_MODE = "1110" or ADDR_MODE = "1111" then
@@ -658,10 +792,13 @@ begin
                                 resize(
                                     (resize(unsigned(DATA_IN), 16) sll 8) or
                                     resize(unsigned(data_buffer(7 downto 0)), 16),
-                                    32));
+                                    32) +
+                                unsigned(B_reg));
                         end if;
                         
-                        if ADDR_MODE = "1000" and IS_JMP_d = '1' then
+                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                            null;
+                        elsif ADDR_MODE = "1000" and IS_JMP_d = '1' then
                             -- JMP (abs): pointer read follows
                             state <= ST_READ;
                         else
@@ -672,11 +809,20 @@ begin
                                         -- JSR: capture return address (PC of high byte)
                                         jsr_return <= PC_reg;
                                     end if;
-                                    if IS_ALU_OP = '1' and ALU_OP = "100" then
+                                    if ext_lea = '1' then
+                                        state <= ST_EXECUTE;
+                                    elsif IS_ALU_OP = '1' and ALU_OP = "100" then
+                                        state <= ST_WRITE;
+                                    elsif ext_stq = '1' then
+                                        data_byte_count <= (others => '0');
                                         state <= ST_WRITE;
                                     elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                         state <= ST_WRITE;
                                     else
+                                        if ext_ldq = '1' then
+                                            data_byte_count <= (others => '0');
+                                            ldq_high_phase <= '0';
+                                        end if;
                                         state <= ST_READ;
                                     end if;
                                 when "1000" | "1001" | "1010" | "1011" | "1100" | "1110" | "1111" =>
@@ -691,6 +837,9 @@ begin
                         if IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             -- JMP (abs,X): pointer low byte
                             DR <= DATA_IN;
+                            state <= ST_ADDR4;
+                        elsif wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                            data_buffer(23 downto 16) <= DATA_IN;
                             state <= ST_ADDR4;
                         elsif ADDR_MODE = "1000" then
                             -- (dp): pointer high in DATA_IN, low in data_buffer(7:0)
@@ -754,7 +903,9 @@ begin
                                     resize(unsigned(data_buffer(15 downto 0)), 24),
                                     32));
                         end if;
-                        if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                            null;
+                        elsif IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             null;
                         elsif ADDR_MODE = "1011" or ADDR_MODE = "1100" then
                             null;
@@ -765,7 +916,40 @@ begin
                         end if;
                         
                     when ST_ADDR4 =>
-                        if IS_JMP_d = '1' and ADDR_MODE = "1001" then
+                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                            if ADDR_MODE = "0110" then
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 32) sll 24) or
+                                        resize(unsigned(data_buffer(23 downto 0)), 32),
+                                        32) +
+                                    unsigned(X_reg));
+                            elsif ADDR_MODE = "0111" then
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 32) sll 24) or
+                                        resize(unsigned(data_buffer(23 downto 0)), 32),
+                                        32) +
+                                    unsigned(Y_reg));
+                            else
+                                eff_addr <= std_logic_vector(
+                                    resize(
+                                        (resize(unsigned(DATA_IN), 32) sll 24) or
+                                        resize(unsigned(data_buffer(23 downto 0)), 32),
+                                        32));
+                            end if;
+                            if ext_lea = '1' then
+                                state <= ST_EXECUTE;
+                            elsif IS_ALU_OP = '1' and ALU_OP = "100" then
+                                state <= ST_WRITE;
+                            elsif ext_stq = '1' then
+                                state <= ST_WRITE;
+                            elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+                                state <= ST_WRITE;
+                            else
+                                state <= ST_READ;
+                            end if;
+                        elsif IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             -- JMP (abs,X): pointer high byte, then jump
                             data_buffer(15 downto 8) <= DATA_IN;
                             state <= ST_FETCH;
@@ -806,14 +990,34 @@ begin
                         
                     when ST_READ =>
                         -- Read data byte
-                        data_buffer(7 downto 0) <= DATA_IN;
+                        if ext_ldq = '1' then
+                            if ldq_high_phase = '1' then
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
+                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            else
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
+                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            end if;
+                        else
+                            data_buffer(7 downto 0) <= DATA_IN;
+                        end if;
                         if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
                             DR <= DATA_IN;  -- latch indirect low byte
                         end if;
                         data_byte_count <= data_byte_count + 1;
                         
                         -- Check if we need more bytes based on width
-                        if read_width = WIDTH_8 or data_byte_count = "011" then
+                        if ext_ldq = '1' then
+                            state <= ST_READ2;
+                        elsif read_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_EXECUTE;
                         elsif read_width = WIDTH_16 and data_byte_count = "001" then
                             state <= ST_EXECUTE;
@@ -822,10 +1026,30 @@ begin
                         end if;
                         
                     when ST_READ2 =>
-                        data_buffer(15 downto 8) <= DATA_IN;
+                        if ext_ldq = '1' then
+                            if ldq_high_phase = '1' then
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
+                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            else
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
+                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            end if;
+                        else
+                            data_buffer(15 downto 8) <= DATA_IN;
+                        end if;
                         data_byte_count <= data_byte_count + 1;
                         if IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") then
                             state <= ST_FETCH;
+                        elsif ext_ldq = '1' then
+                            state <= ST_READ3;
                         elsif read_width = WIDTH_16 then
                             state <= ST_EXECUTE;
                         else
@@ -833,17 +1057,94 @@ begin
                         end if;
                         
                     when ST_READ3 =>
-                        data_buffer(23 downto 16) <= DATA_IN;
+                        if ext_ldq = '1' then
+                            if ldq_high_phase = '1' then
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
+                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            else
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
+                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            end if;
+                        else
+                            data_buffer(23 downto 16) <= DATA_IN;
+                        end if;
                         data_byte_count <= data_byte_count + 1;
                         state <= ST_READ4;
                         
                     when ST_READ4 =>
-                        data_buffer(31 downto 24) <= DATA_IN;
-                        state <= ST_EXECUTE;
+                        if ext_ldq = '1' then
+                            if ldq_high_phase = '1' then
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => data_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => data_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => data_buffer(23 downto 16) <= DATA_IN;
+                                    when others => data_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            else
+                                case data_byte_count(1 downto 0) is
+                                    when "00" => ldq_low_buffer(7 downto 0) <= DATA_IN;
+                                    when "01" => ldq_low_buffer(15 downto 8) <= DATA_IN;
+                                    when "10" => ldq_low_buffer(23 downto 16) <= DATA_IN;
+                                    when others => ldq_low_buffer(31 downto 24) <= DATA_IN;
+                                end case;
+                            end if;
+                        else
+                            data_buffer(31 downto 24) <= DATA_IN;
+                        end if;
+                        if ext_ldq = '1' then
+                            if data_byte_count = "011" and ldq_high_phase = '0' then
+                                ldq_high_phase <= '1';
+                                data_byte_count <= (others => '0');
+                                eff_addr <= std_logic_vector(unsigned(eff_addr) + 4);
+                                state <= ST_READ;
+                            elsif data_byte_count = "011" and ldq_high_phase = '1' then
+                                ldq_high_buffer(23 downto 0) <= data_buffer(23 downto 0);
+                                ldq_high_buffer(31 downto 24) <= DATA_IN;
+                                ldq_high_phase <= '0';
+                                state <= ST_EXECUTE;
+                            else
+                                data_byte_count <= data_byte_count + 1;
+                                state <= ST_READ;
+                            end if;
+                        else
+                            state <= ST_EXECUTE;
+                        end if;
                         
                     when ST_EXECUTE =>
                         -- Execute instruction
-                        if IS_RMW_OP = '1' and ADDR_MODE /= "0000" and
+                        if stq_high_reg = '1' then
+                            stq_high_reg <= '0';
+                            state <= ST_FETCH;
+                        elsif ext_lli = '1' then
+                            link_valid <= '1';
+                            link_addr <= eff_addr;
+                        end if;
+                        if IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62") then
+                            -- PEA/PEI/PER push after operand fetch
+                            state <= ST_PUSH;
+                            data_byte_count <= (others => '0');
+                        elsif ext_cas = '1' and cas_match = '1' then
+                            -- CAS match: write A back
+                            state <= ST_WRITE;
+                            data_byte_count <= (others => '0');
+                        elsif ext_sci = '1' and sci_success = '1' then
+                            -- SCI success: write A
+                            state <= ST_WRITE;
+                            data_byte_count <= (others => '0');
+                        elsif R_mode = '1' and IS_RMW_OP = '1' and
+                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") and
+                              RMW_OP /= "100" and RMW_OP /= "101" then
+                            -- Register-window RMW writes back via reg file
+                            state <= ST_FETCH;
+                        elsif IS_RMW_OP = '1' and ADDR_MODE /= "0000" and
                            RMW_OP /= "100" and RMW_OP /= "101" then
                             -- Memory RMW (INC/DEC/shift/rotate): write back result
                             state <= ST_WRITE;
@@ -853,8 +1154,11 @@ begin
                         end if;
                         
                     when ST_WRITE =>
+                        link_valid <= '0';
                         data_byte_count <= data_byte_count + 1;
-                        if write_width = WIDTH_8 or data_byte_count = "011" then
+                        if ext_stq = '1' then
+                            state <= ST_WRITE2;
+                        elsif write_width = WIDTH_8 or data_byte_count = "011" then
                             state <= ST_FETCH;
                         elsif write_width = WIDTH_16 and data_byte_count = "001" then
                             state <= ST_FETCH;
@@ -864,7 +1168,9 @@ begin
                         
                     when ST_WRITE2 =>
                         data_byte_count <= data_byte_count + 1;
-                        if write_width = WIDTH_16 then
+                        if ext_stq = '1' then
+                            state <= ST_WRITE3;
+                        elsif write_width = WIDTH_16 then
                             state <= ST_FETCH;
                         else
                             state <= ST_WRITE3;
@@ -875,13 +1181,43 @@ begin
                         state <= ST_WRITE4;
                         
                     when ST_WRITE4 =>
-                        state <= ST_FETCH;
+                        if ext_stq = '1' then
+                            if data_byte_count = "111" then
+                                state <= ST_FETCH;
+                            else
+                                data_byte_count <= data_byte_count + 1;
+                                state <= ST_WRITE;
+                            end if;
+                        else
+                            state <= ST_FETCH;
+                        end if;
                         
                     when ST_PUSH =>
-                        state <= ST_FETCH;  -- Simplified
+                        data_byte_count <= data_byte_count + 1;
+                        if stack_width = WIDTH_8 or data_byte_count = "011" then
+                            state <= ST_FETCH;
+                        elsif stack_width = WIDTH_16 and data_byte_count = "001" then
+                            state <= ST_FETCH;
+                        else
+                            state <= ST_PUSH;
+                        end if;
                         
                     when ST_PULL =>
-                        state <= ST_FETCH;  -- Simplified
+                        case data_byte_count is
+                            when "000" => data_buffer(7 downto 0) <= DATA_IN;
+                            when "001" => data_buffer(15 downto 8) <= DATA_IN;
+                            when "010" => data_buffer(23 downto 16) <= DATA_IN;
+                            when "011" => data_buffer(31 downto 24) <= DATA_IN;
+                            when others => null;
+                        end case;
+                        data_byte_count <= data_byte_count + 1;
+                        if stack_width = WIDTH_8 or data_byte_count = "011" then
+                            state <= ST_EXECUTE;
+                        elsif stack_width = WIDTH_16 and data_byte_count = "001" then
+                            state <= ST_EXECUTE;
+                        else
+                            state <= ST_PULL;
+                        end if;
                         
                     when ST_BRANCH =>
                         DR <= DATA_IN;
@@ -986,11 +1322,13 @@ begin
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES)
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg, stack_width, ext_stq)
         variable write_reg : std_logic_vector(31 downto 0);
     begin
         -- Select source register for stores
-        if IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" then
+        if state = ST_PUSH then
+            write_reg := stack_write_reg;
+        elsif IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" then
             -- RMW writeback uses ALU result
             write_reg := ALU_RES;
         elsif IS_ALU_OP = '1' and ALU_OP = "100" then
@@ -1007,13 +1345,49 @@ begin
             write_reg := A_reg;
         end if;
         
-        case data_byte_count is
-            when "000" => DATA_OUT <= write_reg(7 downto 0);
-            when "001" => DATA_OUT <= write_reg(15 downto 8);
-            when "010" => DATA_OUT <= write_reg(23 downto 16);
-            when "011" => DATA_OUT <= write_reg(31 downto 24);
-            when others => DATA_OUT <= write_reg(7 downto 0);
-        end case;
+        if ext_stq = '1' then
+            if data_byte_count(2) = '1' then
+                case data_byte_count(1 downto 0) is
+                    when "00" => DATA_OUT <= T_reg(7 downto 0);
+                    when "01" => DATA_OUT <= T_reg(15 downto 8);
+                    when "10" => DATA_OUT <= T_reg(23 downto 16);
+                    when others => DATA_OUT <= T_reg(31 downto 24);
+                end case;
+            else
+                case data_byte_count(1 downto 0) is
+                    when "00" => DATA_OUT <= A_reg(7 downto 0);
+                    when "01" => DATA_OUT <= A_reg(15 downto 8);
+                    when "10" => DATA_OUT <= A_reg(23 downto 16);
+                    when others => DATA_OUT <= A_reg(31 downto 24);
+                end case;
+            end if;
+        elsif state = ST_PUSH then
+            if stack_width = WIDTH_8 then
+                DATA_OUT <= write_reg(7 downto 0);
+            elsif stack_width = WIDTH_16 then
+                if data_byte_count = "000" then
+                    DATA_OUT <= write_reg(15 downto 8);
+                else
+                    DATA_OUT <= write_reg(7 downto 0);
+                end if;
+            else
+                case data_byte_count is
+                    when "000" => DATA_OUT <= write_reg(31 downto 24);
+                    when "001" => DATA_OUT <= write_reg(23 downto 16);
+                    when "010" => DATA_OUT <= write_reg(15 downto 8);
+                    when "011" => DATA_OUT <= write_reg(7 downto 0);
+                    when others => DATA_OUT <= write_reg(7 downto 0);
+                end case;
+            end if;
+        else
+            case data_byte_count is
+                when "000" => DATA_OUT <= write_reg(7 downto 0);
+                when "001" => DATA_OUT <= write_reg(15 downto 8);
+                when "010" => DATA_OUT <= write_reg(23 downto 16);
+                when "011" => DATA_OUT <= write_reg(31 downto 24);
+                when others => DATA_OUT <= write_reg(7 downto 0);
+            end case;
+        end if;
     end process;
     
     ---------------------------------------------------------------------------
@@ -1061,13 +1435,172 @@ begin
     ALU_VI <= P_reg(P_V);
     ALU_SI <= P_reg(P_N);
     
+    exec_result <= ext_result when ext_result_valid = '1' else ALU_RES;
+    
+    process(ext_mul, ext_mulu, ext_div, ext_divu, ext_lea, M_width, A_reg, data_buffer, eff_addr)
+        variable a_s32 : signed(31 downto 0);
+        variable b_s32 : signed(31 downto 0);
+        variable a_u32 : unsigned(31 downto 0);
+        variable b_u32 : unsigned(31 downto 0);
+        variable q_s32 : signed(31 downto 0);
+        variable q_u32 : unsigned(31 downto 0);
+        variable r_s32 : signed(31 downto 0);
+        variable r_u32 : unsigned(31 downto 0);
+    begin
+        ext_result <= (others => '0');
+        ext_remainder <= (others => '0');
+        ext_result_valid <= '0';
+        ext_rem_valid <= '0';
+        
+        if ext_lea = '1' then
+            ext_result <= eff_addr;
+            ext_result_valid <= '1';
+        elsif ext_mul = '1' then
+            ext_result_valid <= '1';
+            if M_width = WIDTH_8 then
+                a_s32 := resize(signed(A_reg(7 downto 0)), 32);
+                b_s32 := resize(signed(data_buffer(7 downto 0)), 32);
+                ext_result <= std_logic_vector(resize(a_s32 * b_s32, 32));
+            elsif M_width = WIDTH_16 then
+                a_s32 := resize(signed(A_reg(15 downto 0)), 32);
+                b_s32 := resize(signed(data_buffer(15 downto 0)), 32);
+                ext_result <= std_logic_vector(resize(a_s32 * b_s32, 32));
+            else
+                a_s32 := signed(A_reg);
+                b_s32 := signed(data_buffer);
+                ext_result <= std_logic_vector(resize(a_s32 * b_s32, 32));
+            end if;
+        elsif ext_mulu = '1' then
+            ext_result_valid <= '1';
+            if M_width = WIDTH_8 then
+                a_u32 := resize(unsigned(A_reg(7 downto 0)), 32);
+                b_u32 := resize(unsigned(data_buffer(7 downto 0)), 32);
+                ext_result <= std_logic_vector(resize(a_u32 * b_u32, 32));
+            elsif M_width = WIDTH_16 then
+                a_u32 := resize(unsigned(A_reg(15 downto 0)), 32);
+                b_u32 := resize(unsigned(data_buffer(15 downto 0)), 32);
+                ext_result <= std_logic_vector(resize(a_u32 * b_u32, 32));
+            else
+                a_u32 := unsigned(A_reg);
+                b_u32 := unsigned(data_buffer);
+                ext_result <= std_logic_vector(resize(a_u32 * b_u32, 32));
+            end if;
+        elsif ext_div = '1' then
+            ext_result_valid <= '1';
+            ext_rem_valid <= '1';
+            if M_width = WIDTH_8 then
+                a_s32 := resize(signed(A_reg(7 downto 0)), 32);
+                b_s32 := resize(signed(data_buffer(7 downto 0)), 32);
+            elsif M_width = WIDTH_16 then
+                a_s32 := resize(signed(A_reg(15 downto 0)), 32);
+                b_s32 := resize(signed(data_buffer(15 downto 0)), 32);
+            else
+                a_s32 := signed(A_reg);
+                b_s32 := signed(data_buffer);
+            end if;
+            if b_s32 = 0 then
+                q_s32 := (others => '0');
+                r_s32 := a_s32;
+            else
+                q_s32 := a_s32 / b_s32;
+                r_s32 := a_s32 mod b_s32;
+            end if;
+            ext_result <= std_logic_vector(q_s32);
+            ext_remainder <= std_logic_vector(r_s32);
+        elsif ext_divu = '1' then
+            ext_result_valid <= '1';
+            ext_rem_valid <= '1';
+            if M_width = WIDTH_8 then
+                a_u32 := resize(unsigned(A_reg(7 downto 0)), 32);
+                b_u32 := resize(unsigned(data_buffer(7 downto 0)), 32);
+            elsif M_width = WIDTH_16 then
+                a_u32 := resize(unsigned(A_reg(15 downto 0)), 32);
+                b_u32 := resize(unsigned(data_buffer(15 downto 0)), 32);
+            else
+                a_u32 := unsigned(A_reg);
+                b_u32 := unsigned(data_buffer);
+            end if;
+            if b_u32 = 0 then
+                q_u32 := (others => '0');
+                r_u32 := a_u32;
+            else
+                q_u32 := a_u32 / b_u32;
+                r_u32 := a_u32 mod b_u32;
+            end if;
+            ext_result <= std_logic_vector(q_u32);
+            ext_remainder <= std_logic_vector(r_u32);
+        end if;
+    end process;
+    
+    process(ext_result, ext_result_valid, ext_lea, ext_mul, ext_mulu, ext_div, ext_divu, ext_lli, ext_tta, T_reg,
+            stack_is_pull, IR, data_buffer, M_width, X_width)
+        variable value32 : std_logic_vector(31 downto 0);
+        variable width_sel : std_logic_vector(1 downto 0);
+    begin
+        ext_flag_load <= '0';
+        ext_flag_z <= '0';
+        ext_flag_n <= '0';
+        ext_flag_v <= '0';
+        
+        if ext_tta = '1' then
+            ext_flag_load <= '1';
+            value32 := T_reg;
+            width_sel := M_width;
+        elsif ext_result_valid = '1' and ext_lea = '0' then
+            ext_flag_load <= '1';
+            value32 := ext_result;
+            width_sel := M_width;
+        elsif ext_lli = '1' then
+            ext_flag_load <= '1';
+            value32 := data_buffer;
+            width_sel := M_width;
+        elsif stack_is_pull = '1' and (IR = x"68" or IR = x"FA" or IR = x"7A") then
+            ext_flag_load <= '1';
+            value32 := data_buffer;
+            if IR = x"68" then
+                width_sel := M_width;
+            else
+                width_sel := X_width;
+            end if;
+        end if;
+        
+        if ext_flag_load = '1' then
+            if width_sel = WIDTH_8 then
+                if value32(7 downto 0) = x"00" then
+                    ext_flag_z <= '1';
+                else
+                    ext_flag_z <= '0';
+                end if;
+                ext_flag_n <= value32(7);
+            elsif width_sel = WIDTH_16 then
+                if value32(15 downto 0) = x"0000" then
+                    ext_flag_z <= '1';
+                else
+                    ext_flag_z <= '0';
+                end if;
+                ext_flag_n <= value32(15);
+            else
+                if value32 = x"00000000" then
+                    ext_flag_z <= '1';
+                else
+                    ext_flag_z <= '0';
+                end if;
+                ext_flag_n <= value32(31);
+            end if;
+        end if;
+    end process;
     is_bit_op <= '1' when (IS_ALU_OP = '1' and ALU_OP = "001" and
                            (IR = x"24" or IR = x"2C" or IR = x"34" or
                             IR = x"3C" or IR = x"89"))
                 else '0';
     
     read_width <= WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
+                  WIDTH_16 when (IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62")) else
                   WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
+                  WIDTH_8 when (ext_repe = '1' or ext_sepe = '1' or ext_trap = '1') else
+                  WIDTH_32 when (is_extended = '1' and (IR_EXT = x"20" or IR_EXT = x"22" or IR_EXT = x"24")) else
+                  WIDTH_32 when (is_extended = '1' and (IR_EXT = x"21" or IR_EXT = x"23" or IR_EXT = x"25")) else
+                  WIDTH_32 when (wid_active = '1' and ADDR_MODE = "0001") else
                   X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
                                 (REG_DST = "001" or REG_DST = "010")) else
                   X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
@@ -1077,6 +1610,59 @@ begin
     write_width <= X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
                                  (REG_SRC = "001" or REG_SRC = "010")) else
                    M_width;
+    
+    M_width_eff <= WIDTH_32 when ext_ldq = '1' else M_width;
+
+    process(IR, M_width, X_width, A_reg, X_reg, Y_reg, D_reg, B_reg, VBR_reg, P_reg, PC_reg, data_buffer,
+            ext_stack32_push, ext_stack32_pull)
+    begin
+        stack_width <= WIDTH_8;
+        stack_write_reg <= (others => '0');
+        
+        if ext_stack32_push = '1' or ext_stack32_pull = '1' then
+            stack_width <= WIDTH_32;
+        elsif IR = x"48" or IR = x"68" then
+            stack_width <= M_width;
+        elsif IR = x"DA" or IR = x"FA" or IR = x"5A" or IR = x"7A" then
+            stack_width <= X_width;
+        elsif IR = x"0B" or IR = x"2B" then
+            stack_width <= WIDTH_16;
+        elsif IR = x"F4" or IR = x"D4" or IR = x"62" then
+            stack_width <= WIDTH_16;
+        else
+            stack_width <= WIDTH_8;
+        end if;
+        
+        if ext_stack32_push = '1' then
+            if IR_EXT = x"70" then
+                stack_write_reg <= D_reg;
+            elsif IR_EXT = x"72" then
+                stack_write_reg <= B_reg;
+            elsif IR_EXT = x"74" then
+                stack_write_reg <= VBR_reg;
+            else
+                stack_write_reg <= (others => '0');
+            end if;
+        elsif IR = x"08" then
+            stack_write_reg <= x"000000" & P_reg(7 downto 0);
+        elsif IR = x"48" then
+            stack_write_reg <= A_reg;
+        elsif IR = x"DA" then
+            stack_write_reg <= X_reg;
+        elsif IR = x"5A" then
+            stack_write_reg <= Y_reg;
+        elsif IR = x"0B" then
+            stack_write_reg <= D_reg;
+        elsif IR = x"8B" then
+            stack_write_reg <= B_reg;
+        elsif IR = x"4B" then
+            stack_write_reg <= x"000000" & PC_reg(23 downto 16);
+        elsif IR = x"F4" or IR = x"D4" or IR = x"62" then
+            stack_write_reg <= data_buffer;
+        else
+            stack_write_reg <= A_reg;
+        end if;
+    end process;
     
     process(IS_RMW_OP, RMW_OP, ALU_OP, M_width, is_bit_op)
     begin
@@ -1119,10 +1705,15 @@ begin
     
     -- Accumulator input: data_buffer for loads, ALU result for operations, register for transfers
     -- ALU_OP: 000=ORA, 001=AND, 010=EOR, 011=ADC, 100=STA, 101=LDA, 110=CMP, 111=SBC
-    A_in <= data_buffer when (IS_ALU_OP = '1' and ALU_OP = "101") 
+    A_in <= data_buffer when ((IS_ALU_OP = '1' and ALU_OP = "101") or
+                               ext_lli = '1' or
+                               (stack_is_pull = '1' and IR = x"68"))
+            else ldq_low_buffer when (ext_ldq = '1')
+            else T_reg when (ext_tta = '1')
             else X_reg when (IS_TRANSFER = '1' and REG_SRC = "001" and REG_DST = "000")  -- TXA
             else Y_reg when (IS_TRANSFER = '1' and REG_SRC = "010" and REG_DST = "000")  -- TYA
-            else ALU_RES;
+            else eff_addr when (ext_lea = '1')
+            else exec_result;
     
     -- A loads on: LDA, ALU operations that produce results (not STA, not CMP),
     -- accumulator RMW (ASL A, etc.), or transfers to A (TXA, TYA)
@@ -1130,30 +1721,39 @@ begin
               ((IS_ALU_OP = '1' and ALU_OP /= "100" and ALU_OP /= "110" and is_bit_op = '0') or  -- ALU ops except STA, CMP, BIT
                (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "000" and 
                 RMW_OP /= "100" and RMW_OP /= "101") or  -- Accumulator RMW (not stores/loads)
-               (IS_TRANSFER = '1' and REG_DST = "000"))  -- Transfers to A (TXA, TYA)
+               (IS_TRANSFER = '1' and REG_DST = "000") or  -- Transfers to A (TXA, TYA)
+               ext_lli = '1' or ext_lea = '1' or ext_mul = '1' or ext_mulu = '1' or
+               ext_div = '1' or ext_divu = '1' or ext_tta = '1' or ext_ldq = '1' or
+               (stack_is_pull = '1' and IR = x"68"))
               else '0';
     
     -- X register: LDX is RMW_OP = "101" with REG_DST = "001"
     -- Also handle transfers TAX (REG_DST = "001")
     -- Also handle INX/DEX (RMW_OP = "110"/"111" with REG_DST = "001")
     X_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "001")
+            else data_buffer when (stack_is_pull = '1' and IR = x"FA")
+            else data_buffer when (ext_cas = '1' and cas_match = '0')
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "001")
             else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "001")
             else (others => '0');
     X_load <= '1' when state = ST_EXECUTE and 
               ((IS_RMW_OP = '1' and REG_DST = "001" and RMW_OP /= "100") or  -- LDX, INX, DEX
-               (IS_TRANSFER = '1' and REG_DST = "001"))
+               (IS_TRANSFER = '1' and REG_DST = "001") or
+               (stack_is_pull = '1' and IR = x"FA") or
+               (ext_cas = '1' and cas_match = '0'))
               else '0';
     
     -- Y register: LDY is RMW_OP = "101" with REG_DST = "010"
     -- Also handle INY/DEY (RMW_OP = "110"/"111" with REG_DST = "010")
     Y_in <= data_buffer when (IS_RMW_OP = '1' and RMW_OP = "101" and REG_DST = "010")
+            else data_buffer when (stack_is_pull = '1' and IR = x"7A")
             else A_reg when (IS_TRANSFER = '1' and REG_DST = "010")
             else ALU_RES when (IS_RMW_OP = '1' and REG_DST = "010")
             else (others => '0');
     Y_load <= '1' when state = ST_EXECUTE and 
               ((IS_RMW_OP = '1' and REG_DST = "010" and RMW_OP /= "100") or  -- LDY, INY, DEY
-               (IS_TRANSFER = '1' and REG_DST = "010"))
+               (IS_TRANSFER = '1' and REG_DST = "010") or
+               (stack_is_pull = '1' and IR = x"7A"))
               else '0';
     
     -- Stack pointer
@@ -1162,22 +1762,136 @@ begin
     SP_inc <= '1' when state = ST_PULL else '0';
     SP_dec <= '1' when state = ST_PUSH else '0';
     
-    D_in <= (others => '0');
-    D_load <= '0';
-    B_in <= (others => '0');
-    B_load <= '0';
-    VBR_in <= (others => '0');
-    VBR_load <= '0';
-    T_in <= (others => '0');
-    T_load <= '0';
+    D_in <= data_buffer;
+    D_load <= '1' when state = ST_EXECUTE and
+              ((stack_is_pull = '1' and IR = x"2B") or
+               (ext_stack32_pull = '1' and IR_EXT = x"71") or
+               ext_sd = '1')
+              else '0';
+    
+    B_in <= data_buffer;
+    B_load <= '1' when state = ST_EXECUTE and
+              ((stack_is_pull = '1' and IR = x"AB") or
+               (ext_stack32_pull = '1' and IR_EXT = x"73") or
+               ext_sb = '1')
+              else '0';
+    
+    VBR_in <= data_buffer;
+    VBR_load <= '1' when state = ST_EXECUTE and
+                ((ext_stack32_pull = '1' and IR_EXT = x"75") or
+                 ext_svbr = '1')
+                else '0';
+    
+    T_in <= ext_remainder when ext_rem_valid = '1'
+            else ldq_high_buffer when ext_ldq = '1'
+            else A_reg;
+    T_load <= '1' when state = ST_EXECUTE and (ext_rem_valid = '1' or ext_tat = '1' or ext_ldq = '1') else '0';
+
+    ---------------------------------------------------------------------------
+    -- Register Window Access (DP-as-registers)
+    ---------------------------------------------------------------------------
+    
+    rw_addr1 <= dp_reg_index_next when (state = ST_ADDR1 and
+                                        (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                else dp_reg_index;
+    rw_addr2 <= dp_reg_index_next_plus1 when (ext_ldq = '1' and R_mode = '1' and state = ST_ADDR1 and
+                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                else (others => '0');
+    rw_waddr <= dp_reg_index_next_plus1 when (stq_high_reg = '1' and state = ST_EXECUTE)
+                else dp_reg_index_next when (state = ST_ADDR1 and
+                                             (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                else dp_reg_index;
+    rw_width <= X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
+                              (REG_DST = "001" or REG_DST = "010")) else
+                X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
+                              (REG_SRC = "001" or REG_SRC = "010")) else
+                M_width;
+    rw_byte_sel <= "00";
+    
+    process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg)
+    begin
+        if stq_high_reg = '1' then
+            rw_wdata <= T_reg;
+        elsif IS_ALU_OP = '1' and ALU_OP = "100" then
+            rw_wdata <= A_reg;
+        elsif IS_RMW_OP = '1' and RMW_OP = "100" then
+            if REG_SRC = "001" then
+                rw_wdata <= X_reg;
+            else
+                rw_wdata <= Y_reg;
+            end if;
+        elsif IS_RMW_OP = '1' then
+            rw_wdata <= ALU_RES;
+        else
+            rw_wdata <= A_reg;
+        end if;
+    end process;
+    
+    rw_we <= '1' when (R_mode = '1' and
+                       ((state = ST_ADDR1 and (IS_ALU_OP = '1' and ALU_OP = "100")) or
+                        (state = ST_ADDR1 and (IS_RMW_OP = '1' and RMW_OP = "100")) or
+                        (state = ST_ADDR1 and ext_stq = '1') or
+                        (stq_high_reg = '1' and state = ST_EXECUTE) or
+                        (state = ST_EXECUTE and IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" and
+                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))))
+             else '0';
+
+    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index)
+    begin
+        dp_reg_index_next <= dp_reg_index;
+        if state = ST_ADDR1 and (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") then
+            if ADDR_MODE = "0011" then
+                dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)), 6));
+            elsif ADDR_MODE = "0100" then
+                dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)), 6));
+            else
+                dp_reg_index_next <= DATA_IN(5 downto 0);
+            end if;
+        end if;
+    end process;
+    
+    dp_reg_index_next_plus1 <= std_logic_vector(unsigned(dp_reg_index_next) + 1);
+    
     p_next <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and (not data_buffer(7 downto 0)))
-              when IS_REP = '1' else
+              when (IS_REP = '1' or ext_repe = '1') else
               P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or data_buffer(7 downto 0))
-              when IS_SEP = '1' else
+              when (IS_SEP = '1' or ext_sepe = '1') else
               P_reg;
     
-    P_in <= p_next;
-    P_load <= '1' when state = ST_EXECUTE and (IS_REP = '1' or IS_SEP = '1') else '0';
+    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg)
+    begin
+        p_override <= P_reg;
+        p_override_valid <= '0';
+        if state = ST_EXECUTE and stack_is_pull = '1' and IR = x"28" then
+            p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            p_override_valid <= '1';
+        elsif state = ST_EXECUTE and IS_RSET = '1' then
+            p_override <= P_reg(P_WIDTH-1 downto P_R+1) & '1' & P_reg(P_R-1 downto 0);
+            p_override_valid <= '1';
+        elsif state = ST_EXECUTE and IS_RCLR = '1' then
+            p_override <= P_reg(P_WIDTH-1 downto P_R+1) & '0' & P_reg(P_R-1 downto 0);
+            p_override_valid <= '1';
+        elsif state = ST_EXECUTE and ext_cas = '1' then
+            if cas_match = '1' then
+                p_override <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or "00000010");
+            else
+                p_override <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and "11111101");
+            end if;
+            p_override_valid <= '1';
+        elsif state = ST_EXECUTE and ext_sci = '1' then
+            if sci_success = '1' then
+                p_override <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or "00000010");
+            else
+                p_override <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and "11111101");
+            end if;
+            p_override_valid <= '1';
+        end if;
+    end process;
+    
+    P_in <= p_override when p_override_valid = '1' else p_next;
+    P_load <= '1' when state = ST_EXECUTE and (IS_REP = '1' or IS_SEP = '1' or ext_repe = '1' or
+                                               ext_sepe = '1' or IS_RSET = '1' or IS_RCLR = '1' or
+                                               p_override_valid = '1') else '0';
     
     ---------------------------------------------------------------------------
     -- Flag Update Logic
@@ -1197,8 +1911,13 @@ begin
                    else '0';
     
     -- N, Z, V flags load: most ALU operations and RMW operations
-    flag_nzv_load <= '1' when state = ST_EXECUTE and 
-                     ((IS_ALU_OP = '1' and ALU_OP /= "100") or  -- All ALU except STA
+    flag_z_in <= ext_flag_z when ext_flag_load = '1' else ALU_ZO;
+    flag_n_in <= ext_flag_n when ext_flag_load = '1' else ALU_SO;
+    flag_v_in <= ext_flag_v when ext_flag_load = '1' else ALU_VO;
+    
+    flag_nzv_load <= '1' when state = ST_EXECUTE and
+                     (ext_flag_load = '1' or
+                      (IS_ALU_OP = '1' and ALU_OP /= "100") or  -- All ALU except STA
                       (IS_RMW_OP = '1' and RMW_OP /= "100"))    -- All RMW except STX/STY
                      else '0';
     
@@ -1234,6 +1953,64 @@ begin
                                   ADDR_MODE = "1110") else '0';
     is_long_x <= '1' when (ADDR_MODE = "1111" and IR(4 downto 0) = "11111") else '0';
     
+    ext_mul  <= '1' when (is_extended = '1' and (IR_EXT = x"00" or IR_EXT = x"02")) else '0';
+    ext_mulu <= '1' when (is_extended = '1' and (IR_EXT = x"01" or IR_EXT = x"03")) else '0';
+    ext_div  <= '1' when (is_extended = '1' and (IR_EXT = x"04" or IR_EXT = x"06")) else '0';
+    ext_divu <= '1' when (is_extended = '1' and (IR_EXT = x"05" or IR_EXT = x"07")) else '0';
+    
+    ext_cas  <= '1' when (is_extended = '1' and (IR_EXT = x"10" or IR_EXT = x"11")) else '0';
+    ext_lli  <= '1' when (is_extended = '1' and (IR_EXT = x"12" or IR_EXT = x"13")) else '0';
+    ext_sci  <= '1' when (is_extended = '1' and (IR_EXT = x"14" or IR_EXT = x"15")) else '0';
+    
+    ext_svbr <= '1' when (is_extended = '1' and (IR_EXT = x"20" or IR_EXT = x"21")) else '0';
+    ext_sb   <= '1' when (is_extended = '1' and (IR_EXT = x"22" or IR_EXT = x"23")) else '0';
+    ext_sd   <= '1' when (is_extended = '1' and (IR_EXT = x"24" or IR_EXT = x"25")) else '0';
+    
+    ext_trap <= '1' when (is_extended = '1' and IR_EXT = x"40") else '0';
+    ext_fence   <= '1' when (is_extended = '1' and IR_EXT = x"50") else '0';
+    ext_fencer  <= '1' when (is_extended = '1' and IR_EXT = x"51") else '0';
+    ext_fencew  <= '1' when (is_extended = '1' and IR_EXT = x"52") else '0';
+    
+    ext_repe <= '1' when (is_extended = '1' and IR_EXT = x"60") else '0';
+    ext_sepe <= '1' when (is_extended = '1' and IR_EXT = x"61") else '0';
+    
+    ext_stack32_push <= '1' when (is_extended = '1' and (IR_EXT = x"70" or IR_EXT = x"72" or IR_EXT = x"74")) else '0';
+    ext_stack32_pull <= '1' when (is_extended = '1' and (IR_EXT = x"71" or IR_EXT = x"73" or IR_EXT = x"75")) else '0';
+    
+    ext_lea <= '1' when (is_extended = '1' and (IR_EXT = x"A0" or IR_EXT = x"A1" or
+                                                IR_EXT = x"A2" or IR_EXT = x"A3")) else '0';
+    ext_tta <= '1' when (is_extended = '1' and IR_EXT = x"86") else '0';
+    ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"87") else '0';
+    ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"88" or IR_EXT = x"89")) else '0';
+    ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"8A" or IR_EXT = x"8B")) else '0';
+    
+    stack_is_pull <= '1' when (IS_STACK = '1' and
+                               (IR = x"28" or IR = x"68" or IR = x"FA" or IR = x"7A" or
+                                IR = x"2B" or IR = x"AB" or ext_stack32_pull = '1'))
+                     else '0';
+    
+    sci_success <= '1' when (ext_sci = '1' and link_valid = '1' and link_addr = eff_addr) else '0';
+    
+    process(ext_cas, M_width, data_buffer, X_reg)
+    begin
+        cas_match <= '0';
+        if ext_cas = '1' then
+            if M_width = WIDTH_8 then
+                if data_buffer(7 downto 0) = X_reg(7 downto 0) then
+                    cas_match <= '1';
+                end if;
+            elsif M_width = WIDTH_16 then
+                if data_buffer(15 downto 0) = X_reg(15 downto 0) then
+                    cas_match <= '1';
+                end if;
+            else
+                if data_buffer = X_reg then
+                    cas_match <= '1';
+                end if;
+            end if;
+        end if;
+    end process;
+    
     LOAD_PC <= "010" when (state = ST_VECTOR2 or
                            (state = ST_ADDR2 and (IS_JSR = '1' or IS_JMP_d = '1'))) -- Load PC from D_IN:DR
               else "010" when (state = ST_READ2 and IS_JMP_d = '1' and
@@ -1247,7 +2024,7 @@ begin
                            (state = ST_ADDR3 and is_indirect_addr = '0') or
                            (state = ST_ADDR4 and is_indirect_addr = '0') or
                            state = ST_BRANCH or  -- Fetch branch offset
-                           ((state = ST_DECODE) and IR = x"02" and E_mode = '0') or
+                           ((state = ST_DECODE) and IR = x"02" and is_extended = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
                else "111" when (state = ST_EXECUTE and IS_RTS = '1') -- RTS uses stored return

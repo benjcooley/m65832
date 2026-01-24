@@ -1171,7 +1171,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(140);
+        wait_cycles(220);
         
         check_mem(16#0226#, x"EF", "32-bit STA byte 0");
         check_mem(16#0227#, x"CD", "32-bit STA byte 1");
@@ -1339,7 +1339,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(180);
+        wait_cycles(260);
         
         check_mem(16#0236#, x"15", "32-bit ADC byte 0");
         check_mem(16#0237#, x"14", "32-bit ADC byte 1");
@@ -1635,7 +1635,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(220);
+        wait_cycles(280);
         
         check_mem(16#024C#, x"08", "32-bit ASL abs byte 0");
         check_mem(16#024D#, x"06", "32-bit ASL abs byte 1");
@@ -2928,7 +2928,7 @@ begin
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(260);
+        wait_cycles(320);
         
         check_mem(16#0630#, x"34", "16-bit STA long low");
         check_mem(16#0631#, x"12", "16-bit STA long high");
@@ -2972,6 +2972,720 @@ begin
         
         check_mem(16#0660#, x"9C", "STA [dp] result");
         check_mem(16#0673#, x"AD", "STA [dp],Y result");
+        
+        -----------------------------------------------------------------------
+        -- TEST 84: Stack PHA/PLA (8-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 84: PHA/PLA";
+        
+        -- Program: LDA #$5A, PHA, LDA #$00, PLA, STA $0310
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"5A");  -- $5A
+        poke(16#8002#, x"48");  -- PHA
+        poke(16#8003#, x"A9");  -- LDA #
+        poke(16#8004#, x"00");  -- $00
+        poke(16#8005#, x"68");  -- PLA
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"10");  -- $10
+        poke(16#8008#, x"03");  -- $03 -> $0310
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(140);
+        
+        check_mem(16#01FF#, x"5A", "PHA wrote stack");
+        check_mem(16#0310#, x"5A", "PLA restored A");
+        
+        -----------------------------------------------------------------------
+        -- TEST 85: PHX/PLX (16-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 85: PHX/PLX 16-bit";
+        
+        -- Program: SEP #$10 (X0=1), LDX #$1234, PHX, LDX #$0000, PLX, STX $0312
+        poke(16#8000#, x"E2");  -- SEP
+        poke(16#8001#, x"10");  -- set X0 -> 16-bit
+        poke(16#8002#, x"A2");  -- LDX #
+        poke(16#8003#, x"34");  -- low
+        poke(16#8004#, x"12");  -- high
+        poke(16#8005#, x"DA");  -- PHX
+        poke(16#8006#, x"A2");  -- LDX #
+        poke(16#8007#, x"00");  -- low
+        poke(16#8008#, x"00");  -- high
+        poke(16#8009#, x"FA");  -- PLX
+        poke(16#800A#, x"8E");  -- STX abs
+        poke(16#800B#, x"12");  -- $12
+        poke(16#800C#, x"03");  -- $03 -> $0312/$0313
+        poke(16#800D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(180);
+        
+        check_mem(16#01FF#, x"12", "PHX stack high");
+        check_mem(16#01FE#, x"34", "PHX stack low");
+        check_mem(16#0312#, x"34", "PLX low");
+        check_mem(16#0313#, x"12", "PLX high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 86: PEA/PEI (16-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 86: PEA/PEI";
+        
+        -- Setup dp $90 with $BEEF
+        poke(16#0090#, x"EF");
+        poke(16#0091#, x"BE");
+        
+        -- Program: SEP #$40, PEA #$1234, PLA, STA $0314, PEI $90, PLA, STA $0316
+        poke(16#8000#, x"E2");  -- SEP
+        poke(16#8001#, x"40");  -- set M0 -> 16-bit
+        poke(16#8002#, x"F4");  -- PEA
+        poke(16#8003#, x"34");  -- low
+        poke(16#8004#, x"12");  -- high
+        poke(16#8005#, x"68");  -- PLA
+        poke(16#8006#, x"8D");  -- STA abs
+        poke(16#8007#, x"14");  -- $14
+        poke(16#8008#, x"03");  -- $03 -> $0314/$0315
+        poke(16#8009#, x"D4");  -- PEI dp
+        poke(16#800A#, x"90");  -- dp
+        poke(16#800B#, x"68");  -- PLA
+        poke(16#800C#, x"8D");  -- STA abs
+        poke(16#800D#, x"16");  -- $16
+        poke(16#800E#, x"03");  -- $03 -> $0316/$0317
+        poke(16#800F#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0314#, x"34", "PEA low");
+        check_mem(16#0315#, x"12", "PEA high");
+        check_mem(16#0316#, x"EF", "PEI low");
+        check_mem(16#0317#, x"BE", "PEI high");
+        
+        -----------------------------------------------------------------------
+        -- TEST 87: WID immediate and WID absolute
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 87: WID immediate/absolute";
+        
+        -- Program: set M=32-bit, WID LDA #imm32, STA $0318
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"42");  -- WID prefix
+        poke(16#8005#, x"A9");  -- LDA #
+        poke(16#8006#, x"44");  -- byte 0
+        poke(16#8007#, x"33");  -- byte 1
+        poke(16#8008#, x"22");  -- byte 2
+        poke(16#8009#, x"11");  -- byte 3
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"18");  -- $18
+        poke(16#800C#, x"03");  -- $03 -> $0318-$031B
+        poke(16#800D#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0318#, x"44", "WID imm byte 0");
+        check_mem(16#0319#, x"33", "WID imm byte 1");
+        check_mem(16#031A#, x"22", "WID imm byte 2");
+        check_mem(16#031B#, x"11", "WID imm byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 87B: WID absolute address
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 87B: WID absolute";
+        
+        -- Program: LDA #$5A, WID STA addr32 $00004000, WID LDA addr32, STA $031C
+        poke(16#8000#, x"A9");  -- LDA #
+        poke(16#8001#, x"5A");  -- $5A
+        poke(16#8002#, x"42");  -- WID prefix
+        poke(16#8003#, x"8D");  -- STA abs (32-bit addr)
+        poke(16#8004#, x"00");  -- addr0
+        poke(16#8005#, x"40");  -- addr1
+        poke(16#8006#, x"00");  -- addr2
+        poke(16#8007#, x"00");  -- addr3
+        poke(16#8008#, x"42");  -- WID prefix
+        poke(16#8009#, x"AD");  -- LDA abs (32-bit addr)
+        poke(16#800A#, x"00");  -- addr0
+        poke(16#800B#, x"40");  -- addr1
+        poke(16#800C#, x"00");  -- addr2
+        poke(16#800D#, x"00");  -- addr3
+        poke(16#800E#, x"8D");  -- STA abs
+        poke(16#800F#, x"1C");  -- $1C
+        poke(16#8010#, x"03");  -- $03 -> $031C
+        poke(16#8011#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#4000#, x"5A", "WID abs store");
+        check_mem(16#031C#, x"5A", "WID abs load/store");
+        
+        -----------------------------------------------------------------------
+        -- TEST 88: SD + LEA (32-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 88: SD + LEA";
+        
+        -- Program: set M=32-bit, SD #$00001000, LEA $20, STA $0320
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"24");  -- SD #imm32
+        poke(16#8006#, x"00");  -- imm0
+        poke(16#8007#, x"10");  -- imm1
+        poke(16#8008#, x"00");  -- imm2
+        poke(16#8009#, x"00");  -- imm3
+        poke(16#800A#, x"02");  -- EXT prefix
+        poke(16#800B#, x"A0");  -- LEA dp
+        poke(16#800C#, x"20");  -- dp
+        poke(16#800D#, x"8D");  -- STA abs
+        poke(16#800E#, x"20");  -- $20
+        poke(16#800F#, x"03");  -- $03 -> $0320-$0323
+        poke(16#8010#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(300);
+        
+        check_mem(16#0320#, x"20", "LEA byte 0");
+        check_mem(16#0321#, x"10", "LEA byte 1");
+        check_mem(16#0322#, x"00", "LEA byte 2");
+        check_mem(16#0323#, x"00", "LEA byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 89: SB base register for absolute
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 89: SB base register";
+        
+        -- Program: SB #$00002000, LDA #$7E, STA $0040, LDA $0040, STA $0324
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"22");  -- SB #imm32
+        poke(16#8002#, x"00");  -- imm0
+        poke(16#8003#, x"20");  -- imm1
+        poke(16#8004#, x"00");  -- imm2
+        poke(16#8005#, x"00");  -- imm3
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"7E");  -- $7E
+        poke(16#8008#, x"8D");  -- STA abs ($0040 -> $2040)
+        poke(16#8009#, x"40");  -- low
+        poke(16#800A#, x"00");  -- high
+        poke(16#800B#, x"AD");  -- LDA abs ($0040 -> $2040)
+        poke(16#800C#, x"40");  -- low
+        poke(16#800D#, x"00");  -- high
+        poke(16#800E#, x"8D");  -- STA abs
+        poke(16#800F#, x"24");  -- $24
+        poke(16#8010#, x"03");  -- $03 -> $0324
+        poke(16#8011#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#2040#, x"7E", "SB base wrote $2040");
+        check_mem(16#2324#, x"7E", "SB base absolute");
+        
+        -----------------------------------------------------------------------
+        -- TEST 90: MULU dp and DIVU abs (16-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 90: MULU/DIVU";
+        
+        poke(16#0020#, x"04");
+        poke(16#0021#, x"00");
+        poke(16#0350#, x"03");
+        poke(16#0351#, x"00");
+        
+        -- Program: SEP #$40, LDA #$0003, MULU dp $20, STA $0326,
+        -- LDA #$0014, DIVU abs $0350, STA $0328, TTA, STA $032A
+        poke(16#8000#, x"E2");  -- SEP
+        poke(16#8001#, x"40");  -- set M0 -> 16-bit
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"03");
+        poke(16#8004#, x"00");
+        poke(16#8005#, x"02");  -- EXT prefix
+        poke(16#8006#, x"01");  -- MULU dp
+        poke(16#8007#, x"20");  -- dp
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"26");  -- $26
+        poke(16#800A#, x"03");  -- $03 -> $0326/$0327
+        poke(16#800B#, x"A9");  -- LDA #
+        poke(16#800C#, x"14");
+        poke(16#800D#, x"00");
+        poke(16#800E#, x"02");  -- EXT prefix
+        poke(16#800F#, x"07");  -- DIVU abs
+        poke(16#8010#, x"50");  -- low
+        poke(16#8011#, x"03");  -- high
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"28");  -- $28
+        poke(16#8014#, x"03");  -- $03 -> $0328/$0329
+        poke(16#8015#, x"02");  -- EXT prefix
+        poke(16#8016#, x"86");  -- TTA (A = T remainder)
+        poke(16#8017#, x"8D");  -- STA abs
+        poke(16#8018#, x"2A");  -- $2A
+        poke(16#8019#, x"03");  -- $03 -> $032A/$032B
+        poke(16#801A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(320);
+        
+        check_mem(16#0326#, x"0C", "MULU low");
+        check_mem(16#0327#, x"00", "MULU high");
+        check_mem(16#0328#, x"06", "DIVU low");
+        check_mem(16#0329#, x"00", "DIVU high");
+        check_mem(16#032A#, x"02", "DIVU remainder");
+        
+        -----------------------------------------------------------------------
+        -- TEST 91: CAS success
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 91: CAS success";
+        
+        poke(16#0030#, x"05");
+        
+        -- Program: CAS dp $30, set flag at $032A, loop
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"05");
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"07");
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"10");  -- CAS dp
+        poke(16#8006#, x"30");
+        poke(16#8007#, x"F0");  -- BEQ success
+        poke(16#8008#, x"08");
+        poke(16#8009#, x"A9");  -- LDA #
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"2A");
+        poke(16#800D#, x"03");
+        poke(16#800E#, x"4C");  -- JMP done
+        poke(16#800F#, x"16");
+        poke(16#8010#, x"80");
+        poke(16#8011#, x"A9");  -- LDA #
+        poke(16#8012#, x"01");
+        poke(16#8013#, x"8D");  -- STA abs
+        poke(16#8014#, x"2A");
+        poke(16#8015#, x"03");
+        poke(16#8016#, x"4C");  -- done loop
+        poke(16#8017#, x"16");
+        poke(16#8018#, x"80");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0030#, x"07", "CAS success stored A");
+        check_mem(16#032A#, x"01", "CAS Z=1");
+        
+        -----------------------------------------------------------------------
+        -- TEST 92: CAS fail
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 92: CAS fail";
+        
+        poke(16#0031#, x"09");
+        
+        -- Program: CAS dp $31, store X to $032B, flag at $032C, loop
+        poke(16#8000#, x"A2");  -- LDX #
+        poke(16#8001#, x"05");
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"07");
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"10");  -- CAS dp
+        poke(16#8006#, x"31");
+        poke(16#8007#, x"8E");  -- STX abs
+        poke(16#8008#, x"2B");
+        poke(16#8009#, x"03");
+        poke(16#800A#, x"D0");  -- BNE fail
+        poke(16#800B#, x"08");
+        poke(16#800C#, x"A9");  -- LDA #
+        poke(16#800D#, x"00");
+        poke(16#800E#, x"8D");  -- STA abs
+        poke(16#800F#, x"2C");
+        poke(16#8010#, x"03");
+        poke(16#8011#, x"4C");  -- JMP done
+        poke(16#8012#, x"1C");
+        poke(16#8013#, x"80");
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"01");
+        poke(16#8016#, x"8D");  -- STA abs
+        poke(16#8017#, x"2C");
+        poke(16#8018#, x"03");
+        poke(16#8019#, x"4C");  -- done loop
+        poke(16#801A#, x"1C");
+        poke(16#801B#, x"80");
+        poke(16#801C#, x"4C");
+        poke(16#801D#, x"1C");
+        poke(16#801E#, x"80");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#032B#, x"09", "CAS fail loaded X");
+        check_mem(16#032C#, x"01", "CAS Z=0");
+        
+        -----------------------------------------------------------------------
+        -- TEST 93: LLI/SCI success
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 93: LLI/SCI success";
+        
+        poke(16#0040#, x"3C");
+        
+        -- Program: LLI dp $40, SCI dp $40, flag at $032D, loop
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"12");  -- LLI dp
+        poke(16#8002#, x"40");
+        poke(16#8003#, x"02");  -- EXT prefix
+        poke(16#8004#, x"14");  -- SCI dp
+        poke(16#8005#, x"40");
+        poke(16#8006#, x"F0");  -- BEQ success
+        poke(16#8007#, x"08");
+        poke(16#8008#, x"A9");  -- LDA #
+        poke(16#8009#, x"00");
+        poke(16#800A#, x"8D");  -- STA abs
+        poke(16#800B#, x"2D");
+        poke(16#800C#, x"03");
+        poke(16#800D#, x"4C");  -- JMP done
+        poke(16#800E#, x"18");
+        poke(16#800F#, x"80");
+        poke(16#8010#, x"A9");  -- LDA #
+        poke(16#8011#, x"01");
+        poke(16#8012#, x"8D");  -- STA abs
+        poke(16#8013#, x"2D");
+        poke(16#8014#, x"03");
+        poke(16#8015#, x"4C");  -- done loop
+        poke(16#8016#, x"18");
+        poke(16#8017#, x"80");
+        poke(16#8018#, x"4C");
+        poke(16#8019#, x"18");
+        poke(16#801A#, x"80");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0040#, x"3C", "SCI success stored A");
+        check_mem(16#032D#, x"01", "SCI Z=1");
+        
+        -----------------------------------------------------------------------
+        -- TEST 94: LLI/SCI fail
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 94: LLI/SCI fail";
+        
+        poke(16#0041#, x"AA");
+        
+        -- Program: LLI dp $41, STA $0330 (clear link), SCI dp $41, flag at $032E, loop
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"12");  -- LLI dp
+        poke(16#8002#, x"41");
+        poke(16#8003#, x"A9");  -- LDA #
+        poke(16#8004#, x"00");
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"30");
+        poke(16#8007#, x"03");
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"14");  -- SCI dp
+        poke(16#800A#, x"41");
+        poke(16#800B#, x"D0");  -- BNE fail
+        poke(16#800C#, x"08");
+        poke(16#800D#, x"A9");  -- LDA #
+        poke(16#800E#, x"00");
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"2E");
+        poke(16#8011#, x"03");
+        poke(16#8012#, x"4C");  -- JMP done
+        poke(16#8013#, x"1E");
+        poke(16#8014#, x"80");
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"01");
+        poke(16#8017#, x"8D");  -- STA abs
+        poke(16#8018#, x"2E");
+        poke(16#8019#, x"03");
+        poke(16#801A#, x"4C");  -- done loop
+        poke(16#801B#, x"1E");
+        poke(16#801C#, x"80");
+        poke(16#801E#, x"4C");
+        poke(16#801F#, x"1E");
+        poke(16#8020#, x"80");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(280);
+        
+        check_mem(16#032E#, x"01", "SCI Z=0");
+        
+        -----------------------------------------------------------------------
+        -- TEST 95: RSET register window ignores D (dp + dp,X)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 95: RSET register window";
+        
+        -- Memory values that should be ignored in R mode
+        poke(16#1020#, x"55");
+        poke(16#2020#, x"55");
+        poke(16#2021#, x"11");
+        
+        -- Program:
+        -- SD #$00001000, RSET, LDA #$AA, STA $20
+        -- SD #$00002000, LDA $20 -> $0340 (should be $AA)
+        -- LDX #$01, LDA #$CC, STA $20,X, LDA $21 -> $0342 (should be $CC)
+        -- RCLR, LDA $20 -> $0341 (should be $55 from $2020)
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"24");  -- SD #imm32
+        poke(16#8002#, x"00");  -- imm0
+        poke(16#8003#, x"10");  -- imm1
+        poke(16#8004#, x"00");  -- imm2
+        poke(16#8005#, x"00");  -- imm3
+        poke(16#8006#, x"02");  -- EXT prefix
+        poke(16#8007#, x"30");  -- RSET
+        poke(16#8008#, x"A9");  -- LDA #
+        poke(16#8009#, x"AA");
+        poke(16#800A#, x"85");  -- STA dp
+        poke(16#800B#, x"20");
+        poke(16#800C#, x"02");  -- EXT prefix
+        poke(16#800D#, x"24");  -- SD #imm32
+        poke(16#800E#, x"00");  -- imm0
+        poke(16#800F#, x"20");  -- imm1
+        poke(16#8010#, x"00");  -- imm2
+        poke(16#8011#, x"00");  -- imm3
+        poke(16#8012#, x"A5");  -- LDA dp
+        poke(16#8013#, x"20");
+        poke(16#8014#, x"8D");  -- STA abs
+        poke(16#8015#, x"40");  -- $0340
+        poke(16#8016#, x"03");
+        poke(16#8017#, x"A2");  -- LDX #
+        poke(16#8018#, x"01");
+        poke(16#8019#, x"A9");  -- LDA #
+        poke(16#801A#, x"CC");
+        poke(16#801B#, x"95");  -- STA dp,X
+        poke(16#801C#, x"20");
+        poke(16#801D#, x"A5");  -- LDA dp
+        poke(16#801E#, x"21");
+        poke(16#801F#, x"8D");  -- STA abs
+        poke(16#8020#, x"42");  -- $0342
+        poke(16#8021#, x"03");
+        poke(16#8022#, x"02");  -- EXT prefix
+        poke(16#8023#, x"31");  -- RCLR
+        poke(16#8024#, x"A5");  -- LDA dp
+        poke(16#8025#, x"20");
+        poke(16#8026#, x"8D");  -- STA abs
+        poke(16#8027#, x"41");  -- $0341
+        poke(16#8028#, x"03");
+        poke(16#8029#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(320);
+        
+        check_mem(16#0340#, x"AA", "RSET ignores D (dp)");
+        check_mem(16#0341#, x"55", "RCLR uses memory dp");
+        check_mem(16#0342#, x"CC", "RSET dp,X index");
+        
+        -----------------------------------------------------------------------
+        -- TEST 96: RSET dp RMW (INC)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 96: RSET dp RMW";
+        
+        -- Memory value that should be ignored in R mode
+        poke(16#1010#, x"80");
+        
+        -- Program: SD #$00001000, RSET, LDA #$01, STA $10, INC $10,
+        -- LDA $10 -> $0343, RCLR, LDA $10 -> $0344
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"24");  -- SD #imm32
+        poke(16#8002#, x"00");  -- imm0
+        poke(16#8003#, x"10");  -- imm1
+        poke(16#8004#, x"00");  -- imm2
+        poke(16#8005#, x"00");  -- imm3
+        poke(16#8006#, x"02");  -- EXT prefix
+        poke(16#8007#, x"30");  -- RSET
+        poke(16#8008#, x"A9");  -- LDA #
+        poke(16#8009#, x"01");
+        poke(16#800A#, x"85");  -- STA dp
+        poke(16#800B#, x"10");
+        poke(16#800C#, x"E6");  -- INC dp
+        poke(16#800D#, x"10");
+        poke(16#800E#, x"A5");  -- LDA dp
+        poke(16#800F#, x"10");
+        poke(16#8010#, x"8D");  -- STA abs
+        poke(16#8011#, x"43");  -- $0343
+        poke(16#8012#, x"03");
+        poke(16#8013#, x"02");  -- EXT prefix
+        poke(16#8014#, x"31");  -- RCLR
+        poke(16#8015#, x"A5");  -- LDA dp
+        poke(16#8016#, x"10");
+        poke(16#8017#, x"8D");  -- STA abs
+        poke(16#8018#, x"44");  -- $0344
+        poke(16#8019#, x"03");
+        poke(16#801A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(320);
+        
+        check_mem(16#0343#, x"02", "RSET INC dp");
+        check_mem(16#0344#, x"80", "RCLR dp reads memory");
+        
+        -----------------------------------------------------------------------
+        -- TEST 97: RSET MULU dp
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 97: RSET MULU dp";
+        
+        -- Program: RSET, LDA #$03, STA $22, LDA #$04,
+        -- MULU dp $22, STA $0345
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"30");  -- RSET
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"03");
+        poke(16#8004#, x"85");  -- STA dp
+        poke(16#8005#, x"22");
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"04");
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"01");  -- MULU dp
+        poke(16#800A#, x"22");
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"45");  -- $0345
+        poke(16#800D#, x"03");
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0345#, x"0C", "RSET MULU dp");
+        
+        -----------------------------------------------------------------------
+        -- TEST 98: LDQ/STQ absolute (64-bit)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 98: LDQ/STQ abs";
+        
+        poke(16#0500#, x"01");
+        poke(16#0501#, x"02");
+        poke(16#0502#, x"03");
+        poke(16#0503#, x"04");
+        poke(16#0504#, x"11");
+        poke(16#0505#, x"12");
+        poke(16#0506#, x"13");
+        poke(16#0507#, x"14");
+        
+        -- Program: set M=32, LDQ abs $0500, STA $0520, STQ abs $0510
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"89");  -- LDQ abs
+        poke(16#8006#, x"00");  -- low
+        poke(16#8007#, x"05");  -- high
+        poke(16#8008#, x"8D");  -- STA abs
+        poke(16#8009#, x"20");  -- $0520
+        poke(16#800A#, x"05");
+        poke(16#800B#, x"02");  -- EXT prefix
+        poke(16#800C#, x"8B");  -- STQ abs
+        poke(16#800D#, x"10");  -- low
+        poke(16#800E#, x"05");  -- high
+        poke(16#800F#, x"8D");  -- STA abs
+        poke(16#8010#, x"28");  -- $0528
+        poke(16#8011#, x"05");
+        poke(16#8012#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(380);
+        
+        check_mem(16#0520#, x"01", "LDQ A byte0");
+        check_mem(16#0521#, x"02", "LDQ A byte1");
+        check_mem(16#0522#, x"03", "LDQ A byte2");
+        check_mem(16#0523#, x"04", "LDQ A byte3");
+        check_mem(16#0528#, x"01", "A after STQ byte0");
+        check_mem(16#0529#, x"02", "A after STQ byte1");
+        check_mem(16#052A#, x"03", "A after STQ byte2");
+        check_mem(16#052B#, x"04", "A after STQ byte3");
+        
+        check_mem(16#0510#, x"01", "STQ abs byte0");
+        check_mem(16#0511#, x"02", "STQ abs byte1");
+        check_mem(16#0512#, x"03", "STQ abs byte2");
+        check_mem(16#0513#, x"04", "STQ abs byte3");
+        check_mem(16#0514#, x"11", "STQ abs byte4");
+        check_mem(16#0515#, x"12", "STQ abs byte5");
+        check_mem(16#0516#, x"13", "STQ abs byte6");
+        check_mem(16#0517#, x"14", "STQ abs byte7");
+        
+        -----------------------------------------------------------------------
+        -- TEST 99: LDQ/STQ dp in RSET
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 99: LDQ/STQ dp (RSET)";
+        
+        -- Program: RSET, LDA #$11, TAT, LDA #$22, STQ dp $30,
+        -- LDQ dp $30, STA $0346, TTA, STA $0347
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"30");  -- RSET
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"11");
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"87");  -- TAT
+        poke(16#8006#, x"A9");  -- LDA #
+        poke(16#8007#, x"22");
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"8A");  -- STQ dp
+        poke(16#800A#, x"30");
+        poke(16#800B#, x"02");  -- EXT prefix
+        poke(16#800C#, x"88");  -- LDQ dp
+        poke(16#800D#, x"30");
+        poke(16#800E#, x"8D");  -- STA abs
+        poke(16#800F#, x"46");  -- $0346
+        poke(16#8010#, x"03");
+        poke(16#8011#, x"02");  -- EXT prefix
+        poke(16#8012#, x"86");  -- TTA
+        poke(16#8013#, x"8D");  -- STA abs
+        poke(16#8014#, x"47");  -- $0347
+        poke(16#8015#, x"03");
+        poke(16#8016#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(280);
+        
+        check_mem(16#0346#, x"22", "LDQ dp low");
+        check_mem(16#0347#, x"11", "LDQ dp high");
         
         -----------------------------------------------------------------------
         -- Summary

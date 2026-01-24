@@ -195,6 +195,12 @@ $02 $82            TBA            A = B
 $02 $83            TAB            B = A
 $02 $84            TVA            A = VBR
 $02 $85            TAV            VBR = A (supervisor only)
+$02 $86            TTA            A = T (remainder/temp)
+$02 $87            TAT            T = A (remainder/temp)
+$02 $88 [dp]       LDQ dp         A:T = [dp..dp+7] (RSET reg window)
+$02 $89 [abs16]    LDQ abs        A:T = [abs..abs+7]
+$02 $8A [dp]       STQ dp         [dp..dp+7] = A:T (RSET reg window)
+$02 $8B [abs16]    STQ abs        [abs..abs+7] = A:T
 
 $02 $90            XCE            Exchange Carry with E flag
 $02 $91            WAI            Wait for Interrupt

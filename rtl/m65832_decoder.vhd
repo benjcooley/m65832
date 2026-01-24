@@ -209,14 +209,68 @@ begin
             IS_EXT_OP <= '1';
             
             case IR_EXT is
-                -- M65832 Extended Instructions
-                when x"00" => IS_RSET <= '1'; INSTR_LEN <= "001";  -- RSET
-                when x"01" => IS_RCLR <= '1'; INSTR_LEN <= "001";  -- RCLR
-                when x"02" => IS_SB   <= '1'; INSTR_LEN <= "101";  -- SB #imm32
-                when x"03" => IS_SVBR <= '1'; INSTR_LEN <= "101";  -- SVBR #imm32
-                when x"10" => IS_CAS  <= '1'; INSTR_LEN <= "010";  -- CAS dp
-                when x"11" => IS_LLI  <= '1'; INSTR_LEN <= "010";  -- LLI dp
-                when x"12" => IS_SCI  <= '1'; INSTR_LEN <= "010";  -- SCI dp
+                -- Multiply/Divide
+                when x"00" | x"01" | x"04" | x"05" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- MUL/MULU/DIV/DIVU dp
+                when x"02" | x"03" | x"06" | x"07" =>
+                    ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- MUL/MULU/DIV/DIVU abs
+                
+                -- CAS/LLI/SCI
+                when x"10" | x"12" | x"14" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- dp
+                when x"11" | x"13" | x"15" =>
+                    ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- abs
+                
+                -- Set base registers (imm32 or dp)
+                when x"20" | x"22" | x"24" =>
+                    ADDR_MODE <= "0001"; INSTR_LEN <= "110";  -- imm32
+                when x"21" | x"23" | x"25" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- dp
+                
+                -- Register window control
+                when x"30" => IS_RSET <= '1'; INSTR_LEN <= "010";  -- RSET
+                when x"31" => IS_RCLR <= '1'; INSTR_LEN <= "010";  -- RCLR
+                
+                -- TRAP and fences
+                when x"40" => ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- TRAP #imm8
+                when x"50" | x"51" | x"52" =>
+                    INSTR_LEN <= "010";  -- FENCE/FENCER/FENCEW
+                
+                -- Extended status ops
+                when x"60" | x"61" =>
+                    ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- REPE/SEPE #imm8
+                
+                -- Extended stack ops (32-bit)
+                when x"70" => IS_STACK <= '1'; REG_SRC <= "100"; INSTR_LEN <= "010";  -- PHD (32)
+                when x"71" => IS_STACK <= '1'; REG_DST <= "100"; INSTR_LEN <= "010";  -- PLD (32)
+                when x"72" => IS_STACK <= '1'; REG_SRC <= "101"; INSTR_LEN <= "010";  -- PHB (32)
+                when x"73" => IS_STACK <= '1'; REG_DST <= "101"; INSTR_LEN <= "010";  -- PLB (32)
+                when x"74" => IS_STACK <= '1'; REG_SRC <= "111"; INSTR_LEN <= "010";  -- PHVBR (32)
+                when x"75" => IS_STACK <= '1'; REG_DST <= "111"; INSTR_LEN <= "010";  -- PLVBR (32)
+                
+                -- Transfer T (remainder/temp)
+                when x"86" => INSTR_LEN <= "010";  -- TTA (A = T)
+                when x"87" => INSTR_LEN <= "010";  -- TAT (T = A)
+                
+                -- 64-bit load/store (A=low, T=high)
+                when x"88" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDQ dp
+                when x"89" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDQ abs
+                when x"8A" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
+                when x"8B" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
+                
+                -- WAI/STP (extended)
+                when x"91" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
+                when x"92" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
+                
+                -- LEA
+                when x"A0" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LEA dp
+                when x"A1" =>
+                    ADDR_MODE <= "0011"; INSTR_LEN <= "011";  -- LEA dp,X
+                when x"A2" =>
+                    ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LEA abs
+                when x"A3" =>
+                    ADDR_MODE <= "0110"; INSTR_LEN <= "100";  -- LEA abs,X
                 when others => null;
             end case;
             
@@ -255,6 +309,8 @@ begin
                         IS_ALU_OP <= '1'; ALU_OP <= "101"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- LDA (dp)
                     elsif IR = x"92" then
                         IS_ALU_OP <= '1'; ALU_OP <= "100"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- STA (dp)
+                    elsif IR = x"42" then
+                        IS_WID <= '1'; INSTR_LEN <= "010";  -- WID prefix
                     elsif IR = x"C2" then
                         IS_REP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- REP #imm
                     elsif IR = x"E2" then
@@ -269,6 +325,14 @@ begin
                         IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "011"; INSTR_LEN <= "001";  -- TXS
                     elsif IR = x"CA" then
                         IS_RMW_OP <= '1'; RMW_OP <= "110"; REG_DST <= "001"; ADDR_MODE <= "0000"; INSTR_LEN <= "001";  -- DEX
+                    elsif IR = x"DA" then
+                        IS_STACK <= '1'; REG_SRC <= "001"; INSTR_LEN <= "001";  -- PHX
+                    elsif IR = x"FA" then
+                        IS_STACK <= '1'; REG_DST <= "001"; INSTR_LEN <= "001";  -- PLX
+                    elsif IR = x"5A" then
+                        IS_STACK <= '1'; REG_SRC <= "010"; INSTR_LEN <= "001";  -- PHY
+                    elsif IR = x"7A" then
+                        IS_STACK <= '1'; REG_DST <= "010"; INSTR_LEN <= "001";  -- PLY
                     else
                         IS_RMW_OP <= '1';
                         RMW_OP <= aaa;
@@ -398,7 +462,7 @@ begin
                         
                         -- Control
                         when x"EA" => IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- NOP
-                        when x"42" => IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- WDM (reserved)
+                        when x"42" => IS_WID <= '1'; INSTR_LEN <= "010";  -- WID prefix
                         when x"CB" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- WAI
                         when x"DB" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
                         
