@@ -2414,8 +2414,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                 end if;
 
                 if timer_ctrl(0) = '1' then
-                    if timer_ctrl(2) = '1' and timer_pending = '0' and timer_cmp /= x"00000000" and
-                       unsigned(timer_count) >= unsigned(timer_cmp) then
+                    if timer_ctrl(2) = '1' and timer_pending = '0' and timer_latched_valid = '0' and
+                       timer_cmp /= x"00000000" and unsigned(timer_count) >= unsigned(timer_cmp) then
                         timer_pending <= '1';
                         timer_count_latched <= timer_cmp;
                         timer_latched_valid <= '1';
@@ -2454,6 +2454,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             timer_ctrl(2 downto 0) <= DATA_OUT(2 downto 0);
                             if DATA_OUT(3) = '1' then
                                 timer_pending <= '0';
+                                timer_count <= (others => '0');
                                 timer_count_latched <= timer_cmp;
                                 timer_latched_valid <= '1';
                             end if;
