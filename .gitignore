@@ -59,3 +59,8 @@ venv/
 build/
 dist/
 dbugging/
+
+# Local archives and RAG indexes
+attic/
+rag/chroma_db/
+rag/chroma_db_m65832/

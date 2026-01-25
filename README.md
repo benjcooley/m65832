@@ -29,6 +29,18 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 4. **Compact Instructions** - Keep the 6502's code density
 5. **FPGA Friendly** - Implementable on mid-range FPGAs
 
+### Reference Implementations
+
+This project includes third-party reference cores for study and the dedicated
+6502 coprocessor. We gratefully acknowledge:
+
+- **[MX65](https://github.com/steveteal/mx65)** by Steve Teal (MIT License) -
+  Cycle-accurate 6502 core in VHDL, used for the dedicated classic coprocessor
+- **[SNES_MiSTer](https://github.com/MiSTer-devel/SNES_MiSTer)** by srg320 (GPL-3.0) -
+  65C816 implementation used as architectural reference
+
+See [LICENSE.md](LICENSE.md) for complete licensing details.
+
 ## Documentation
 
 - **[Architecture Reference](docs/M65832_Architecture_Reference.md)** - Complete CPU specification
@@ -272,6 +284,8 @@ The dedicated 6502 core (MX65) is MIT and can be used freely.
 
 ## Acknowledgments
 
+- **Steve Teal** for the [MX65](https://github.com/steveteal/mx65) 6502 core (MIT)
+- **srg320** for the [SNES_MiSTer](https://github.com/MiSTer-devel/SNES_MiSTer) 65C816 core (GPL-3.0)
 - WDC for the 6502 and 65816
 - The 6502.org community
 - Classic computer preservationists everywhere
