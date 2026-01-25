@@ -1529,6 +1529,36 @@ Double-precision operations (use full 64 bits):
 
 ---
 
+## MMIO Timer Registers
+
+Timer registers are memory-mapped in the MMIO region (addresses shown are full 32-bit):
+
+| Register | Address | Access | Description |
+|----------|---------|--------|-------------|
+| TIMER_CTRL  | $FFFFF040 | R/W | Control/status (bit 7 reflects pending) |
+| TIMER_CMP   | $FFFFF044 | R/W | 32-bit compare value (little-endian) |
+| TIMER_COUNT | $FFFFF048 | R/W | 32-bit count value (little-endian) |
+
+### TIMER_CTRL Bits
+
+| Bit | Name | Meaning |
+|-----|------|---------|
+| 0 | ENABLE | Enable timer counting |
+| 1 | PERIODIC | Auto-rearm: allow repeated compare without clearing latch |
+| 2 | IRQ_EN | Enable timer IRQ generation |
+| 3 | CLEAR | Clear pending; also resets COUNT to 0 |
+| 7 | PENDING | Read-only: reflects pending interrupt state |
+
+### Compare/Latch Behavior
+
+- COUNT increments when ENABLE=1.
+- When COUNT >= CMP and IRQ_EN=1, PENDING is set and COUNT is latched.
+- Reading TIMER_COUNT returns the latched value if valid; otherwise the live COUNT.
+- If PERIODIC=0, software must re-arm by writing TIMER_COUNT (clears the latch).
+- If PERIODIC=1, compare can re-trigger without clearing the latch.
+
+---
+
 ## Addressing Mode Summary
 
 | Mode | Syntax | Calculation | Bytes |

@@ -288,10 +288,6 @@ architecture rtl of M65832_Core is
     signal mmio_addr_write : std_logic_vector(31 downto 0);
     signal mmio_addr_read_lo  : std_logic_vector(15 downto 0);
     signal mmio_addr_write_lo : std_logic_vector(15 downto 0);
-    signal mmio_base_read  : std_logic_vector(31 downto 0);
-    signal mmio_base_write : std_logic_vector(31 downto 0);
-    signal mmio_base_read_sel  : std_logic_vector(31 downto 0);
-    signal mmio_base_write_sel : std_logic_vector(31 downto 0);
     
     -- MMU integration
     signal mem_ready       : std_logic;
@@ -2079,26 +2075,6 @@ begin
     -- MMIO Read Decode (MMU control registers)
     ---------------------------------------------------------------------------
 
-    process(CLK, RST_N)
-    begin
-        if RST_N = '0' then
-            mmio_base_read <= (others => '0');
-            mmio_base_write <= (others => '0');
-        elsif rising_edge(CLK) then
-            if CE = '1' then
-                -- Capture base address at the start of MMIO transactions
-                if state = ST_READ and data_byte_count = "000" then
-                    mmio_base_read <= ADDR;
-                elsif state = ST_WRITE and data_byte_count = "000" then
-                    mmio_base_write <= ADDR;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    mmio_base_read_sel <= ADDR when data_byte_count = "000" else mmio_base_read;
-    mmio_base_write_sel <= ADDR when data_byte_count = "000" else mmio_base_write;
-
     mmio_addr_read <= ADDR;
     mmio_addr_read_lo <= ADDR(15 downto 0);
     
@@ -2385,8 +2361,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     -- MMU MMIO Write Handling
     ---------------------------------------------------------------------------
     
-    mmio_addr_write <= std_logic_vector(unsigned(mmio_base_write_sel) + resize(data_byte_count, 32));
-    mmio_addr_write_lo <= mmio_addr_write(15 downto 0);
+    mmio_addr_write <= ADDR;
+    mmio_addr_write_lo <= ADDR(15 downto 0);
     
     process(CLK, RST_N)
     begin
@@ -2414,7 +2390,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                 end if;
 
                 if timer_ctrl(0) = '1' then
-                    if timer_ctrl(2) = '1' and timer_pending = '0' and timer_latched_valid = '0' and
+                    if timer_ctrl(2) = '1' and timer_pending = '0' and
+                       (timer_ctrl(1) = '1' or timer_latched_valid = '0') and
                        timer_cmp /= x"00000000" and unsigned(timer_count) >= unsigned(timer_cmp) then
                         timer_pending <= '1';
                         timer_count_latched <= timer_cmp;

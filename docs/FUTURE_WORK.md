@@ -8,5 +8,7 @@
   `eff_addr`/`data_byte_count`.
 - This refactor is a good candidate to fold into any larger core re-architecture (e.g., deeper
   pipelining or more systematic bus timing), where a cleaner transaction boundary is already required.
-- Interim mitigation: the core now latches the MMIO base address at the start of `ST_READ`/`ST_WRITE`
-  so multi-byte MMIO transactions are more stable, but this does not replace the full restructure.
+- MMIO writes currently assert WE on the external bus; this is correct for real hardware where address
+  decode selects the target device. If a future simulation memory model does not decode MMIO ranges,
+  it may appear to "write through" to RAM at MMIO addresses. If this becomes confusing in tests,
+  consider masking MMIO ranges in the testbench memory model rather than changing core WE behavior.
