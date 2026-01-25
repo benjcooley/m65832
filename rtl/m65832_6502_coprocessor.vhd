@@ -30,6 +30,13 @@ entity M65832_6502_Coprocessor is
         VBR_LOAD        : in  std_logic;
 
         ---------------------------------------------------------------------------
+        -- Compatibility control (saved/restored with coprocessor state)
+        ---------------------------------------------------------------------------
+        COMPAT_IN       : in  std_logic_vector(7 downto 0);
+        COMPAT_LOAD     : in  std_logic;
+        COMPAT_OUT      : out std_logic_vector(7 downto 0);
+
+        ---------------------------------------------------------------------------
         -- Shared Memory Interface (virtual address)
         ---------------------------------------------------------------------------
         ADDR_VA         : out std_logic_vector(31 downto 0);
@@ -58,6 +65,7 @@ end M65832_6502_Coprocessor;
 
 architecture rtl of M65832_6502_Coprocessor is
     signal vbr_reg     : std_logic_vector(31 downto 0);
+    signal compat_reg  : std_logic_vector(7 downto 0);
     signal ce_core     : std_logic;
     signal addr_16     : std_logic_vector(15 downto 0);
     signal rw          : std_logic;
@@ -71,9 +79,13 @@ begin
     begin
         if RST_N = '0' then
             vbr_reg <= (others => '0');
+            compat_reg <= x"01";
         elsif rising_edge(CLK) then
             if VBR_LOAD = '1' then
                 vbr_reg <= VBR_IN;
+            end if;
+            if COMPAT_LOAD = '1' then
+                compat_reg <= COMPAT_IN;
             end if;
         end if;
     end process;
@@ -99,6 +111,7 @@ begin
             clock    => CLK,
             reset    => not RST_N,
             ce       => ce_core,
+            compat   => compat_reg,
             data_in  => data_from_bus,
             data_out => DATA_OUT,
             address  => addr_16,
@@ -121,4 +134,5 @@ begin
     IO_RE <= rw and IO_HIT;
     IO_DATA_OUT <= DATA_OUT;
     IO_ADDR <= addr_16;
+    COMPAT_OUT <= compat_reg;
 end rtl;

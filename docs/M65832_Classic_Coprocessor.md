@@ -10,12 +10,10 @@ The M65832 SoC includes two interleaved processor cores:
 
 | Core | Purpose | ISA | Execution |
 |------|---------|-----|-----------|
-| **M65832** | Linux, modern apps | Full M65832 (32-bit) | 49/50 cycles |
-| **6502** | Classic game code | Pure 6502 | 1/50 cycles (1 MHz) |
+| **M65832** | Linux, modern apps | Full M65832 (32-bit) | Time-sliced (configurable) |
+| **6502** | Classic game code | Pure 6502 | Time-sliced (configurable) |
 
-This enables running classic 6502 software with cycle-accurate timing while Linux runs concurrently.
-
-**Note:** The original servicer core design is now replaced by main-CPU IRQ handling for computed MMIO reads. The sections below that describe the servicer core are kept for historical context and will be updated or removed as the IRQ path is finalized.
+The time-slicing ratio is programmable and chosen per target system to preserve cycle accuracy.
 
 ---
 
@@ -222,11 +220,10 @@ When the accumulator triggers a 6502 cycle:
 │  6502 trigger: Accumulator overflow → Run one 6502 instruction      │
 │                │                                                     │
 │                ├─► No I/O access?                                   │
-│                │   └── Servicer sleeps                              │
 │                │   └── M65832 runs until next trigger              │
 │                │                                                     │
 │                └─► I/O access detected?                             │
-│                    └── Servicer wakes (uses some cycles)            │
+│                    └── IRQ handler computes response (if needed)   │
 │                    └── M65832 gets remaining cycles                 │
 │                                                                      │
 │  Result: 6502 at EXACT target frequency, M65832 gets ~90%+ cycles   │
@@ -238,8 +235,8 @@ The interval between 6502 cycles varies (e.g., 48 or 49) but the **average** is 
 
 ### 3.4 Timing Examples
 
-| 6502 Instruction | Servicer Work | Servicer Cycles | M65832 Cycles | M65832 % |
-|------------------|---------------|-----------------|---------------|----------|
+| 6502 Instruction | MMIO Work | MMIO Cycles | M65832 Cycles | M65832 % |
+|------------------|-----------|-------------|---------------|----------|
 | INX (no I/O) | None | 0 | 49 | 98% |
 | STA $D020 (color) | Log write | 3 | 46 | 92% |
 | STA $D000 (sprite) | Update + collision | 8 | 41 | 82% |
@@ -250,110 +247,7 @@ The interval between 6502 cycles varies (e.g., 48 or 49) but the **average** is 
 
 ---
 
-## 4. Servicer Core
-
-### 4.1 Extended 6502 Instruction Set
-
-The servicer runs a 6502-compatible ISA with extensions for common I/O tasks:
-
-```
-┌──────────┬────────┬───────────────────────────────────────────────────┐
-│ Mnemonic │ Opcode │ Description                                       │
-├──────────┼────────┼───────────────────────────────────────────────────┤
-│          │        │ BEAM POSITION                                     │
-│ LDBY     │  $03   │ A = beam_y (current scanline, 0-311)             │
-│ LDBX     │  $13   │ A = beam_x (position in scanline, 0-63)          │
-│ LDC16    │  $23   │ X:A = cycle_count (16-bit)                       │
-│          │        │                                                   │
-│          │        │ COMPARISONS                                       │
-│ CMP16 zp │  $33   │ Compare X:A with 16-bit value at zp              │
-│ CMPBY zp │  $07   │ Compare beam_y with value at zp                  │
-│          │        │                                                   │
-│          │        │ BOUNDING BOX                                      │
-│ BBOX a,b │  $43   │ Z = 1 if boxes at zp a and zp b overlap          │
-│          │        │ Box format: x, y, width, height (4 bytes)        │
-│          │        │                                                   │
-│          │        │ BIT MANIPULATION                                  │
-│ SETBIT n │  $53   │ [zp] |= (1 << n)                                 │
-│ CLRBIT n │  $63   │ [zp] &= ~(1 << n)                                │
-│ TSTBIT n │  $73   │ Z = ([zp] & (1 << n)) == 0                       │
-│          │        │                                                   │
-│          │        │ CONTROL                                           │
-│ RTS_SVC  │  $83   │ Return from servicer (fast exit)                 │
-│ NOP_SVC  │  $93   │ No operation (servicer idle)                     │
-└──────────┴────────┴───────────────────────────────────────────────────┘
-```
-
-### 4.2 BBOX Instruction Detail
-
-The `BBOX` instruction performs a complete bounding box overlap test in hardware:
-
-```
-BBOX zp1, zp2
-
-Memory layout:
-    zp1+0: x1 (left)
-    zp1+1: y1 (top)
-    zp1+2: w1 (width)
-    zp1+3: h1 (height)
-    
-    zp2+0: x2
-    zp2+1: y2
-    zp2+2: w2
-    zp2+3: h2
-
-Operation (hardware):
-    r1 = x1 + w1          // right edge 1
-    b1 = y1 + h1          // bottom edge 1
-    r2 = x2 + w2
-    b2 = y2 + h2
-    
-    overlap = (x1 < r2) && (r1 > x2) && (y1 < b2) && (b1 > y2)
-    Z = overlap
-
-Cycles: 4 (all comparisons in parallel)
-```
-
-### 4.3 Example: Sprite Collision Servicer
-
-```asm
-; Servicer routine for sprite collision
-; Called when 6502 reads $D01E
-; Must compute current collision state based on beam position
-
-sprite_collision_servicer:
-    LDBY                    ; A = current scanline
-    STA beam_y              ; Save for comparisons
-    
-    LDA #$00
-    STA $D01E               ; Clear collision register
-    STA $D01F
-    
-    ; Check sprite 0 vs sprite 1
-    ; Sprite bounding boxes stored at $D0-$D3 and $D4-$D7
-    BBOX $D0, $D4
-    BNE no_s01              ; Z=0 means no overlap
-    
-    ; Check if beam has reached overlap area
-    LDA $D1                 ; Sprite 0 Y
-    CMP beam_y
-    BCS no_s01              ; Sprite below beam, no collision yet
-    
-    ; Collision detected!
-    SETBIT $D01E, #0        ; Sprite 0 in collision
-    SETBIT $D01E, #1        ; Sprite 1 in collision
-    
-no_s01:
-    ; ... repeat for other sprite pairs (0-2, 0-3, etc.) ...
-    
-    RTS_SVC                 ; Return result in $D01E
-    
-; Total: ~15-20 cycles for full collision check
-```
-
----
-
-## 5. Memory Architecture
+## 4. Memory Architecture
 
 ### 5.1 Shadow Registers
 
@@ -368,11 +262,11 @@ $0011_D000 - $0011_D02E   Shadow: VIC-II registers
 $0011_D400 - $0011_D41C   Shadow: SID registers
 $0011_DC00 - $0011_DCFF   Shadow: CIA #1 registers
 $0011_DD00 - $0011_DDFF   Shadow: CIA #2 registers
-$0011_F000 - $0011_F0FF   Servicer scratch area
+$0011_F000 - $0011_F0FF   MMIO handler scratch area
 ────────────────────────────────────────────────────────
 
 6502 address $D000 → Physical $0011_D000 (via VBR mapping)
-Servicer sees same address space as 6502
+MMIO handler sees the same address space as 6502
 M65832 can also access for frame rendering
 ```
 
@@ -395,16 +289,16 @@ $FFFF_F40C: CYCLE_RST - Write to reset cycle counter (do at frame start)
 Usage:
 1. 6502 writes to I/O register
 2. Hardware logs {cycle, address, value} to FIFO
-3. Servicer updates shadow register immediately
+3. Hardware updates shadow register immediately
 4. At VBlank, Linux process drains FIFO
 5. Renderer replays writes in cycle order for accurate raster effects
 ```
 
 ---
 
-## 6. I/O Flow
+## 5. I/O Flow
 
-### 6.1 Write Path
+### 5.1 Write Path
 
 ```
 6502 executes: STA $D020 (set border color)
@@ -417,15 +311,15 @@ Usage:
 │                                                                      │
 │ 3. Entry logged to FIFO: {cycle_count, $D020, value}                │
 │                                                                      │
-│ 4. Servicer triggered (if additional processing needed)            │
-│    └── For color registers: No extra work, servicer sleeps         │
-│    └── For sprite position: Servicer updates bounding box          │
+│ 4. Main CPU IRQ handler runs (if additional processing needed)     │
+│    └── For color registers: No extra work                          │
+│    └── For sprite position: Update bounding box                    │
 │                                                                      │
 │ 5. 6502 continues, M65832 resumes                                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 Read Path
+### 5.2 Read Path
 
 ```
 6502 executes: LDA $D01E (read collision register)
@@ -436,14 +330,14 @@ Usage:
 │                                                                      │
 │ 2. 6502 read cycle stretched (RDY signal held)                      │
 │                                                                      │
-│ 3. Servicer triggered with address $D01E                            │
+│ 3. Main CPU IRQ handler triggered with address $D01E                │
 │                                                                      │
-│ 4. Servicer computes current collision state:                       │
+│ 4. Main CPU computes current collision state:                       │
 │    └── Reads sprite positions from shadow registers                 │
-│    └── Uses LDBY to get current beam position                       │
-│    └── Uses BBOX to check overlaps                                  │
+│    └── Reads current beam position                                  │
+│    └── Checks overlaps                                              │
 │    └── Writes result to $D01E                                       │
-│    └── RTS_SVC signals completion                                   │
+│    └── IRQ completion releases the 6502                             │
 │                                                                      │
 │ 5. Hardware releases 6502 (RDY asserted)                            │
 │                                                                      │
@@ -453,9 +347,9 @@ Usage:
 
 ---
 
-## 7. Servicer Routines by Register
+## 6. MMIO Routines by Register
 
-### 7.1 VIC-II Registers
+### 6.1 VIC-II Registers
 
 | Register | On Write | On Read |
 |----------|----------|---------|
@@ -468,7 +362,7 @@ Usage:
 | $D01F (sprite-bg) | Clear register | **Compute collision** |
 | $D020-$D02E (colors) | Log only | Return shadow |
 
-### 7.2 SID Registers
+### 6.2 SID Registers
 
 | Register | On Write | On Read |
 |----------|----------|---------|
@@ -478,7 +372,7 @@ Usage:
 | $D41B (osc 3) | N/A | Return LFSR (random) |
 | $D41C (env 3) | N/A | Return envelope value |
 
-### 7.3 CIA Registers
+### 6.3 CIA Registers
 
 | Register | On Write | On Read |
 |----------|----------|---------|
@@ -488,9 +382,9 @@ Usage:
 
 ---
 
-## 8. Classic System Configurations
+## 7. Classic System Configurations
 
-### 8.1 C64 Mode
+### 7.1 C64 Mode
 
 ```c
 struct classic_config c64_ntsc = {
@@ -501,7 +395,6 @@ struct classic_config c64_ntsc = {
     .vic_base = 0x0011D000,
     .sid_base = 0x0011D400,
     .cia_base = 0x0011DC00,
-    .servicer_entry = 0x0011F000,
 };
 
 struct classic_config c64_pal = {
@@ -512,11 +405,10 @@ struct classic_config c64_pal = {
     .vic_base = 0x0011D000,
     .sid_base = 0x0011D400,
     .cia_base = 0x0011DC00,
-    .servicer_entry = 0x0011F000,
 };
 ```
 
-### 8.2 NES Mode
+### 7.2 NES Mode
 
 ```c
 struct classic_config nes_ntsc = {
@@ -526,7 +418,6 @@ struct classic_config nes_ntsc = {
     .cycles_per_line = 114,     // ~341 PPU dots / 3
     .ppu_base = 0x0011D000,
     .apu_base = 0x0011D400,
-    .servicer_entry = 0x0011F000,
 };
 
 struct classic_config nes_pal = {
@@ -536,11 +427,10 @@ struct classic_config nes_pal = {
     .cycles_per_line = 106,
     .ppu_base = 0x0011D000,
     .apu_base = 0x0011D400,
-    .servicer_entry = 0x0011F000,
 };
 ```
 
-### 8.3 Apple II Mode
+### 7.3 Apple II Mode
 
 ```c
 struct classic_config apple2 = {
@@ -549,11 +439,10 @@ struct classic_config apple2 = {
     .scanlines = 262,
     .cycles_per_line = 65,
     .soft_switch_base = 0x0011C000,
-    .servicer_entry = 0x0011F000,
 };
 ```
 
-### 8.4 Atari 2600 Mode
+### 7.4 Atari 2600 Mode
 
 ```c
 struct classic_config atari2600 = {
@@ -563,11 +452,10 @@ struct classic_config atari2600 = {
     .cycles_per_line = 76,
     .tia_base = 0x0011D000,
     .riot_base = 0x0011D200,
-    .servicer_entry = 0x0011F000,
 };
 ```
 
-### 8.5 Frequency Table
+### 7.5 Frequency Table
 
 | System | Region | Exact Frequency | Master Cycles (avg) |
 |--------|--------|-----------------|---------------------|
@@ -582,9 +470,9 @@ struct classic_config atari2600 = {
 
 ---
 
-## 9. Linux Integration
+## 8. Linux Integration
 
-### 9.1 Video Renderer Process
+### 8.1 Video Renderer Process
 
 ```c
 // Normal Linux process - runs at VBlank
@@ -621,7 +509,7 @@ void video_renderer(void) {
 }
 ```
 
-### 9.2 Audio Generator Process
+### 8.2 Audio Generator Process
 
 ```c
 // Normal Linux process - runs on audio buffer low
@@ -647,50 +535,47 @@ void audio_generator(void) {
 
 ---
 
-## 10. Hardware Resource Summary
+## 9. Hardware Resource Summary
 
-### 10.1 FPGA Utilization
+### 9.1 FPGA Utilization
 
 | Component | LUTs | Flip-Flops | BRAM |
 |-----------|------|------------|------|
 | M65832 core | ~5,000 | ~2,000 | 2 |
-| Servicer core | ~600 | ~100 | 0 |
 | 6502 core | ~500 | ~100 | 0 |
 | Memory arbiter | ~200 | ~50 | 0 |
 | Shadow registers | ~100 | ~500 | 0 |
 | I/O FIFO | ~100 | ~100 | 1 |
-| **Total** | **~6,500** | **~2,850** | **3** |
+| **Total** | **~5,900** | **~2,750** | **3** |
 
 **Fits easily in Xilinx Artix-7 35T** with room for peripherals.
 
-### 10.2 Performance Summary
+### 9.2 Performance Summary
 
 | Metric | Value |
 |--------|-------|
 | Master clock | 50 MHz |
-| 6502 effective speed | 1 MHz (configurable) |
+| 6502 effective speed | Targeted per-system (configurable) |
 | M65832 availability | 88-98% (depending on I/O) |
 | Context switch overhead | 0 cycles (dedicated registers) |
-| Servicer max latency | ~20 cycles (~400 ns) |
 | I/O FIFO depth | 256 entries |
 
 ---
 
-## 11. Summary
+## 10. Summary
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    M65832 Classic Coprocessor                        │
 │                                                                      │
-│  THREE CORES:                                                        │
+│  TWO CORES:                                                          │
 │  ├── M65832: Linux, modern apps (32-bit, gets 90%+ of cycles)       │
-│  ├── Servicer: I/O handling (extended 6502, on-demand)              │
-│  └── 6502: Classic games (pure 6502, 1 MHz interleaved)             │
+│  └── 6502: Classic games (pure 6502, time-sliced)                   │
 │                                                                      │
 │  KEY FEATURES:                                                       │
 │  ├── Zero context-switch overhead (dedicated registers)             │
 │  ├── Cycle-accurate classic execution                                │
-│  ├── Servicer extensions for fast collision/beam queries            │
+│  ├── IRQ-based MMIO handling for computed reads                     │
 │  ├── Shadow registers + FIFO for renderer                           │
 │  └── Linux runs concurrently at near-full speed                     │
 │                                                                      │

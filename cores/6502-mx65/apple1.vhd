@@ -36,6 +36,7 @@ architecture rtl of apple1 is
 	clock	: in std_logic;
 	reset	: in std_logic;	  
 	ce		: in std_logic;
+	compat	: in std_logic_vector(7 downto 0);
 	data_in	: in std_logic_vector(7 downto 0);
 	data_out: out std_logic_vector(7 downto 0);
 	address	: out std_logic_vector(15 downto 0);
@@ -85,7 +86,7 @@ architecture rtl of apple1 is
 begin
 
 	u1: uart port map(rx,tx,clock,'1',rx_ready,rx_read,tx_start,tx_ready,uart_data_in,uart_data);
-	u2: mx65 port map(clock,n_reset,p1,data_bus,mx65_data,address_bus,rw,sync,'1','1');
+	u2: mx65 port map(clock,n_reset,p1,(others => '0'),data_bus,mx65_data,address_bus,rw,sync,'1','1');
 	u3: rom port map(clock,address_bus(7 downto 0),rom_cs,rom_data);
 	u4: ram port map(clock,ram_cs,we,address_bus(11 downto 0),data_bus,ram_data);
 		

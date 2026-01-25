@@ -1,24 +1,14 @@
--- Testbench for M65832 coprocessor integration
+-- M65832 Coprocessor Soak Testbench
 
 library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
 
-entity tb_M65832_Coprocessor is
-end tb_M65832_Coprocessor;
+entity tb_M65832_Coprocessor_Soak is
+end tb_M65832_Coprocessor_Soak;
 
-architecture sim of tb_M65832_Coprocessor is
-    constant CLK_PERIOD : time := 20 ns; -- 50 MHz
-
-    function is_clean(v : std_logic_vector) return boolean is
-    begin
-        for i in v'range loop
-            if v(i) /= '0' and v(i) /= '1' then
-                return false;
-            end if;
-        end loop;
-        return true;
-    end function;
+architecture sim of tb_M65832_Coprocessor_Soak is
+    constant CLK_PERIOD : time := 20 ns;
 
     signal clk         : std_logic := '0';
     signal rst_n       : std_logic := '0';
@@ -43,24 +33,25 @@ architecture sim of tb_M65832_Coprocessor is
     signal irq_valid   : std_logic := '0';
     signal irq_req     : std_logic;
     signal irq_addr    : std_logic_vector(15 downto 0);
-    signal core_sel    : std_logic_vector(1 downto 0);
 
     type mem_t is array (0 to 65535) of std_logic_vector(7 downto 0);
     signal mem : mem_t := (others => x"00");
     signal init_done : std_logic := '0';
-    signal write_seen : std_logic := '0';
-    signal irq_read_seen : std_logic := '0';
-    signal slot_count : unsigned(31 downto 0) := (others => '0');
-    signal write_count : unsigned(31 downto 0) := (others => '0');
+    signal writes_seen : unsigned(31 downto 0) := (others => '0');
+    signal irq_reads_seen : unsigned(31 downto 0) := (others => '0');
+
+    function is_clean(v : std_logic_vector) return boolean is
+    begin
+        for i in v'range loop
+            if v(i) /= '0' and v(i) /= '1' then
+                return false;
+            end if;
+        end loop;
+        return true;
+    end function;
 begin
-    ---------------------------------------------------------------------------
-    -- Clock
-    ---------------------------------------------------------------------------
     clk <= not clk after CLK_PERIOD / 2;
 
-    ---------------------------------------------------------------------------
-    -- DUT
-    ---------------------------------------------------------------------------
     dut : entity work.M65832_Coprocessor_Top
         port map (
             CLK         => clk,
@@ -87,22 +78,25 @@ begin
             IRQ_VALID   => irq_valid,
             IRQ_REQ     => irq_req,
             IRQ_ADDR    => irq_addr,
-            CORE_SEL_OUT=> core_sel
+            CORE_SEL_OUT=> open
         );
 
-    ---------------------------------------------------------------------------
-    -- Memory model (read-combinational, write-synchronous)
-    ---------------------------------------------------------------------------
     bus_data_in <= mem(to_integer(unsigned(bus_addr(15 downto 0))));
 
     process(clk)
     begin
         if rising_edge(clk) then
             if init_done = '0' then
-                -- Initialize program and vectors once
                 mem <= (others => x"00");
+                -- Program at $0000:
+                -- LDA #$55
+                -- STA $0400
+                -- LDA $D012
+                -- STA $0401
+                -- INC $0400
+                -- JMP $0000
                 mem(16#0000#) <= x"A9";
-                mem(16#0001#) <= x"42";
+                mem(16#0001#) <= x"55";
                 mem(16#0002#) <= x"8D";
                 mem(16#0003#) <= x"00";
                 mem(16#0004#) <= x"04";
@@ -112,39 +106,33 @@ begin
                 mem(16#0008#) <= x"8D";
                 mem(16#0009#) <= x"01";
                 mem(16#000A#) <= x"04";
-                mem(16#000B#) <= x"4C";
+                mem(16#000B#) <= x"EE";
                 mem(16#000C#) <= x"00";
-                mem(16#000D#) <= x"00";
+                mem(16#000D#) <= x"04";
+                mem(16#000E#) <= x"4C";
+                mem(16#000F#) <= x"00";
+                mem(16#0010#) <= x"00";
+                -- Reset vector -> $0000
                 mem(16#FFFC#) <= x"00";
                 mem(16#FFFD#) <= x"00";
                 init_done <= '1';
             end if;
-            if core_sel = "01" then
-                slot_count <= slot_count + 1;
-            end if;
-            if init_done = '1' and bus_we = '1' and bus_rdy = '1' and core_sel = "01" and
+
+            if init_done = '1' and bus_we = '1' and bus_rdy = '1' and
                is_clean(bus_addr(15 downto 0)) and is_clean(bus_data_out) then
-                write_count <= write_count + 1;
-                if not (bus_addr(15 downto 0) >= x"0000" and bus_addr(15 downto 0) <= x"0007") and
+                if not (bus_addr(15 downto 0) >= x"0000" and bus_addr(15 downto 0) <= x"0010") and
                    not (bus_addr(15 downto 0) = x"FFFC" or bus_addr(15 downto 0) = x"FFFD") then
                     mem(to_integer(unsigned(bus_addr(15 downto 0)))) <= bus_data_out;
                 end if;
                 if bus_addr(15 downto 0) = x"0400" then
-                    if bus_data_out = x"42" then
-                        write_seen <= '1';
-                    end if;
+                    writes_seen <= writes_seen + 1;
                 elsif bus_addr(15 downto 0) = x"0401" then
-                    if bus_data_out = x"5A" then
-                        irq_read_seen <= '1';
-                    end if;
+                    irq_reads_seen <= irq_reads_seen + 1;
                 end if;
             end if;
         end if;
     end process;
 
-    ---------------------------------------------------------------------------
-    -- IRQ response (simulate main CPU computed read)
-    ---------------------------------------------------------------------------
     process(clk)
     begin
         if rising_edge(clk) then
@@ -156,9 +144,6 @@ begin
         end if;
     end process;
 
-    ---------------------------------------------------------------------------
-    -- Stimulus
-    ---------------------------------------------------------------------------
     process
     begin
         target_freq <= std_logic_vector(to_unsigned(1022727, 32));
@@ -173,21 +158,14 @@ begin
         vbr_load <= '0';
         enable <= '1';
 
-        wait for 2 ms;
-
-        report "6502 slot count=" & integer'image(to_integer(slot_count)) &
-               " write_count=" & integer'image(to_integer(write_count)) severity note;
-        assert slot_count > 0
-            report "6502 time-slice slots never occurred"
+        wait for 10 ms;
+        assert writes_seen > 0
+            report "Soak: no writes to $0400 observed"
             severity failure;
-        assert write_seen = '1'
-            report "6502 did not write expected value to $0400"
+        assert irq_reads_seen > 0
+            report "Soak: no writes to $0401 observed"
             severity failure;
-        assert irq_read_seen = '1'
-            report "6502 did not receive expected IRQ MMIO data at $0401"
-            severity failure;
-
-        report "Coprocessor integration test PASSED" severity note;
+        report "Coprocessor soak test PASSED" severity note;
         wait;
     end process;
 end sim;

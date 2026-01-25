@@ -36,7 +36,8 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 - **[Linux Porting Guide](docs/M65832_Linux_Porting_Guide.md)** - OS implementation notes
 - **[Mixed-Mode Multitasking](docs/M65832_Mixed_Mode_Multitasking.md)** - Running 8/16/32-bit processes together
 - **[Timing Compatibility](docs/M65832_Timing_Compatibility.md)** - Cycle-accurate 6502, clock speed control
-- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Three-core architecture for retro gaming
+- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core coprocessor architecture
+- **[6502 Compatibility](docs/M65832_6502_Compatibility.md)** - Supported variants and mode bits
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
 
 ## Tests
@@ -45,6 +46,7 @@ GHDL testbenches:
 
 - Core/MMU suite (fast iteration): `tb/run_core_tests.sh`
 - Coprocessor suite (fast iteration): `tb/run_coprocessor_tests.sh`
+- 6502 illegal/65C02 cycle-accuracy test: `tb/tb_mx65_illegal.vhd` (included in coprocessor suite)
 - Manual core testbench:
   `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_core.vhd && ghdl -e --std=08 tb_M65832_Core && ghdl -r --std=08 tb_M65832_Core --stop-time=1ms`
 - Manual MMU-only testbench:

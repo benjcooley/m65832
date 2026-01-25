@@ -39,6 +39,13 @@ entity M65832_Coprocessor_Top is
         VBR_LOAD        : in  std_logic;
 
         ---------------------------------------------------------------------------
+        -- 6502 compatibility control
+        ---------------------------------------------------------------------------
+        COMPAT_IN       : in  std_logic_vector(7 downto 0);
+        COMPAT_LOAD     : in  std_logic;
+        COMPAT_OUT      : out std_logic_vector(7 downto 0);
+
+        ---------------------------------------------------------------------------
         -- Shadow I/O configuration
         ---------------------------------------------------------------------------
         BANK0_BASE      : in  std_logic_vector(15 downto 0);
@@ -84,6 +91,8 @@ architecture rtl of M65832_Coprocessor_Top is
     signal c_io_hit     : std_logic;
 
     signal cycle_count  : std_logic_vector(19 downto 0);
+    signal irq_req_int  : std_logic;
+    signal irq_addr_int : std_logic_vector(15 downto 0);
 begin
     ---------------------------------------------------------------------------
     -- Interleaver (time slicing)
@@ -123,7 +132,7 @@ begin
             VPB     => open,
             MLB     => open,
             NMI_N   => '1',
-            IRQ_N   => '1',
+            IRQ_N   => not irq_req_int,
             ABORT_N => '1',
             E_FLAG  => open,
             M_FLAG  => open,
@@ -143,6 +152,9 @@ begin
             IRQ         => '1',
             VBR_IN      => VBR_IN,
             VBR_LOAD    => VBR_LOAD,
+            COMPAT_IN   => COMPAT_IN,
+            COMPAT_LOAD => COMPAT_LOAD,
+            COMPAT_OUT  => COMPAT_OUT,
             ADDR_VA     => c_addr,
             DATA_OUT    => c_data_out,
             DATA_IN     => BUS_DATA_IN,
@@ -174,8 +186,8 @@ begin
             IO_HIT       => c_io_hit,
             CYCLE_COUNT  => cycle_count,
             FRAME_NUMBER => FRAME_NUMBER,
-            IRQ_REQ      => IRQ_REQ,
-            IRQ_ADDR     => IRQ_ADDR,
+            IRQ_REQ      => irq_req_int,
+            IRQ_ADDR     => irq_addr_int,
             IRQ_DATA     => IRQ_DATA,
             IRQ_VALID    => IRQ_VALID,
             SHADOW_BANK  => (others => '0'),
@@ -200,4 +212,6 @@ begin
     BUS_WE       <= m_we when core_sel = "00" else c_we;
 
     CORE_SEL_OUT <= core_sel;
+    IRQ_REQ <= irq_req_int;
+    IRQ_ADDR <= irq_addr_int;
 end rtl;

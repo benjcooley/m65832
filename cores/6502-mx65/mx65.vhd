@@ -15,6 +15,7 @@ entity mx65 is
 	clock	: in std_logic;
 	reset	: in std_logic;	  
 	ce		: in std_logic;
+	compat	: in std_logic_vector(7 downto 0);
 	data_in	: in std_logic_vector(7 downto 0);
 	data_out: out std_logic_vector(7 downto 0);
 	address	: out std_logic_vector(15 downto 0);
@@ -49,18 +50,20 @@ architecture rtl of mx65 is
 			PLP3,RTS3_RTI4,RTI3,BR3,IZY3,RTS4_RTI5,JMPIND4,IZX4,BRK5,BRK6,RTS5,TFIX,TMOD);
 	
 	type control_type is record 
-		src_a,src_x,src_y,src_s,src_dl,src_pcl,src_pch,src_p,dst_a,dst_x,dst_y,dst_dl,
+		src_a,src_x,src_y,src_s,src_dl,src_pcl,src_pch,src_p,src_zero,src_ax,dst_a,dst_x,dst_y,dst_dl,
         dst_adl,dst_adh,dst_pcl,dst_pch,dst_s,load_dl,load_adl,load_adh,load_pcl,
         load_pch,load_nv,load_czid,update_c,update_z,update_n,update_v,clcsec,clisei,
         cldsed,inc_pc,alu_fn0,alu_fn1,force_carry,carry_enable,alu_invert,alu_dl,alu_sr,
-        bcd_add,bcd_sub,write_enable : std_logic;		
+        bcd_add,bcd_sub,write_enable,update_z_and,update_c_alu7,update_c_arr,update_v_arr,
+		and_then_shift,and_then_ror,trb_op,tsb_op : std_logic;		
 		end record;
 			
 	type decode_type is record
 		brk,jsr,rti,rts,php,plp,pha,pla,bita,jmpabs,jmpind,sty,ldy,cpy,cpx,dey,tya,tay,clv,
 		iny,inx,clcsec,clisei,cldsed,ora,anda,eor,adc,sta,lda,cmp,sbc,asl,rotl,lsr,rotr,stx,
 		sta_stx_sty,ldx,dec,inc,a_shift,txa,txs,tax,tsx,dex,index_y,zp,ab,zp_index,ab_index,
-		indirect_x,indirect_y,single_byte,br,read_mod_write : std_logic;
+		indirect_x,indirect_y,zp_indirect,single_byte,br,read_mod_write,bra,phx,plx,phy,ply,stz,bit_imm,
+		inc_a,dec_a,trb,tsb,jmp_absx,lax,sax,dcp,isc,slo,rla,sre,rra,anc,alr,arr,sbx : std_logic;
 		
 		end record;
 		
@@ -81,6 +84,7 @@ architecture rtl of mx65 is
 	signal adder_hi : unsigned(4 downto 0);
 	signal adder_lo : unsigned(4 downto 0);
 	signal alu_out  : unsigned(7 downto 0);
+	signal and_ab   : unsigned(7 downto 0);
 	signal bcd_fix  : unsigned(7 downto 0);	
 	signal brk_vect : std_logic_vector(14 downto 0);
 	signal reset_reg : std_logic;
@@ -91,9 +95,15 @@ architecture rtl of mx65 is
 	signal t0_irq_nmi : std_logic;	 
 	signal inhibit_pcinc : std_logic;
 	signal enable : std_logic;
+	signal decimal_en : std_logic;
+	signal zero_vec : std_logic_vector(7 downto 0);
+	signal ax_and : std_logic_vector(7 downto 0);
+	signal illegal_rmw : std_logic;
 
 begin
 
+	zero_vec <= (others => '0');
+	ax_and <= a and x;
 	data_mux <= (a or (7 downto 0 => not control.src_a)) and
 				(x or (7 downto 0 => not control.src_x)) and
 				(y or (7 downto 0 => not control.src_y)) and	 
@@ -101,10 +111,14 @@ begin
 				(dl or (7 downto 0 => not control.src_dl)) and
 				(pcl or (7 downto 0 => not control.src_pcl)) and
 				(pch or (7 downto 0 => not control.src_pch)) and
-				( n & v & '1' & b & d & i & z & c or (7 downto 0 => not control.src_p));
+				( n & v & '1' & b & d & i & z & c or (7 downto 0 => not control.src_p)) and
+				(zero_vec or (7 downto 0 => not control.src_zero)) and
+				(ax_and or (7 downto 0 => not control.src_ax));
 
 	data_out <= data_mux;  
 	enable <= ce;
+	decimal_en <= compat(0);
+	illegal_rmw <= decode.slo or decode.rla or decode.sre or decode.rra or decode.dcp or decode.isc;
 	
 	brk_vect(14 downto 2) <= "1111111111111";
 	brk_vect(1) <= not nmi_reg;
@@ -181,7 +195,7 @@ begin
 	--
 	---------------------------------------
 	
-	process(ir) begin
+	process(ir, compat) begin
 		decode <= (others=>'0');
 		
 		decode.index_y <= ir(2) nand (ir(1) nand (ir(7) and not ir(6)));
@@ -266,6 +280,444 @@ begin
 			end case;
 		end if;
 		
+		if compat(1) = '1' then
+			case ir is
+				when X"80" => decode.bra <= '1';
+				when X"DA" => decode.phx <= '1';
+				when X"FA" => decode.plx <= '1';
+				when X"5A" => decode.phy <= '1';
+				when X"7A" => decode.ply <= '1';
+				when X"14" =>
+					decode.trb <= '1';
+					decode.zp <= '1';
+					decode.zp_index <= '0';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"1C" =>
+					decode.trb <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"04" =>
+					decode.tsb <= '1';
+					decode.zp <= '1';
+					decode.zp_index <= '0';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"0C" =>
+					decode.tsb <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"64" =>
+					decode.stz <= '1';
+					decode.zp <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"74" =>
+					decode.stz <= '1';
+					decode.zp_index <= '1';
+					decode.sta_stx_sty <= '1';
+					decode.index_y <= '0';
+				when X"9C" =>
+					decode.stz <= '1';
+					decode.ab <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"9E" =>
+					decode.stz <= '1';
+					decode.ab_index <= '1';
+					decode.sta_stx_sty <= '1';
+					decode.index_y <= '0';
+				when X"89" =>
+					decode.bita <= '1';
+					decode.bit_imm <= '1';
+				when X"34" =>
+					decode.bita <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '0';
+				when X"3C" =>
+					decode.bita <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+				when X"1A" => decode.inc_a <= '1';
+				when X"3A" => decode.dec_a <= '1';
+				when X"7C" =>
+					decode.jmp_absx <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+				when X"12" =>
+					decode.ora <= '1';
+					decode.zp_indirect <= '1';
+				when X"32" =>
+					decode.anda <= '1';
+					decode.zp_indirect <= '1';
+				when X"52" =>
+					decode.eor <= '1';
+					decode.zp_indirect <= '1';
+				when X"72" =>
+					decode.adc <= '1';
+					decode.zp_indirect <= '1';
+				when X"92" =>
+					decode.sta <= '1';
+					decode.zp_indirect <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"B2" =>
+					decode.lda <= '1';
+					decode.zp_indirect <= '1';
+				when X"D2" =>
+					decode.cmp <= '1';
+					decode.zp_indirect <= '1';
+				when X"F2" =>
+					decode.sbc <= '1';
+					decode.zp_indirect <= '1';
+				when others => null;
+			end case;
+		end if;
+		
+		if compat(2) = '1' then
+			case ir is
+				-- LAX
+				when X"A7" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.zp <= '1';
+				when X"B7" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+				when X"AF" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.ab <= '1';
+				when X"BF" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+				when X"A3" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.indirect_x <= '1';
+				when X"B3" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+					decode.indirect_y <= '1';
+				when X"AB" =>
+					decode <= (others => '0');
+					decode.lax <= '1';
+				-- SAX
+				when X"87" =>
+					decode <= (others => '0');
+					decode.sax <= '1';
+					decode.zp <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"97" =>
+					decode <= (others => '0');
+					decode.sax <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"8F" =>
+					decode <= (others => '0');
+					decode.sax <= '1';
+					decode.ab <= '1';
+					decode.sta_stx_sty <= '1';
+				when X"83" =>
+					decode <= (others => '0');
+					decode.sax <= '1';
+					decode.indirect_x <= '1';
+					decode.sta_stx_sty <= '1';
+				-- DCP
+				when X"C7" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"D7" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"CF" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"DF" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"DB" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"C3" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"D3" =>
+					decode <= (others => '0');
+					decode.dcp <= '1';
+					decode.dec <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- ISC
+				when X"E7" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"F7" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"EF" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"FF" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"FB" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"E3" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"F3" =>
+					decode <= (others => '0');
+					decode.isc <= '1';
+					decode.inc <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- SLO
+				when X"07" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"17" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"0F" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"1F" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"1B" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"03" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"13" =>
+					decode <= (others => '0');
+					decode.slo <= '1';
+					decode.asl <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- RLA
+				when X"27" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"37" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"2F" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"3F" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"3B" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"23" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"33" =>
+					decode <= (others => '0');
+					decode.rla <= '1';
+					decode.rotl <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- SRE
+				when X"47" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"57" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"4F" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"5F" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"5B" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"43" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"53" =>
+					decode <= (others => '0');
+					decode.sre <= '1';
+					decode.lsr <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- RRA
+				when X"67" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.zp <= '1';
+					decode.read_mod_write <= '1';
+				when X"77" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.zp_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"6F" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.ab <= '1';
+					decode.read_mod_write <= '1';
+				when X"7F" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '0';
+					decode.read_mod_write <= '1';
+				when X"7B" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.ab_index <= '1';
+					decode.index_y <= '1';
+					decode.read_mod_write <= '1';
+				when X"63" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.indirect_x <= '1';
+					decode.read_mod_write <= '1';
+				when X"73" =>
+					decode <= (others => '0');
+					decode.rra <= '1';
+					decode.rotr <= '1';
+					decode.indirect_y <= '1';
+					decode.read_mod_write <= '1';
+				-- ANC / ALR / ARR / SBX
+				when X"0B" | X"2B" =>
+					decode <= (others => '0');
+					decode.anc <= '1';
+				when X"4B" =>
+					decode <= (others => '0');
+					decode.alr <= '1';
+				when X"6B" =>
+					decode <= (others => '0');
+					decode.arr <= '1';
+				when X"CB" =>
+					decode <= (others => '0');
+					decode.sbx <= '1';
+				when others => null;
+			end case;
+		end if;
+		
 	end process;
 	
 	---------------------------------------
@@ -284,11 +736,11 @@ begin
 					when T1 =>
 						if decode.brk = '1' then
 							state <= BRK2_JSR3;
-						elsif decode.pha = '1' then
+						elsif decode.pha = '1' or decode.phx = '1' or decode.phy = '1' then
 							state <= PHA2;
 						elsif decode.php = '1' then
 							state <= PHP2_BRK4;
-						elsif decode.plp = '1' or decode.pla = '1' or decode.rts = '1' or decode.rti = '1' then
+						elsif decode.plp = '1' or decode.pla = '1' or decode.plx = '1' or decode.ply = '1' or decode.rts = '1' or decode.rti = '1' then
 							state <= PLX2_RTX2;
 						elsif decode.jsr = '1' then
 							state <= JSR2;
@@ -296,6 +748,10 @@ begin
 							state <= JMPABS2_JSR5;
 						elsif decode.ab = '1' then
 							state <= ABS2;
+						elsif decode.zp_indirect = '1' then
+							state <= IZY2_IZX3_JMPIND3;
+						elsif decode.bra = '1' then
+							state <= BR2;
 						elsif decode.br = '1' and flag_mux = ir(5) then
 							state <= BR2;
 						elsif decode.zp_index = '1' and decode.index_y = '1' then
@@ -323,7 +779,7 @@ begin
 							state <= T0;
 						end if;
 					when PLX2_RTX2 =>
-						if decode.pla = '1' then
+						if decode.pla = '1' or decode.plx = '1' or decode.ply = '1' then
 							state <= PLA3;
 						elsif decode.plp = '1' then
 							state <= PLP3;
@@ -348,7 +804,9 @@ begin
 							state <= BR3;
 						end if;
 					when IZY2_IZX3_JMPIND3 =>
-						if decode.indirect_x = '1' then
+						if decode.jmp_absx = '1' then
+							state <= IZX4;
+						elsif decode.indirect_x = '1' or decode.zp_indirect = '1' then
 							state <= IZX4;
 						elsif decode.indirect_y = '1' then
 							state <= IZY3;
@@ -361,7 +819,12 @@ begin
 						else
 							state <= TREAD;
 						end if;
-					when ABX2|ABY2|IZY3 => state <= TFIX;
+					when ABX2|ABY2|IZY3 =>
+						if decode.jmp_absx = '1' then
+							state <= IZY2_IZX3_JMPIND3;
+						else
+							state <= TFIX;
+						end if;
 					when TREAD =>
 						if decode.read_mod_write = '1' then
 							state <= TMOD;
@@ -392,7 +855,8 @@ begin
 							state <= T0;
 						end if;
 					when TMOD => state <= TWRITE;
-					when TWRITE|PLA3|PLP3|BR3|JMPIND4|BRK6|RTS5|JMPABS2_JSR5|PHA2 => state <= T0;
+					when TWRITE => state <= T0;
+					when PLA3|PLP3|BR3|JMPIND4|BRK6|RTS5|JMPABS2_JSR5|PHA2 => state <= T0;
 				end case;		
 			end if;
 		end if;
@@ -404,7 +868,7 @@ begin
 	--
 	---------------------------------------
 	
-	process (state, decode, carry_reg, addr_pc, addr_s, addr_ad, d, data_mux, adl, adh, s, reset_reg, brk_vect)
+	process (state, decode, carry_reg, addr_pc, addr_s, addr_ad, d, decimal_en, data_mux, adl, adh, s, reset_reg, brk_vect)
 	begin
 		control <= (others => '0');				
 		case state is
@@ -412,42 +876,53 @@ begin
 				control.inc_pc <= '1';
 				-- Source
 				control.src_a <= decode.tay or decode.tax or decode.cmp or decode.a_shift or decode.ora
-					or decode.anda or decode.eor or decode.bita or decode.adc or decode.sbc;
+					or decode.anda or decode.eor or decode.bita or decode.adc or decode.sbc or decode.inc_a or decode.dec_a
+					or decode.anc or decode.alr or decode.arr;
 				control.src_x <= decode.inx or decode.dex or decode.txa or decode.txs or decode.cpx;
 				control.src_y <= decode.iny or decode.dey or decode.tya or decode.cpy;
-				control.src_dl <= decode.pla or decode.lda or decode.ldy or (decode.ldx and not decode.tsx); 
+				control.src_dl <= decode.pla or decode.plx or decode.ply or decode.lda or decode.ldy or decode.lax or (decode.ldx and not decode.tsx); 
+				control.src_ax <= decode.sbx;
 				control.src_s <= decode.tsx;
 				-- Destination
 				control.dst_a <= decode.pla or decode.a_shift or decode.txa or decode.tya or decode.ora
-					or decode.anda or decode.eor or decode.adc or decode.sbc or decode.lda;
-				control.dst_x <= decode.inx or decode.dex or decode.tax or decode.tsx or decode.ldx;
-				control.dst_y <= decode.iny or decode.dey or decode.tay or decode.ldy;
+					or decode.anda or decode.eor or decode.adc or decode.sbc or decode.lda or decode.lax or decode.inc_a or decode.dec_a
+					or decode.anc or decode.alr or decode.arr;
+				control.dst_x <= decode.inx or decode.dex or decode.tax or decode.tsx or decode.ldx or decode.plx or decode.lax or decode.sbx;
+				control.dst_y <= decode.iny or decode.dey or decode.tay or decode.ldy or decode.ply;
 				control.dst_s <= decode.txs;
 				-- Function
-				control.bcd_add <= decode.adc and d;
-				control.bcd_sub <= decode.sbc and d;
+				control.bcd_add <= decode.adc and d and decimal_en;
+				control.bcd_sub <= decode.sbc and d and decimal_en;
 				control.alu_fn0 <= decode.ora or decode.eor;
-				control.alu_fn1 <= decode.anda or decode.bita or decode.eor;	
-				control.force_carry <= decode.iny or decode.inx or decode.cmp or decode.cpx or decode.cpy;
-				control.carry_enable <= decode.adc or decode.sbc or decode.rotl or decode.rotr;
-				control.alu_invert <= decode.dey or decode.dex or decode.sbc or decode.cmp or decode.cpx or decode.cpy;
+				control.alu_fn1 <= decode.anda or decode.bita or decode.eor or decode.anc or decode.alr or decode.arr;	
+				control.force_carry <= decode.iny or decode.inx or decode.cmp or decode.cpx or decode.cpy or decode.inc_a or decode.sbx;
+				control.carry_enable <= decode.adc or decode.sbc or decode.rotl or decode.rotr or decode.arr;
+				control.alu_invert <= decode.dey or decode.dex or decode.sbc or decode.cmp or decode.cpx or decode.cpy or decode.dec_a or decode.sbx;
 				control.alu_dl <= decode.ora or decode.anda or decode.eor or decode.bita or decode.adc or
-					decode.sbc or decode.cmp or decode.cpx or decode.cpy or decode.asl or decode.rotl;
+					decode.sbc or decode.cmp or decode.cpx or decode.cpy or decode.asl or decode.rotl or decode.sbx
+					or decode.anc or decode.alr or decode.arr;
 				control.alu_sr <= decode.lsr or decode.rotr;
+				control.and_then_shift <= decode.alr;
+				control.and_then_ror <= decode.arr;
 				-- Flags   
 				
-				control.update_n <= decode.pla or decode.a_shift or decode.txa or decode.tya or decode.ora
+				control.update_n <= decode.pla or decode.plx or decode.ply or decode.a_shift or decode.txa or decode.tya or decode.ora
 					or decode.anda or decode.eor or decode.adc or decode.sbc or decode.lda or decode.inx or
 					decode.dex or decode.tax or decode.cpx or decode.tsx or decode.iny or decode.ldx or
-					decode.dey or decode.tay or decode.ldy or decode.cmp or decode.cpx or decode.cpy;	   
+					decode.dey or decode.tay or decode.ldy or decode.cmp or decode.cpx or decode.cpy or decode.inc_a or decode.dec_a
+					or decode.lax or decode.sbx or decode.anc or decode.alr or decode.arr;	   
 				
-				control.update_z <= decode.pla or decode.a_shift or decode.txa or decode.tya or decode.ora
+				control.update_z <= decode.pla or decode.plx or decode.ply or decode.a_shift or decode.txa or decode.tya or decode.ora
 					or decode.anda or decode.eor or decode.adc or decode.sbc or decode.lda or decode.inx or
 					decode.dex or decode.tax or decode.cpx or decode.tsx or decode.iny or decode.ldx or
-					decode.dey or decode.tay or decode.ldy or decode.cmp or decode.cpx or decode.cpy or decode.bita;   
+					decode.dey or decode.tay or decode.ldy or decode.cmp or decode.cpx or decode.cpy or decode.bita or decode.inc_a or decode.dec_a
+					or decode.lax or decode.sbx or decode.anc or decode.alr or decode.arr;   
 				
-				control.update_c <= decode.adc or decode.sbc or decode.cmp or decode.cpx or decode.cpy or decode.a_shift;
+				control.update_c <= decode.adc or decode.sbc or decode.cmp or decode.cpx or decode.cpy or decode.a_shift or decode.sbx or decode.alr;
+				control.update_c_alu7 <= decode.anc;
+				control.update_c_arr <= decode.arr;
 				control.update_v <= decode.adc or decode.sbc or decode.clv;
+				control.update_v_arr <= decode.arr;
 				control.clcsec <= decode.clcsec;
 				control.clisei <= decode.clisei;
 				control.cldsed <= decode.cldsed;
@@ -471,9 +946,11 @@ begin
 				control.dst_s <= '1';
 				address <= addr_s;	
 				alu_a <= unsigned(s);
-			when PHA2 => -- [S--] = A
+			when PHA2 => -- [S--] = A/X/Y
 				control.write_enable <= '1';
-				control.src_a <= '1';
+				control.src_a <= decode.pha;
+				control.src_x <= decode.phx;
+				control.src_y <= decode.phy;
 				control.alu_invert <= '1';
 				control.dst_s <= '1';
 				address <= addr_s;		
@@ -545,7 +1022,7 @@ begin
 				alu_a <= unsigned(data_mux);
 			when TREAD => -- DL = [AD]
 				control.load_dl <= '1';
-				control.load_nv <= decode.bita;
+				control.load_nv <= decode.bita and not decode.bit_imm;
 				address <= addr_ad;	
 				alu_a <= unsigned(data_mux);
 			when TWRITE => -- [AD] = reg
@@ -553,9 +1030,58 @@ begin
 				control.src_x <= decode.stx;
 				control.src_y <= decode.sty;
 				control.src_dl <= decode.read_mod_write;
+				control.src_zero <= decode.stz;
+				control.src_ax <= decode.sax;
 				control.write_enable <= '1';
+				if illegal_rmw = '1' then
+					control.alu_dl <= '1';
+					if decode.slo = '1' then
+						control.alu_fn0 <= '1';
+						control.dst_a <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+					elsif decode.rla = '1' then
+						control.alu_fn1 <= '1';
+						control.dst_a <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+					elsif decode.sre = '1' then
+						control.alu_fn0 <= '1';
+						control.alu_fn1 <= '1';
+						control.dst_a <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+					elsif decode.rra = '1' then
+						control.carry_enable <= '1';
+						control.dst_a <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+						control.update_c <= '1';
+						control.update_v <= '1';
+						control.bcd_add <= d and decimal_en;
+					elsif decode.dcp = '1' then
+						control.alu_invert <= '1';
+						control.force_carry <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+						control.update_c <= '1';
+					elsif decode.isc = '1' then
+						control.alu_invert <= '1';
+						control.carry_enable <= '1';
+						control.dst_a <= '1';
+						control.update_n <= '1';
+						control.update_z <= '1';
+						control.update_c <= '1';
+						control.update_v <= '1';
+						control.bcd_sub <= d and decimal_en;
+					end if;
+				end if;
 				address <= addr_ad;	
-				alu_a <= unsigned(data_mux);
+				if illegal_rmw = '1' then
+					alu_a <= unsigned(a);
+				else
+					alu_a <= unsigned(data_mux);
+				end if;
 			when BRK3_JSR4 => -- [S--] = PCL
 				control.write_enable <= not reset_reg;
 				control.alu_invert <= '1';
@@ -642,9 +1168,12 @@ begin
 				control.carry_enable <= decode.rotr or decode.rotl;
 				control.force_carry <= decode.inc;
 				control.alu_invert <= decode.dec;
-				control.update_z <= '1';
-				control.update_n <= '1';
+				control.update_z <= not (decode.trb or decode.tsb or illegal_rmw);
+				control.update_n <= not (decode.trb or decode.tsb or illegal_rmw);
 				control.update_c <= decode.rotl or decode.asl or decode.rotr or decode.lsr;
+				control.update_z_and <= decode.trb or decode.tsb;
+				control.trb_op <= decode.trb;
+				control.tsb_op <= decode.tsb;
 				address <= addr_ad;	 
 				alu_a <= unsigned(data_mux);
 		end case;
@@ -794,6 +1323,10 @@ begin
 			if enable='1' then
 				if control.load_czid = '1' then
 					c <= data_in(0);
+				elsif control.update_c_arr = '1' then
+					c <= alu_out(6);
+				elsif control.update_c_alu7 = '1' then
+					c <= alu_out(7);
 				elsif control.update_c = '1' then
 					c <= carry_out;
 				elsif control.clcsec = '1' then
@@ -817,6 +1350,12 @@ begin
 			if enable='1' then
 				if control.load_czid = '1' then
 					z <= data_in(1);
+				elsif control.update_z_and = '1' then
+					if (a and dl) = X"00" then
+						z <= '1';
+					else
+						z <= '0';
+					end if;
 				elsif control.update_z = '1' then		
 					if alu_out = X"00" then
 						z <= '1';
@@ -886,6 +1425,8 @@ begin
 			if enable='1' then
 				if control.load_nv = '1' then
 					v <= data_in(6);
+				elsif control.update_v_arr = '1' then
+					v <= alu_out(6) xor alu_out(5);
 				elsif control.update_v = '1' then
 					-- Overflow occurs when the ALU input signs match and the output sign does not
 					if alu_a(7) /= adder_hi(3) and alu_b(7) /= adder_hi(3) then
@@ -949,14 +1490,27 @@ begin
 	---------------------------------------	
 
 	carry_in <= control.force_carry or (control.carry_enable and c);
+	and_ab <= alu_a and alu_b;
 	adder_lo <= ('0' & alu_a(3 downto 0)) + ('0' & alu_b(3 downto 0)) + ("0000" & carry_in);
 	adder_hi <= ('0' & alu_a(7 downto 4)) + ('0' & alu_b(7 downto 4)) + ("0000" & half_carry);
 	half_carry <= adder_lo(4) or (control.bcd_add and adder_lo(3) and (adder_lo(2) or adder_lo(1)));
 	full_carry <= adder_hi(4) or (control.bcd_add and adder_hi(3) and (adder_hi(2) or adder_hi(1)));
 	
-	process(control,carry_in,alu_a,alu_b,adder_hi,adder_lo,full_carry)
+process(control,carry_in,alu_a,alu_b,and_ab,adder_hi,adder_lo,full_carry,a,dl)
 	begin
-		if control.alu_sr = '1' then
+		if control.trb_op = '1' then
+			alu_out <= unsigned(dl and not a);
+			carry_out <= full_carry;
+		elsif control.tsb_op = '1' then
+			alu_out <= unsigned(dl or a);
+			carry_out <= full_carry;
+		elsif control.and_then_shift = '1' then
+			alu_out <= ('0' & and_ab(7 downto 1));
+			carry_out <= and_ab(0);
+		elsif control.and_then_ror = '1' then
+			alu_out <= (carry_in & and_ab(7 downto 1));
+			carry_out <= and_ab(0);
+		elsif control.alu_sr = '1' then
 			alu_out <= (carry_in & alu_a(7 downto 1));
 			carry_out <= alu_a(0);
 		else
