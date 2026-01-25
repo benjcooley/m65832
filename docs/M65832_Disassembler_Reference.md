@@ -360,6 +360,25 @@ When opcode $02 is encountered, the next byte is looked up in a separate extende
 - Memory fences
 - FPU operations
 - System instructions
+- Shifter/rotate instructions ($E9): SHL, SHR, SAR, ROL, ROR
+- Extend instructions ($EA): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT
+
+### Register Aliases (R0-R63)
+
+For Direct Page addresses that are 4-byte aligned (multiples of 4), the disassembler outputs register alias notation:
+
+```
+00000000  SHL R4,R1,#4        ; $02 $E9 $04 $10 $04 - dest=$10=R4, src=$04=R1
+00000005  CLZ R8,R5           ; $02 $EA $04 $20 $14 - dest=$20=R8, src=$14=R5
+0000000A  SHL $01,$02,#4      ; Non-aligned addresses shown as hex
+```
+
+| Register | DP Address | Register | DP Address |
+|----------|------------|----------|------------|
+| R0 | $00 | R32 | $80 |
+| R1 | $04 | R33 | $84 |
+| R2 | $08 | ... | ... |
+| ... | ... | R63 | $FC |
 
 ### WID Prefix ($42)
 

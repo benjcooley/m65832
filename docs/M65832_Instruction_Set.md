@@ -364,22 +364,23 @@ The `[op|cnt]` byte encodes:
 **Assembly Syntax:**
 
 ```asm
-; Shift left by constant
+; Using DP address syntax:
     SHL $08, $04, #4      ; [$08] = [$04] << 4
-
-; Shift right logical by constant
     SHR $0C, $04, #8      ; [$0C] = [$04] >> 8
-
-; Shift right arithmetic (preserves sign)
     SAR $10, $08, #4      ; [$10] = [$08] >>> 4
-
-; Rotate through carry
     ROL $14, $10, #1      ; [$14] = [$10] rotate left 1
     ROR $18, $14, #1      ; [$18] = [$14] rotate right 1
 
-; Variable shift by A register
-    SHL $08, $04, A       ; [$08] = [$04] << (A & $1F)
-    SHR $0C, $04, A       ; [$0C] = [$04] >> (A & $1F)
+; Using register alias syntax (R0-R63 = $00, $04, $08, ...):
+    SHL R2, R1, #4        ; R2 = R1 << 4 (same as $08, $04)
+    SHR R3, R1, #8        ; R3 = R1 >> 8
+    SAR R4, R2, #4        ; R4 = R2 >>> 4
+    ROL R5, R4, #1        ; R5 = R4 rotate left 1
+    ROR R6, R5, #1        ; R6 = R5 rotate right 1
+
+; Variable shift by A register:
+    SHL R2, R1, A         ; R2 = R1 << (A & $1F)
+    SHR R3, R1, A         ; R3 = R1 >> (A & $1F)
 ```
 
 **Instruction Length:** 5 bytes ($02 $E9 op|cnt dest src)
@@ -405,22 +406,23 @@ Extend operations for converting between data sizes.
 **Assembly Syntax:**
 
 ```asm
-; Sign extend byte to full width
+; Using DP address syntax:
     SEXT8 $10, $0C        ; [$10] = sign_extend_8([$0C])
-                          ; $FF -> $FFFFFFFF
+    SEXT16 $14, $0C       ; [$14] = sign_extend_16([$0C])
+    ZEXT8 $18, $0C        ; [$18] = zero_extend_8([$0C])
+    ZEXT16 $1C, $0C       ; [$1C] = zero_extend_16([$0C])
+    CLZ $20, $04          ; [$20] = count_leading_zeros([$04])
+    CTZ $24, $04          ; [$24] = count_trailing_zeros([$04])
+    POPCNT $28, $04       ; [$28] = popcount([$04])
 
-; Zero extend byte to full width
-    ZEXT8 $14, $0C        ; [$14] = zero_extend_8([$0C])
-                          ; $FF -> $000000FF
-
-; Count leading zeros
-    CLZ $18, $04          ; [$18] = count_leading_zeros([$04])
-
-; Count trailing zeros
-    CTZ $1C, $04          ; [$1C] = count_trailing_zeros([$04])
-
-; Population count (bit count)
-    POPCNT $20, $04       ; [$20] = popcount([$04])
+; Using register alias syntax (R0-R63):
+    SEXT8 R4, R3          ; R4 = sign_extend_8(R3)  ; $FF -> $FFFFFFFF
+    SEXT16 R5, R3         ; R5 = sign_extend_16(R3)
+    ZEXT8 R6, R3          ; R6 = zero_extend_8(R3)  ; $FF -> $000000FF
+    ZEXT16 R7, R3         ; R7 = zero_extend_16(R3)
+    CLZ R8, R1            ; R8 = count_leading_zeros(R1)
+    CTZ R9, R1            ; R9 = count_trailing_zeros(R1)
+    POPCNT R10, R1        ; R10 = popcount(R1)
 ```
 
 **Instruction Length:** 5 bytes ($02 $EA subop dest src)
@@ -429,13 +431,13 @@ Extend operations for converting between data sizes.
 
 ```asm
 ; C: int32_t y = (int32_t)(int8_t)x;  // sign extend char to int
-    SEXT8 $08, $04        ; R2 = sign_extend(R1)
+    SEXT8 R2, R1          ; R2 = sign_extend(R1)
 
 ; C: uint32_t mask = (1u << n) - 1;
     LDA #1
-    LD $04, A             ; R1 = 1
-    SHL $08, $04, n       ; R2 = 1 << n
-    DEC $08               ; R2 = (1 << n) - 1
+    LD R1, A              ; R1 = 1
+    SHL R2, R1, n         ; R2 = 1 << n
+    DEC R2                ; R2 = (1 << n) - 1
 ```
 
 ---

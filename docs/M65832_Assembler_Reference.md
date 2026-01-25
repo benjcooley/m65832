@@ -724,6 +724,95 @@ All extended instructions are prefixed with opcode $02.
     D2S                 ; Convert double to single
 ```
 
+### Shifter/Rotate Instructions ($E9)
+
+One-cycle barrel shifter for register window registers.
+
+**Syntax:** `OP dest, src, #count` or `OP dest, src, A`
+
+```asm
+    SHL R4, R1, #4      ; Shift left: R4 = R1 << 4
+    SHR R5, R2, #8      ; Shift right logical: R5 = R2 >> 8
+    SAR R6, R3, #16     ; Shift right arithmetic: R6 = R3 >>> 16
+    ROL R7, R4, #1      ; Rotate left through carry
+    ROR R8, R5, #2      ; Rotate right through carry
+    
+    SHL R10, R1, A      ; Shift count from accumulator (0-31)
+    SHR R11, R2, A      ; Variable shift right
+```
+
+| Mnemonic | Operation | Flags |
+|----------|-----------|-------|
+| `SHL` | Shift left logical (zero fill) | N, Z, C |
+| `SHR` | Shift right logical (zero fill) | N, Z, C |
+| `SAR` | Shift right arithmetic (sign extend) | N, Z, C |
+| `ROL` | Rotate left through carry | N, Z, C |
+| `ROR` | Rotate right through carry | N, Z, C |
+
+**Note:** Standard ROL/ROR with accumulator mode (no operand or just `A`) use the original 6502 opcodes.
+
+### Sign/Zero Extend Instructions ($EA)
+
+Single-cycle sign and zero extension, plus bit counting operations.
+
+**Syntax:** `OP dest, src`
+
+```asm
+    SEXT8 R4, R1        ; Sign extend 8-bit to 32-bit
+    SEXT16 R5, R2       ; Sign extend 16-bit to 32-bit
+    ZEXT8 R6, R3        ; Zero extend 8-bit to 32-bit
+    ZEXT16 R7, R4       ; Zero extend 16-bit to 32-bit
+    
+    CLZ R8, R5          ; Count leading zeros (0-32)
+    CTZ R9, R6          ; Count trailing zeros (0-32)
+    POPCNT R10, R7      ; Population count (number of 1 bits)
+```
+
+| Mnemonic | Operation | Flags |
+|----------|-----------|-------|
+| `SEXT8` | Sign extend byte to 32-bit | N, Z |
+| `SEXT16` | Sign extend word to 32-bit | N, Z |
+| `ZEXT8` | Zero extend byte to 32-bit | N, Z |
+| `ZEXT16` | Zero extend word to 32-bit | N, Z |
+| `CLZ` | Count leading zeros | N, Z |
+| `CTZ` | Count trailing zeros | N, Z |
+| `POPCNT` | Population count (bit count) | N, Z |
+
+### Register Aliases (R0-R63)
+
+When the Register Window is enabled (R=1), Direct Page addresses `$00`, `$04`, `$08`, ... `$FC` map to 32-bit registers R0-R63. The assembler provides register aliases for convenience:
+
+| Alias | DP Address | Alias | DP Address |
+|-------|------------|-------|------------|
+| `R0` | `$00` | `R32` | `$80` |
+| `R1` | `$04` | `R33` | `$84` |
+| `R2` | `$08` | `R34` | `$88` |
+| ... | ... | ... | ... |
+| `R15` | `$3C` | `R47` | `$BC` |
+| `R16` | `$40` | `R48` | `$C0` |
+| ... | ... | ... | ... |
+| `R31` | `$7C` | `R63` | `$FC` |
+
+**Usage Examples:**
+
+```asm
+    RSET                ; Enable register window
+    
+    ; These are equivalent:
+    LDA $04             ; Load from DP $04
+    LDA R1              ; Load from register R1
+    
+    ; Extended instructions use register aliases:
+    SHL R4, R1, #4      ; Shift R1 left by 4, store in R4
+    CLZ R8, R5          ; Count leading zeros in R5, store in R8
+    
+    ; Expressions work:
+    LDA R0+1            ; Same as LDA $04 (R1)
+    STA R15+1           ; Same as STA $40 (R16)
+```
+
+**Note:** Register aliases are converted to DP addresses at assembly time. R0 = `$00`, R1 = `$04`, R2 = `$08`, etc. (register number × 4).
+
 ## WID Prefix
 
 The WID prefix ($42) enables 32-bit operands:

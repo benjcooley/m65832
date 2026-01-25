@@ -365,7 +365,61 @@ static const RegALUInstruction regalu_instructions[] = {
 #define REGALU_SRC_ABSY     0x08  /* abs,Y */
 #define REGALU_SRC_DP_IND   0x09  /* (dp) */
 
+/* Shifter instructions ($02 $E9 prefix)
+ * Syntax: OP dest, src, #count  or  OP dest, src, A
+ * Example: SHL $08, $04, #4  or  SHR R2, R1, A
+ */
+typedef struct {
+    const char *name;
+    uint8_t op_code;  /* Bits 7-5 of op|cnt byte */
+} ShifterInstruction;
+
+static const ShifterInstruction shifter_instructions[] = {
+    { "SHL",  0x00 },  /* Shift left logical */
+    { "SHR",  0x20 },  /* Shift right logical */
+    { "SAR",  0x40 },  /* Shift right arithmetic */
+    { "ROL",  0x60 },  /* Rotate left through carry */
+    { "ROR",  0x80 },  /* Rotate right through carry */
+    { NULL, 0 }
+};
+
+/* Extend instructions ($02 $EA prefix)
+ * Syntax: OP dest, src
+ * Example: SEXT8 $10, $0C  or  CLZ R4, R1
+ */
+typedef struct {
+    const char *name;
+    uint8_t subop;
+} ExtendInstruction;
+
+static const ExtendInstruction extend_instructions[] = {
+    { "SEXT8",  0x00 },  /* Sign extend 8->32 */
+    { "SEXT16", 0x01 },  /* Sign extend 16->32 */
+    { "ZEXT8",  0x02 },  /* Zero extend 8->32 */
+    { "ZEXT16", 0x03 },  /* Zero extend 16->32 */
+    { "CLZ",    0x04 },  /* Count leading zeros */
+    { "CTZ",    0x05 },  /* Count trailing zeros */
+    { "POPCNT", 0x06 },  /* Population count */
+    { NULL, 0 }
+};
+
 #undef __
+
+/* Check if name is a register alias (R0-R63) and return DP address, or -1 */
+static int parse_register_alias(const char *name) {
+    if ((name[0] == 'R' || name[0] == 'r') && isdigit((unsigned char)name[1])) {
+        int reg = 0;
+        const char *p = name + 1;
+        while (isdigit((unsigned char)*p)) {
+            reg = reg * 10 + (*p - '0');
+            p++;
+        }
+        if (*p == '\0' && reg >= 0 && reg <= 63) {
+            return reg * 4;  /* R0=$00, R1=$04, R2=$08, etc. */
+        }
+    }
+    return -1;
+}
 
 /* ========================================================================== */
 /* Utility Functions                                                          */
@@ -767,7 +821,7 @@ static int parse_expression(Assembler *as, const char *s, uint32_t *value, const
     } else if (parse_number(p, &v, &p)) {
         have_value = 1;
     } else if (is_label_char(*p) && !isdigit((unsigned char)*p)) {
-        /* Symbol */
+        /* Symbol or register alias */
         char label[MAX_LABEL];
         int i = 0;
         while (is_label_char(*p) && i < MAX_LABEL - 1)
@@ -775,17 +829,24 @@ static int parse_expression(Assembler *as, const char *s, uint32_t *value, const
         label[i] = '\0';
         str_upper(label);  /* Case-insensitive symbol lookup */
         
-        Symbol *sym = find_symbol(as, label);
-        if (!sym) {
-            sym = add_symbol(as, label, 0, 0);
-        }
-        if (sym) {
-            if (!sym->defined && as->pass == 2) {
-                error(as, "undefined symbol '%s'", label);
-                return 0;
-            }
-            v = sym->value;
+        /* Check for register alias R0-R63 */
+        int reg_addr = parse_register_alias(label);
+        if (reg_addr >= 0) {
+            v = reg_addr;
             have_value = 1;
+        } else {
+            Symbol *sym = find_symbol(as, label);
+            if (!sym) {
+                sym = add_symbol(as, label, 0, 0);
+            }
+            if (sym) {
+                if (!sym->defined && as->pass == 2) {
+                    error(as, "undefined symbol '%s'", label);
+                    return 0;
+                }
+                v = sym->value;
+                have_value = 1;
+            }
         }
     }
     
@@ -1085,6 +1146,106 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         } else {
             error(as, "WID prefix requires instruction");
             return 0;
+        }
+    }
+    
+    /* Check for shifter instructions ($02 $E9): SHL, SHR, SAR, ROL, ROR
+     * These require 3 operands separated by commas (dest, src, count)
+     * Standard ROL/ROR with accumulator mode have no operands or just "A" */
+    for (int i = 0; shifter_instructions[i].name; i++) {
+        if (strcmp(mnemonic, shifter_instructions[i].name) == 0 &&
+            strchr(operand, ',') != NULL) {  /* Must have comma to be extended form */
+            /* Parse: dest, src, #count  or  dest, src, A */
+            char *p = skip_whitespace(operand);
+            uint32_t dest_dp, src_dp, count;
+            
+            /* Parse destination (DP address or register alias) */
+            if (!parse_expression(as, p, &dest_dp, (const char**)&p)) {
+                error(as, "expected destination for %s", mnemonic);
+                return 0;
+            }
+            p = skip_whitespace(p);
+            if (*p != ',') {
+                error(as, "expected ',' after destination");
+                return 0;
+            }
+            p++;
+            
+            /* Parse source (DP address or register alias) */
+            p = skip_whitespace(p);
+            if (!parse_expression(as, p, &src_dp, (const char**)&p)) {
+                error(as, "expected source for %s", mnemonic);
+                return 0;
+            }
+            p = skip_whitespace(p);
+            if (*p != ',') {
+                error(as, "expected ',' after source");
+                return 0;
+            }
+            p++;
+            
+            /* Parse count: #imm or A */
+            p = skip_whitespace(p);
+            if (*p == '#') {
+                p++;
+                if (!parse_expression(as, p, &count, (const char**)&p)) {
+                    error(as, "expected shift count");
+                    return 0;
+                }
+                if (count > 31) {
+                    error(as, "shift count must be 0-31");
+                    return 0;
+                }
+            } else if ((*p == 'A' || *p == 'a') && (!p[1] || isspace((unsigned char)p[1]) || p[1] == ';')) {
+                count = 0x1F;  /* A register flag */
+            } else {
+                error(as, "expected #count or A");
+                return 0;
+            }
+            
+            /* Emit: $02 $E9 [op|cnt] [dest_dp] [src_dp] */
+            emit_byte(as, 0x02);
+            emit_byte(as, 0xE9);
+            emit_byte(as, shifter_instructions[i].op_code | (count & 0x1F));
+            emit_byte(as, dest_dp & 0xFF);
+            emit_byte(as, src_dp & 0xFF);
+            return 1;
+        }
+    }
+    
+    /* Check for extend instructions ($02 $EA): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT */
+    for (int i = 0; extend_instructions[i].name; i++) {
+        if (strcmp(mnemonic, extend_instructions[i].name) == 0) {
+            /* Parse: dest, src */
+            char *p = skip_whitespace(operand);
+            uint32_t dest_dp, src_dp;
+            
+            /* Parse destination (DP address or register alias) */
+            if (!parse_expression(as, p, &dest_dp, (const char**)&p)) {
+                error(as, "expected destination for %s", mnemonic);
+                return 0;
+            }
+            p = skip_whitespace(p);
+            if (*p != ',') {
+                error(as, "expected ',' after destination");
+                return 0;
+            }
+            p++;
+            
+            /* Parse source (DP address or register alias) */
+            p = skip_whitespace(p);
+            if (!parse_expression(as, p, &src_dp, (const char**)&p)) {
+                error(as, "expected source for %s", mnemonic);
+                return 0;
+            }
+            
+            /* Emit: $02 $EA [subop] [dest_dp] [src_dp] */
+            emit_byte(as, 0x02);
+            emit_byte(as, 0xEA);
+            emit_byte(as, extend_instructions[i].subop);
+            emit_byte(as, dest_dp & 0xFF);
+            emit_byte(as, src_dp & 0xFF);
+            return 1;
         }
     }
     

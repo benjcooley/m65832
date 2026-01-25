@@ -45,6 +45,7 @@ run_test "M65832 extended instructions" "test/test2_ext.asm" 0
 run_test "Include files" "test/test3_include.asm" 0
 run_test "Sections" "test/test4_sections.asm" 0
 run_test "Expressions" "test/test6_expressions.asm" 0
+run_test "Shifter/extend instructions (R0-R63)" "test/test7_extended.asm" 0
 
 # Test hex output
 echo -n "Test: Intel HEX output... "
@@ -104,6 +105,15 @@ fi
 
 echo -n "Test: Disassemble extended prefix ($02)... "
 if $DISASSEMBLER -x test/test2_ext.bin 2>&1 | grep -q "MUL"; then
+    echo "PASS"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL"
+    FAIL=$((FAIL + 1))
+fi
+
+echo -n "Test: Disassemble shifter/extend with R0-R63... "
+if $DISASSEMBLER test/test7_extended.bin 2>&1 | grep -q "SHL R"; then
     echo "PASS"
     PASS=$((PASS + 1))
 else
