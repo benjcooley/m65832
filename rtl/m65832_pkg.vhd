@@ -75,6 +75,73 @@ package M65832_pkg is
     constant ALU_SEC_SBC  : std_logic_vector(2 downto 0) := "111";
     
     ---------------------------------------------------------------------------
+    -- Register-Targeted ALU Extended Opcode ($02 $E8)
+    ---------------------------------------------------------------------------
+    
+    constant EXT_REGALU   : std_logic_vector(7 downto 0) := x"E8";
+    
+    -- Register-targeted ALU operation codes (bits 7-4 of op|mode byte)
+    constant REGALU_LD    : std_logic_vector(3 downto 0) := "0000";  -- Load
+    constant REGALU_ADC   : std_logic_vector(3 downto 0) := "0001";  -- Add with carry
+    constant REGALU_SBC   : std_logic_vector(3 downto 0) := "0010";  -- Subtract with borrow
+    constant REGALU_AND   : std_logic_vector(3 downto 0) := "0011";  -- Logical AND
+    constant REGALU_ORA   : std_logic_vector(3 downto 0) := "0100";  -- Logical OR
+    constant REGALU_EOR   : std_logic_vector(3 downto 0) := "0101";  -- Exclusive OR
+    constant REGALU_CMP   : std_logic_vector(3 downto 0) := "0110";  -- Compare
+    constant REGALU_SHF   : std_logic_vector(3 downto 0) := "0111";  -- Shifts (reserved)
+    
+    -- Register-targeted ALU source modes (bits 3-0 of op|mode byte)
+    constant REGALU_SRC_DPX_IND : std_logic_vector(3 downto 0) := "0000";  -- (dp,X)
+    constant REGALU_SRC_DP      : std_logic_vector(3 downto 0) := "0001";  -- dp
+    constant REGALU_SRC_IMM     : std_logic_vector(3 downto 0) := "0010";  -- #imm
+    constant REGALU_SRC_A       : std_logic_vector(3 downto 0) := "0011";  -- A
+    constant REGALU_SRC_DP_Y    : std_logic_vector(3 downto 0) := "0100";  -- (dp),Y
+    constant REGALU_SRC_DPX     : std_logic_vector(3 downto 0) := "0101";  -- dp,X
+    constant REGALU_SRC_ABS     : std_logic_vector(3 downto 0) := "0110";  -- abs
+    constant REGALU_SRC_ABSX    : std_logic_vector(3 downto 0) := "0111";  -- abs,X
+    constant REGALU_SRC_ABSY    : std_logic_vector(3 downto 0) := "1000";  -- abs,Y
+    constant REGALU_SRC_DP_IND  : std_logic_vector(3 downto 0) := "1001";  -- (dp)
+    constant REGALU_SRC_DP_LONG : std_logic_vector(3 downto 0) := "1010";  -- [dp]
+    constant REGALU_SRC_DPL_Y   : std_logic_vector(3 downto 0) := "1011";  -- [dp],Y
+    constant REGALU_SRC_SR      : std_logic_vector(3 downto 0) := "1100";  -- sr,S
+    constant REGALU_SRC_SR_Y    : std_logic_vector(3 downto 0) := "1101";  -- (sr,S),Y
+    
+    ---------------------------------------------------------------------------
+    -- Shifter/Rotate Extended Opcode ($02 $E9)
+    ---------------------------------------------------------------------------
+    -- Format: $02 $E9 [op|cnt] [dest_dp] [src_dp]
+    --   op (bits 7-5): shift operation
+    --   cnt (bits 4-0): shift count (0-31 for immediate, or 11111 for A-sourced)
+    
+    constant EXT_SHIFTER  : std_logic_vector(7 downto 0) := x"E9";
+    
+    -- Shift operation codes (bits 7-5 of op|cnt byte)
+    constant SHIFT_SHL    : std_logic_vector(2 downto 0) := "000";  -- Shift left (logical)
+    constant SHIFT_SHR    : std_logic_vector(2 downto 0) := "001";  -- Shift right (logical)
+    constant SHIFT_SAR    : std_logic_vector(2 downto 0) := "010";  -- Shift right (arithmetic)
+    constant SHIFT_ROL    : std_logic_vector(2 downto 0) := "011";  -- Rotate left through carry
+    constant SHIFT_ROR    : std_logic_vector(2 downto 0) := "100";  -- Rotate right through carry
+    
+    -- Special shift count value: shift by A (low 5 bits)
+    constant SHIFT_BY_A   : std_logic_vector(4 downto 0) := "11111";
+    
+    ---------------------------------------------------------------------------
+    -- Sign/Zero Extend Extended Opcode ($02 $EA)
+    ---------------------------------------------------------------------------
+    -- Format: $02 $EA [subop] [dest_dp] [src_dp]
+    
+    constant EXT_EXTEND   : std_logic_vector(7 downto 0) := x"EA";
+    
+    -- Extend operation codes
+    constant EXTEND_SEXT8  : std_logic_vector(3 downto 0) := "0000";  -- Sign extend 8->32
+    constant EXTEND_SEXT16 : std_logic_vector(3 downto 0) := "0001";  -- Sign extend 16->32
+    constant EXTEND_ZEXT8  : std_logic_vector(3 downto 0) := "0010";  -- Zero extend 8->32
+    constant EXTEND_ZEXT16 : std_logic_vector(3 downto 0) := "0011";  -- Zero extend 16->32
+    constant EXTEND_CLZ    : std_logic_vector(3 downto 0) := "0100";  -- Count leading zeros
+    constant EXTEND_CTZ    : std_logic_vector(3 downto 0) := "0101";  -- Count trailing zeros
+    constant EXTEND_POPCNT : std_logic_vector(3 downto 0) := "0110";  -- Population count
+    
+    ---------------------------------------------------------------------------
     -- Microcode Control Record (extended from 65816)
     ---------------------------------------------------------------------------
     

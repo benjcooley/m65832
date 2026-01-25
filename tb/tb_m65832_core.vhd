@@ -3873,6 +3873,49 @@ begin
         check_mem(16#0707#, x"55", "RSET LDF/STF high byte3");
 
         -----------------------------------------------------------------------
+        -- TEST 100C2: RSET DP alignment trap
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100C2: RSET DP alignment trap";
+        
+        -- In R=1 mode, DP addresses must be aligned to 4 bytes (multiples of 4)
+        -- Accessing unaligned address like $05 should trap to VEC_ILLEGAL
+        
+        -- Set up illegal instruction trap handler at VEC_ILLEGAL ($FFF8)
+        -- Handler at $E000: LDA #$DE, STA $0710, RTI
+        poke(16#FFF8#, x"00");
+        poke(16#FFF9#, x"E0");
+        poke(16#FFFA#, x"00");
+        poke(16#FFFB#, x"00");
+        
+        poke(16#E000#, x"A9");  -- LDA #$DE (trap marker)
+        poke(16#E001#, x"DE");
+        poke(16#E002#, x"8D");  -- STA $0710
+        poke(16#E003#, x"10");
+        poke(16#E004#, x"07");
+        poke(16#E005#, x"40");  -- RTI
+        
+        -- Program: RSET, LDA $05 (unaligned - should trap), LDA #$AA, STA $0711
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"30");  -- RSET
+        poke(16#8002#, x"A5");  -- LDA dp
+        poke(16#8003#, x"05");  -- $05 (unaligned!)
+        poke(16#8004#, x"A9");  -- LDA #$AA (after RTI)
+        poke(16#8005#, x"AA");
+        poke(16#8006#, x"8D");  -- STA $0711
+        poke(16#8007#, x"11");
+        poke(16#8008#, x"07");
+        poke(16#8009#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(300);
+        
+        check_mem(16#0710#, x"DE", "RSET unaligned trap fired");
+        check_mem(16#0711#, x"AA", "Returned after alignment trap");
+
+        -----------------------------------------------------------------------
         -- TEST 100D: FPU reserved opcode trap
         -----------------------------------------------------------------------
         report "";

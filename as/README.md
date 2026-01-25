@@ -2,6 +2,8 @@
 
 A two-pass assembler and disassembler for the M65832 processor, written in portable C.
 
+**Default Mode:** 32-bit native (M=32, X=32). Use `.m8`/`.m16` and `.x8`/`.x16` directives for legacy 6502/65816 code.
+
 ## Building
 
 ```bash

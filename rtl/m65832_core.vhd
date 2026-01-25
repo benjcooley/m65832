@@ -190,6 +190,9 @@ architecture rtl of M65832_Core is
     signal IS_RSET, IS_RCLR, IS_SB, IS_SVBR       : std_logic;
     signal IS_CAS, IS_LLI, IS_SCI                 : std_logic;
     signal ILLEGAL_OP                              : std_logic;
+    signal illegal_regalu                          : std_logic;
+    signal illegal_dp_align                        : std_logic;
+    signal dp_addr_unaligned                       : std_logic;
     
     ---------------------------------------------------------------------------
     -- Interrupt Handling
@@ -230,6 +233,33 @@ architecture rtl of M65832_Core is
     signal ext_ldf, ext_stf                    : std_logic;
     signal f_reg_sel                           : std_logic_vector(1 downto 0);
     signal ext_fpu_trap                        : std_logic;
+    
+    -- Register-targeted ALU ($02 $E8)
+    signal IR_EXT2          : std_logic_vector(7 downto 0);   -- op|mode byte for reg-ALU
+    signal is_regalu_ext    : std_logic;                       -- Fetching reg-ALU op|mode
+    signal IS_REGALU        : std_logic;                       -- Register-targeted ALU op
+    signal REGALU_OP        : std_logic_vector(3 downto 0);   -- Operation code
+    signal REGALU_SRC_MODE  : std_logic_vector(3 downto 0);   -- Source addressing mode
+    signal REGALU_DEST_DP   : std_logic_vector(7 downto 0);   -- Destination DP address
+    signal regalu_dest_addr : std_logic_vector(31 downto 0);  -- Computed dest effective address
+    signal regalu_dest_data : std_logic_vector(31 downto 0);  -- Data read from dest
+    signal regalu_src_data  : std_logic_vector(31 downto 0);  -- Data read from source
+    signal regalu_result    : std_logic_vector(31 downto 0);  -- ALU result
+    
+    -- Shifter signals ($02 $E9)
+    signal IS_SHIFTER       : std_logic;                       -- Shifter operation
+    signal SHIFT_OP         : std_logic_vector(2 downto 0);   -- Shift type
+    signal SHIFT_COUNT      : std_logic_vector(4 downto 0);   -- Shift count
+    signal shifter_src_data : std_logic_vector(31 downto 0);  -- Source data for shift
+    signal shifter_result   : std_logic_vector(31 downto 0);  -- Shift result
+    signal shifter_carry    : std_logic;                       -- Carry out from shift
+    
+    -- Extend signals ($02 $EA)
+    signal IS_EXTEND        : std_logic;                       -- Extend operation
+    signal EXTEND_OP        : std_logic_vector(3 downto 0);   -- Extend type
+    signal extend_src_data  : std_logic_vector(31 downto 0);  -- Source data for extend
+    signal extend_result    : std_logic_vector(31 downto 0);  -- Extend result
+    signal regalu_phase     : std_logic_vector(1 downto 0);   -- Execution phase
     
     -- MMU control registers (MMIO)
     signal mmu_mmucr       : std_logic_vector(31 downto 0);
@@ -556,7 +586,9 @@ begin
         RST_N           => RST_N,
         IR              => IR,
         IR_EXT          => IR_EXT,
+        IR_EXT2         => IR_EXT2,
         IS_EXTENDED     => is_extended,
+        IS_REGALU_EXT   => is_regalu_ext,
         E_MODE          => E_mode,
         M_WIDTH         => M_width,
         X_WIDTH         => X_width,
@@ -606,7 +638,19 @@ begin
         IS_CAS          => IS_CAS,
         IS_LLI          => IS_LLI,
         IS_SCI          => IS_SCI,
-        ILLEGAL_OP      => ILLEGAL_OP
+        ILLEGAL_OP      => ILLEGAL_OP,
+        
+        IS_REGALU       => IS_REGALU,
+        REGALU_OP       => REGALU_OP,
+        REGALU_SRC_MODE => REGALU_SRC_MODE,
+        REGALU_DEST_DP  => REGALU_DEST_DP,
+        
+        IS_SHIFTER      => IS_SHIFTER,
+        SHIFT_OP        => SHIFT_OP,
+        SHIFT_COUNT     => SHIFT_COUNT,
+        
+        IS_EXTEND       => IS_EXTEND,
+        EXTEND_OP       => EXTEND_OP
     );
     
     ---------------------------------------------------------------------------
@@ -615,6 +659,14 @@ begin
     
     W_mode <= '1' when M_width = WIDTH_32 else '0';
     compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
+    illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
+    
+    -- DP alignment check for R_mode: DP address must be multiple of 4
+    -- dp_addr_unaligned is computed in dp_reg_index_next process
+    illegal_dp_align <= '1' when (R_mode = '1' and dp_addr_unaligned = '1' and
+                                  state = ST_ADDR1 and 
+                                  (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                        else '0';
 
     ---------------------------------------------------------------------------
     -- MMU Integration
@@ -838,7 +890,13 @@ begin
             cycle_count <= (others => '0');
             IR <= x"00";
             IR_EXT <= x"00";
+            IR_EXT2 <= x"00";
             is_extended <= '0';
+            is_regalu_ext <= '0';
+            regalu_phase <= "00";
+            regalu_dest_addr <= (others => '0');
+            regalu_dest_data <= (others => '0');
+            regalu_src_data <= (others => '0');
             wid_prefix <= '0';
             wid_active <= '0';
             data_buffer <= (others => '0');
@@ -876,7 +934,8 @@ begin
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
                     state <= ST_PUSH;
-                elsif ILLEGAL_OP = '1' and ext_fpu_trap = '0' and state = ST_DECODE and
+                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1') and ext_fpu_trap = '0' and 
+                      (state = ST_DECODE or state = ST_ADDR1) and
                       int_in_progress = '0' and rti_in_progress = '0' then
                     int_in_progress <= '1';
                     int_step <= (others => '0');
@@ -906,6 +965,8 @@ begin
                         -- Fetch opcode
                         IR <= DATA_IN;
                         is_extended <= '0';
+                        is_regalu_ext <= '0';
+                        regalu_phase <= "00";
                         state <= ST_DECODE;
                         if int_in_progress = '0' and rti_in_progress = '0' then
                             if nmi_pending = '1' or abort_pending = '1' or irq_pending = '1' then
@@ -945,11 +1006,18 @@ begin
                             IR_EXT <= DATA_IN;
                             state <= ST_DECODE;
                             data_byte_count <= (others => '0');
+                        elsif is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0' then
+                            -- Register-targeted ALU/Shifter/Extend needs op|mode byte
+                            is_regalu_ext <= '1';
+                            IR_EXT2 <= DATA_IN;
+                            state <= ST_DECODE;
                         end if;
                         
                         -- WID prefix ($42) extends next operand to 32-bit
                         if IR = x"02" and is_extended = '0' then
                             null;
+                        elsif is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0' then
+                            null;  -- Still fetching extended instruction bytes
                         elsif IS_WID = '1' then
                             wid_prefix <= '1';
                             wid_active <= '0';
@@ -1001,6 +1069,12 @@ begin
                                     state <= ST_PUSH;
                                 end if;
                                 data_byte_count <= (others => '0');
+                            elsif IS_REGALU = '1' then
+                                -- Register-targeted ALU: next byte is dest_dp
+                                -- Fetch destination DP address
+                                regalu_phase <= "00";
+                                state <= ST_ADDR1;
+                                data_byte_count <= (others => '0');
                             elsif ADDR_MODE = "0000" then
                                 -- Implied/Accumulator
                                 state <= ST_EXECUTE;
@@ -1019,6 +1093,84 @@ begin
                         -- First address byte
                         DR <= DATA_IN;
                         data_buffer(7 downto 0) <= DATA_IN;
+                        
+                        -- Register-targeted ALU special handling
+                        if IS_REGALU = '1' then
+                            if regalu_phase = "00" then
+                                -- Phase 0: This byte is dest_dp
+                                regalu_dest_addr <= D_reg(31 downto 8) & DATA_IN;
+                                
+                                -- For source = A, we can go directly to read dest + execute
+                                if REGALU_SRC_MODE = "0011" then
+                                    -- Source is A - read dest value, then execute
+                                    if R_mode = '1' then
+                                        -- Register window: read dest directly
+                                        regalu_dest_data <= rw_data1;
+                                        regalu_src_data <= A_reg;
+                                        state <= ST_EXECUTE;
+                                    else
+                                        -- Memory: need to read dest
+                                        regalu_phase <= "10";
+                                        eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                        state <= ST_READ;
+                                    end if;
+                                else
+                                    -- Source is not A - need to fetch source address
+                                    regalu_phase <= "01";
+                                    state <= ST_ADDR2;
+                                end if;
+                            elsif regalu_phase = "01" then
+                                -- Phase 1: This byte is source address (for dp modes)
+                                if REGALU_SRC_MODE = "0001" or REGALU_SRC_MODE = "0101" then
+                                    -- dp or dp,X source mode
+                                    if REGALU_SRC_MODE = "0101" then
+                                        eff_addr <= D_reg(31 downto 8) &
+                                                    std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
+                                    else
+                                        eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                    end if;
+                                    
+                                    if R_mode = '1' then
+                                        -- Register window: read both source and dest directly
+                                        regalu_src_data <= rw_data1;
+                                        -- Dest was already loaded in phase 0
+                                        state <= ST_EXECUTE;
+                                    else
+                                        -- Memory: read source first
+                                        regalu_phase <= "11";
+                                        state <= ST_READ;
+                                    end if;
+                                elsif REGALU_SRC_MODE = "0110" or REGALU_SRC_MODE = "0111" or REGALU_SRC_MODE = "1000" then
+                                    -- abs, abs,X, abs,Y - need second byte
+                                    state <= ST_ADDR2;
+                                else
+                                    -- Other modes (indirect, etc.) - simplified for now
+                                    state <= ST_READ;
+                                end if;
+                            end if;
+                        elsif IS_SHIFTER = '1' or IS_EXTEND = '1' then
+                            -- Shifter/Extend: $02 $E9/$EA [op|cnt] [dest_dp] [src_dp]
+                            if regalu_phase = "00" then
+                                -- Phase 0: This byte is dest_dp
+                                regalu_dest_addr <= D_reg(31 downto 8) & DATA_IN;
+                                regalu_phase <= "01";
+                                state <= ST_ADDR2;
+                            elsif regalu_phase = "01" then
+                                -- Phase 1: This byte is src_dp
+                                eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                                
+                                if R_mode = '1' then
+                                    -- Register window: read source directly
+                                    shifter_src_data <= rw_data1;
+                                    extend_src_data <= rw_data1;
+                                    state <= ST_EXECUTE;
+                                else
+                                    -- Memory: read source
+                                    regalu_phase <= "11";
+                                    state <= ST_READ;
+                                end if;
+                            end if;
+                        else
                         
                         case ADDR_MODE is
                             when "0010" | "0011" | "0100" =>
@@ -1123,8 +1275,26 @@ begin
                             when others =>
                                 state <= ST_ADDR2;
                         end case;
+                        end if;  -- IS_REGALU else branch
                         
                     when ST_ADDR2 =>
+                        -- Handle shifter/extend src_dp in phase 01
+                        if (IS_SHIFTER = '1' or IS_EXTEND = '1') and regalu_phase = "01" then
+                            -- This byte is src_dp
+                            eff_addr <= D_reg(31 downto 8) & DATA_IN;
+                            
+                            if R_mode = '1' then
+                                -- Register window: read source directly
+                                -- rw_addr1 should be set combinationally based on DATA_IN
+                                shifter_src_data <= rw_data1;
+                                extend_src_data <= rw_data1;
+                                state <= ST_EXECUTE;
+                            else
+                                -- Memory: read source
+                                regalu_phase <= "11";
+                                state <= ST_READ;
+                            end if;
+                        else
                         -- Second address byte
                         data_buffer(15 downto 8) <= DATA_IN;
                         -- WID absolute addressing uses 32-bit operand
@@ -1225,6 +1395,7 @@ begin
                                     state <= ST_READ;
                             end case;
                         end if;
+                        end if;  -- shifter/extend else branch
                         
                     when ST_ADDR3 =>
                         if IS_JMP_d = '1' and ADDR_MODE = "1001" then
@@ -1589,6 +1760,51 @@ begin
                             -- SCI success: write A
                             state <= ST_WRITE;
                             data_byte_count <= (others => '0');
+                        elsif IS_REGALU = '1' then
+                            -- Register-targeted ALU: write result to destination
+                            -- Result is computed in regalu_result (combinational)
+                            if R_mode = '1' then
+                                -- Register window write - happens via separate process
+                                state <= ST_FETCH;
+                            else
+                                -- Memory write
+                                eff_addr <= regalu_dest_addr;
+                                state <= ST_WRITE;
+                                data_byte_count <= (others => '0');
+                            end if;
+                        elsif IS_SHIFTER = '1' then
+                            -- Shifter: write result to destination, update C flag
+                            P_reg(P_C) <= shifter_carry;
+                            -- Update N and Z flags based on result
+                            if shifter_result = x"00000000" then
+                                P_reg(P_Z) <= '1';
+                            else
+                                P_reg(P_Z) <= '0';
+                            end if;
+                            P_reg(P_N) <= shifter_result(31);
+                            if R_mode = '1' then
+                                state <= ST_FETCH;
+                            else
+                                eff_addr <= regalu_dest_addr;
+                                state <= ST_WRITE;
+                                data_byte_count <= (others => '0');
+                            end if;
+                        elsif IS_EXTEND = '1' then
+                            -- Extend: write result to destination
+                            -- Update N and Z flags based on result
+                            if extend_result = x"00000000" then
+                                P_reg(P_Z) <= '1';
+                            else
+                                P_reg(P_Z) <= '0';
+                            end if;
+                            P_reg(P_N) <= extend_result(31);
+                            if R_mode = '1' then
+                                state <= ST_FETCH;
+                            else
+                                eff_addr <= regalu_dest_addr;
+                                state <= ST_WRITE;
+                                data_byte_count <= (others => '0');
+                            end if;
                         elsif R_mode = '1' and IS_RMW_OP = '1' and
                               (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") and
                               RMW_OP /= "100" and RMW_OP /= "101" then
@@ -2398,6 +2614,340 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
 
     ---------------------------------------------------------------------------
+    -- Register-Targeted ALU Result Computation
+    ---------------------------------------------------------------------------
+    
+    process(IS_REGALU, REGALU_OP, regalu_dest_data, regalu_src_data, P_reg, M_width)
+        variable dest_v, src_v, result_v : unsigned(31 downto 0);
+        variable carry_in : unsigned(0 downto 0);
+        variable sum_v    : unsigned(32 downto 0);
+    begin
+        regalu_result <= (others => '0');
+        dest_v := unsigned(regalu_dest_data);
+        src_v := unsigned(regalu_src_data);
+        carry_in(0) := P_reg(P_C);
+        
+        if IS_REGALU = '1' then
+            case REGALU_OP is
+                when "0000" =>  -- LD: result = source
+                    regalu_result <= regalu_src_data;
+                    
+                when "0001" =>  -- ADC: dest + src + C
+                    sum_v := resize(dest_v, 33) + resize(src_v, 33) + resize(carry_in, 33);
+                    regalu_result <= std_logic_vector(sum_v(31 downto 0));
+                    
+                when "0010" =>  -- SBC: dest - src - !C
+                    if P_reg(P_C) = '1' then
+                        sum_v := resize(dest_v, 33) - resize(src_v, 33);
+                    else
+                        sum_v := resize(dest_v, 33) - resize(src_v, 33) - 1;
+                    end if;
+                    regalu_result <= std_logic_vector(sum_v(31 downto 0));
+                    
+                when "0011" =>  -- AND: dest & src
+                    regalu_result <= regalu_dest_data and regalu_src_data;
+                    
+                when "0100" =>  -- ORA: dest | src
+                    regalu_result <= regalu_dest_data or regalu_src_data;
+                    
+                when "0101" =>  -- EOR: dest ^ src
+                    regalu_result <= regalu_dest_data xor regalu_src_data;
+                    
+                when "0110" =>  -- CMP: compare only, result = dest (no change)
+                    regalu_result <= regalu_dest_data;
+                    
+                when others =>
+                    regalu_result <= regalu_dest_data;
+            end case;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
+    -- Shifter Result Computation ($02 $E9)
+    ---------------------------------------------------------------------------
+    
+    process(IS_SHIFTER, SHIFT_OP, SHIFT_COUNT, shifter_src_data, A_reg, P_reg)
+        variable src_v      : unsigned(31 downto 0);
+        variable shift_amt  : integer range 0 to 31;
+        variable result_v   : unsigned(31 downto 0);
+        variable carry_v    : std_logic;
+        variable extended   : unsigned(32 downto 0);
+    begin
+        shifter_result <= (others => '0');
+        shifter_carry <= '0';
+        
+        if IS_SHIFTER = '1' then
+            src_v := unsigned(shifter_src_data);
+            
+            -- Determine shift amount: immediate or from A (low 5 bits)
+            if SHIFT_COUNT = "11111" then
+                shift_amt := to_integer(unsigned(A_reg(4 downto 0)));
+            else
+                shift_amt := to_integer(unsigned(SHIFT_COUNT));
+            end if;
+            
+            case SHIFT_OP is
+                when "000" =>  -- SHL: Shift left logical
+                    if shift_amt = 0 then
+                        result_v := src_v;
+                        carry_v := P_reg(P_C);
+                    elsif shift_amt < 32 then
+                        result_v := shift_left(src_v, shift_amt);
+                        carry_v := src_v(32 - shift_amt);
+                    else
+                        result_v := (others => '0');
+                        carry_v := '0';
+                    end if;
+                    
+                when "001" =>  -- SHR: Shift right logical
+                    if shift_amt = 0 then
+                        result_v := src_v;
+                        carry_v := P_reg(P_C);
+                    elsif shift_amt < 32 then
+                        result_v := shift_right(src_v, shift_amt);
+                        carry_v := src_v(shift_amt - 1);
+                    else
+                        result_v := (others => '0');
+                        carry_v := '0';
+                    end if;
+                    
+                when "010" =>  -- SAR: Shift right arithmetic
+                    if shift_amt = 0 then
+                        result_v := src_v;
+                        carry_v := P_reg(P_C);
+                    elsif shift_amt < 32 then
+                        result_v := unsigned(shift_right(signed(src_v), shift_amt));
+                        carry_v := src_v(shift_amt - 1);
+                    else
+                        -- All sign bits
+                        if src_v(31) = '1' then
+                            result_v := (others => '1');
+                        else
+                            result_v := (others => '0');
+                        end if;
+                        carry_v := src_v(31);
+                    end if;
+                    
+                when "011" =>  -- ROL: Rotate left through carry
+                    if shift_amt = 0 then
+                        result_v := src_v;
+                        carry_v := P_reg(P_C);
+                    else
+                        -- For each bit rotated, carry goes into LSB, MSB goes into carry
+                        extended := src_v & P_reg(P_C);
+                        for i in 1 to shift_amt loop
+                            extended := extended(31 downto 0) & extended(32);
+                        end loop;
+                        result_v := extended(31 downto 0);
+                        carry_v := extended(32);
+                    end if;
+                    
+                when "100" =>  -- ROR: Rotate right through carry
+                    if shift_amt = 0 then
+                        result_v := src_v;
+                        carry_v := P_reg(P_C);
+                    else
+                        -- For each bit rotated, carry goes into MSB, LSB goes into carry
+                        extended := P_reg(P_C) & src_v;
+                        for i in 1 to shift_amt loop
+                            extended := extended(0) & extended(32 downto 1);
+                        end loop;
+                        result_v := extended(31 downto 0);
+                        carry_v := extended(32);
+                    end if;
+                    
+                when others =>
+                    result_v := src_v;
+                    carry_v := P_reg(P_C);
+            end case;
+            
+            shifter_result <= std_logic_vector(result_v);
+            shifter_carry <= carry_v;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
+    -- Extend Result Computation ($02 $EA)
+    ---------------------------------------------------------------------------
+    
+    process(IS_EXTEND, EXTEND_OP, extend_src_data)
+        variable src_v    : std_logic_vector(31 downto 0);
+        variable result_v : std_logic_vector(31 downto 0);
+        
+        -- CLZ binary search variables (5 levels for 32 bits)
+        variable clz_v    : std_logic_vector(31 downto 0);
+        variable clz_cnt  : unsigned(5 downto 0);
+        
+        -- CTZ binary search variables
+        variable ctz_v    : std_logic_vector(31 downto 0);
+        variable ctz_cnt  : unsigned(5 downto 0);
+        
+        -- POPCNT adder tree variables
+        variable p2  : unsigned(1 downto 0);   -- 2-bit partial sums (16 of them)
+        variable p3  : unsigned(2 downto 0);   -- 3-bit partial sums (8 of them)
+        variable p4  : unsigned(3 downto 0);   -- 4-bit partial sums (4 of them)
+        variable p5  : unsigned(4 downto 0);   -- 5-bit partial sums (2 of them)
+        variable pop : unsigned(5 downto 0);   -- Final 6-bit sum
+        
+        -- Arrays for adder tree
+        type arr2_t is array(0 to 15) of unsigned(1 downto 0);
+        type arr3_t is array(0 to 7) of unsigned(2 downto 0);
+        type arr4_t is array(0 to 3) of unsigned(3 downto 0);
+        type arr5_t is array(0 to 1) of unsigned(4 downto 0);
+        variable a2 : arr2_t;
+        variable a3 : arr3_t;
+        variable a4 : arr4_t;
+        variable a5 : arr5_t;
+    begin
+        extend_result <= (others => '0');
+        
+        if IS_EXTEND = '1' then
+            src_v := extend_src_data;
+            
+            case EXTEND_OP is
+                when "0000" =>  -- SEXT8: Sign extend 8->32
+                    if src_v(7) = '1' then
+                        result_v := x"FFFFFF" & src_v(7 downto 0);
+                    else
+                        result_v := x"000000" & src_v(7 downto 0);
+                    end if;
+                    
+                when "0001" =>  -- SEXT16: Sign extend 16->32
+                    if src_v(15) = '1' then
+                        result_v := x"FFFF" & src_v(15 downto 0);
+                    else
+                        result_v := x"0000" & src_v(15 downto 0);
+                    end if;
+                    
+                when "0010" =>  -- ZEXT8: Zero extend 8->32
+                    result_v := x"000000" & src_v(7 downto 0);
+                    
+                when "0011" =>  -- ZEXT16: Zero extend 16->32
+                    result_v := x"0000" & src_v(15 downto 0);
+                    
+                when "0100" =>  -- CLZ: Count leading zeros (binary search, 5 levels)
+                    clz_cnt := (others => '0');
+                    clz_v := src_v;
+                    
+                    -- Level 1: Check upper 16 bits
+                    if clz_v(31 downto 16) = x"0000" then
+                        clz_cnt(4) := '1';
+                        clz_v := clz_v(15 downto 0) & x"0000";
+                    end if;
+                    
+                    -- Level 2: Check upper 8 bits
+                    if clz_v(31 downto 24) = x"00" then
+                        clz_cnt(3) := '1';
+                        clz_v := clz_v(23 downto 0) & x"00";
+                    end if;
+                    
+                    -- Level 3: Check upper 4 bits
+                    if clz_v(31 downto 28) = "0000" then
+                        clz_cnt(2) := '1';
+                        clz_v := clz_v(27 downto 0) & "0000";
+                    end if;
+                    
+                    -- Level 4: Check upper 2 bits
+                    if clz_v(31 downto 30) = "00" then
+                        clz_cnt(1) := '1';
+                        clz_v := clz_v(29 downto 0) & "00";
+                    end if;
+                    
+                    -- Level 5: Check top bit
+                    if clz_v(31) = '0' then
+                        clz_cnt(0) := '1';
+                    end if;
+                    
+                    result_v := std_logic_vector(resize(clz_cnt, 32));
+                    
+                when "0101" =>  -- CTZ: Count trailing zeros (binary search, 5 levels)
+                    ctz_cnt := (others => '0');
+                    ctz_v := src_v;
+                    
+                    -- Level 1: Check lower 16 bits
+                    if ctz_v(15 downto 0) = x"0000" then
+                        ctz_cnt(4) := '1';
+                        ctz_v := x"0000" & ctz_v(31 downto 16);
+                    end if;
+                    
+                    -- Level 2: Check lower 8 bits
+                    if ctz_v(7 downto 0) = x"00" then
+                        ctz_cnt(3) := '1';
+                        ctz_v := x"00" & ctz_v(31 downto 8);
+                    end if;
+                    
+                    -- Level 3: Check lower 4 bits
+                    if ctz_v(3 downto 0) = "0000" then
+                        ctz_cnt(2) := '1';
+                        ctz_v := "0000" & ctz_v(31 downto 4);
+                    end if;
+                    
+                    -- Level 4: Check lower 2 bits
+                    if ctz_v(1 downto 0) = "00" then
+                        ctz_cnt(1) := '1';
+                        ctz_v := "00" & ctz_v(31 downto 2);
+                    end if;
+                    
+                    -- Level 5: Check bottom bit
+                    if ctz_v(0) = '0' then
+                        ctz_cnt(0) := '1';
+                    end if;
+                    
+                    result_v := std_logic_vector(resize(ctz_cnt, 32));
+                    
+                when "0110" =>  -- POPCNT: Population count (adder tree, 5 levels)
+                    -- Level 1: Add pairs of bits -> 16 x 2-bit sums
+                    a2(0)  := unsigned'("0" & src_v(1))   + unsigned'("0" & src_v(0));
+                    a2(1)  := unsigned'("0" & src_v(3))   + unsigned'("0" & src_v(2));
+                    a2(2)  := unsigned'("0" & src_v(5))   + unsigned'("0" & src_v(4));
+                    a2(3)  := unsigned'("0" & src_v(7))   + unsigned'("0" & src_v(6));
+                    a2(4)  := unsigned'("0" & src_v(9))   + unsigned'("0" & src_v(8));
+                    a2(5)  := unsigned'("0" & src_v(11))  + unsigned'("0" & src_v(10));
+                    a2(6)  := unsigned'("0" & src_v(13))  + unsigned'("0" & src_v(12));
+                    a2(7)  := unsigned'("0" & src_v(15))  + unsigned'("0" & src_v(14));
+                    a2(8)  := unsigned'("0" & src_v(17))  + unsigned'("0" & src_v(16));
+                    a2(9)  := unsigned'("0" & src_v(19))  + unsigned'("0" & src_v(18));
+                    a2(10) := unsigned'("0" & src_v(21))  + unsigned'("0" & src_v(20));
+                    a2(11) := unsigned'("0" & src_v(23))  + unsigned'("0" & src_v(22));
+                    a2(12) := unsigned'("0" & src_v(25))  + unsigned'("0" & src_v(24));
+                    a2(13) := unsigned'("0" & src_v(27))  + unsigned'("0" & src_v(26));
+                    a2(14) := unsigned'("0" & src_v(29))  + unsigned'("0" & src_v(28));
+                    a2(15) := unsigned'("0" & src_v(31))  + unsigned'("0" & src_v(30));
+                    
+                    -- Level 2: Add pairs of 2-bit sums -> 8 x 3-bit sums
+                    a3(0) := ("0" & a2(0))  + ("0" & a2(1));
+                    a3(1) := ("0" & a2(2))  + ("0" & a2(3));
+                    a3(2) := ("0" & a2(4))  + ("0" & a2(5));
+                    a3(3) := ("0" & a2(6))  + ("0" & a2(7));
+                    a3(4) := ("0" & a2(8))  + ("0" & a2(9));
+                    a3(5) := ("0" & a2(10)) + ("0" & a2(11));
+                    a3(6) := ("0" & a2(12)) + ("0" & a2(13));
+                    a3(7) := ("0" & a2(14)) + ("0" & a2(15));
+                    
+                    -- Level 3: Add pairs of 3-bit sums -> 4 x 4-bit sums
+                    a4(0) := ("0" & a3(0)) + ("0" & a3(1));
+                    a4(1) := ("0" & a3(2)) + ("0" & a3(3));
+                    a4(2) := ("0" & a3(4)) + ("0" & a3(5));
+                    a4(3) := ("0" & a3(6)) + ("0" & a3(7));
+                    
+                    -- Level 4: Add pairs of 4-bit sums -> 2 x 5-bit sums
+                    a5(0) := ("0" & a4(0)) + ("0" & a4(1));
+                    a5(1) := ("0" & a4(2)) + ("0" & a4(3));
+                    
+                    -- Level 5: Final sum -> 6-bit result (0-32)
+                    pop := ("0" & a5(0)) + ("0" & a5(1));
+                    
+                    result_v := std_logic_vector(resize(pop, 32));
+                    
+                when others =>
+                    result_v := src_v;
+            end case;
+            
+            extend_result <= result_v;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
     -- FPU Coprocessor Operations (F0, F1, F2)
     ---------------------------------------------------------------------------
 
@@ -2843,13 +3393,19 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     -- Register Window Access (DP-as-registers)
     ---------------------------------------------------------------------------
     
-    rw_addr1 <= dp_reg_index_next when (state = ST_ADDR1 and
+    -- rw_addr1: For IS_REGALU/IS_SHIFTER/IS_EXTEND, use dp from DATA_IN; 
+    -- for standard DP modes, use dp_reg_index_next; else use registered dp_reg_index
+    rw_addr1 <= DATA_IN(7 downto 2) when (state = ST_ADDR1 and IS_REGALU = '1' and regalu_phase = "00")
+                else DATA_IN(7 downto 2) when (state = ST_ADDR2 and (IS_SHIFTER = '1' or IS_EXTEND = '1') and regalu_phase = "01")
+                else dp_reg_index_next when (state = ST_ADDR1 and
                                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
     rw_addr2 <= dp_reg_index_next_plus1 when ((ext_ldq = '1' or ext_ldf = '1') and R_mode = '1' and state = ST_ADDR1 and
                                               (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else (others => '0');
     rw_waddr <= dp_reg_index_next_plus1 when ((stq_high_reg = '1' or f_stq_high_reg = '1') and state = ST_EXECUTE)
+                else regalu_dest_addr(7 downto 2) when (state = ST_EXECUTE and IS_REGALU = '1')
+                else regalu_dest_addr(7 downto 2) when (state = ST_EXECUTE and (IS_SHIFTER = '1' or IS_EXTEND = '1'))
                 else dp_reg_index_next when (state = ST_ADDR1 and
                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
@@ -2861,7 +3417,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     rw_byte_sel <= "00";
     
     process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
-            f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg)
+            f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg, IS_REGALU, regalu_result,
+            IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable f_reg : std_logic_vector(63 downto 0);
     begin
         case f_reg_sel is
@@ -2876,6 +3433,12 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             rw_wdata <= f_reg(31 downto 0);
         elsif stq_high_reg = '1' then
             rw_wdata <= T_reg;
+        elsif IS_REGALU = '1' then
+            rw_wdata <= regalu_result;
+        elsif IS_SHIFTER = '1' then
+            rw_wdata <= shifter_result;
+        elsif IS_EXTEND = '1' then
+            rw_wdata <= extend_result;
         elsif IS_ALU_OP = '1' and ALU_OP = "100" then
             rw_wdata <= A_reg;
         elsif IS_RMW_OP = '1' and RMW_OP = "100" then
@@ -2899,22 +3462,40 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                         (stq_high_reg = '1' and state = ST_EXECUTE) or
                         (f_stq_high_reg = '1' and state = ST_EXECUTE) or
                         (state = ST_EXECUTE and IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" and
-                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))))
+                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100")) or
+                        (state = ST_EXECUTE and IS_REGALU = '1' and REGALU_OP /= "0110") or  -- Reg-ALU write (not CMP)
+                        (state = ST_EXECUTE and IS_SHIFTER = '1') or  -- Shifter write
+                        (state = ST_EXECUTE and IS_EXTEND = '1')))    -- Extend write
              else '0';
 
     process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index, R_mode, ext_ldf, ext_stf)
+        variable dp_sum   : unsigned(7 downto 0);
+        variable dp_index : unsigned(5 downto 0);
     begin
         dp_reg_index_next <= dp_reg_index;
+        dp_addr_unaligned <= '0';
         if state = ST_ADDR1 and (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") then
-            if R_mode = '1' and (ext_ldf = '1' or ext_stf = '1') then
-                -- 16-byte alignment for F register pairs in R-mode (Rk/Rk+1)
-                dp_reg_index_next <= DATA_IN(5 downto 2) & "00";
-            elsif ADDR_MODE = "0011" then
-                dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)), 6));
+            dp_sum := unsigned(DATA_IN);
+            if ADDR_MODE = "0011" then
+                dp_sum := unsigned(DATA_IN) + unsigned(X_reg(7 downto 0));
             elsif ADDR_MODE = "0100" then
-                dp_reg_index_next <= std_logic_vector(resize(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)), 6));
+                dp_sum := unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0));
+            end if;
+
+            if R_mode = '1' then
+                -- Check alignment: low 2 bits must be zero for register access
+                if dp_sum(1 downto 0) /= "00" then
+                    dp_addr_unaligned <= '1';
+                end if;
+                -- Map DP byte address -> register index (dp >> 2)
+                dp_index := dp_sum(7 downto 2);
+                if ext_ldf = '1' or ext_stf = '1' then
+                    -- 16-byte alignment for F register pairs in R-mode (Rk/Rk+1)
+                    dp_index(1 downto 0) := "00";
+                end if;
+                dp_reg_index_next <= std_logic_vector(dp_index);
             else
-                dp_reg_index_next <= DATA_IN(5 downto 0);
+                dp_reg_index_next <= std_logic_vector(resize(dp_sum, 6));
             end if;
         end if;
     end process;
@@ -3152,6 +3733,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                            (state = ST_ADDR4 and is_indirect_addr = '0') or
                            state = ST_BRANCH or  -- Fetch branch offset
                            ((state = ST_DECODE) and IR = x"02" and is_extended = '0') or
+                           ((state = ST_DECODE) and is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
                else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSL = '1'))

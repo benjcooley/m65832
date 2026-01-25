@@ -236,6 +236,207 @@ After the `$02` prefix byte:
 | **Reserved FPU** | | |
 | $D9-$DF | (reserved) | Trap to software emulation |
 | $E0-$E6 | (reserved) | Trap to software emulation |
+| **Register-Targeted ALU** | | |
+| $E8 [op] [dest] [src...] | LD/ADC/SBC/AND/ORA/EOR/CMP | Register-targeted ALU (see below) |
+| $E9 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Barrel shifter (see below) |
+| $EA [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
+
+### Register-Targeted ALU Instructions ($02 $E8)
+
+These instructions allow ALU operations with any DP location as the destination, instead of always using the accumulator. This enables efficient compiler code generation with register allocation across the 64-register window.
+
+**Encoding:** `$02 $E8 [op|mode] [dest_dp] [source_operand...]`
+
+The `[op|mode]` byte encodes:
+- **Bits 7-4:** Operation (0=LD, 1=ADC, 2=SBC, 3=AND, 4=ORA, 5=EOR, 6=CMP, 7=Shifts)
+- **Bits 3-0:** Source addressing mode
+
+| Op | Operation | Flags Affected |
+|----|-----------|----------------|
+| 0 | LD dest, src | N, Z |
+| 1 | ADC dest, src | N, V, Z, C |
+| 2 | SBC dest, src | N, V, Z, C |
+| 3 | AND dest, src | N, Z |
+| 4 | ORA dest, src | N, Z |
+| 5 | EOR dest, src | N, Z |
+| 6 | CMP dest, src | N, Z, C |
+| 7 | (shifts - reserved) | |
+
+| Mode | Source Addressing | Operand Bytes |
+|------|-------------------|---------------|
+| $0 | (dp,X) | 1 |
+| $1 | dp | 1 |
+| $2 | #imm | 1-4 (width dependent) |
+| $3 | A | 0 |
+| $4 | (dp),Y | 1 |
+| $5 | dp,X | 1 |
+| $6 | abs | 2 |
+| $7 | abs,X | 2 |
+| $8 | abs,Y | 2 |
+| $9 | (dp) | 1 |
+| $A | [dp] | 1 |
+| $B | [dp],Y | 1 |
+| $C | sr,S | 1 |
+| $D | (sr,S),Y | 1 |
+| $E-$F | (reserved) | |
+
+**Assembly Syntax:**
+
+```asm
+; LD dest, source - Load into DP location
+    LD $04, $00         ; [$04] = [$00]  (R1 = R0)
+    LD $04, A           ; [$04] = A
+    LD $04, #$1234      ; [$04] = $1234
+    LD $04, ($08)       ; [$04] = [[$08]]
+
+; ADC dest, source - Add with carry
+    ADC $08, $04        ; [$08] = [$08] + [$04] + C
+    ADC $08, A          ; [$08] = [$08] + A + C
+    ADC $08, #$10       ; [$08] = [$08] + $10 + C
+
+; SBC dest, source - Subtract with borrow
+    SBC $0C, $08        ; [$0C] = [$0C] - [$08] - !C
+
+; AND/ORA/EOR dest, source - Logical operations
+    AND $10, $04        ; [$10] = [$10] & [$04]
+    ORA $10, #$FF       ; [$10] = [$10] | $FF
+    EOR $14, A          ; [$14] = [$14] ^ A
+
+; CMP dest, source - Compare (flags only)
+    CMP $04, $08        ; flags = [$04] - [$08]
+    CMP $04, #$100      ; flags = [$04] - $100
+```
+
+**Instruction Length:**
+
+| Mode | Length (bytes) |
+|------|----------------|
+| Source = A | 4 ($02 $E8 op dest) |
+| Source = dp | 5 ($02 $E8 op dest src) |
+| Source = #imm8 | 5 |
+| Source = #imm16 | 6 |
+| Source = #imm32 | 8 |
+| Source = abs | 6 |
+
+**Example - Compiler Code Generation:**
+
+```asm
+; C: int result = a + b - c;
+; Traditional (accumulator-centric):
+    LDA a               ; 3 cycles
+    CLC                 ; 2 cycles
+    ADC b               ; 3 cycles
+    SEC                 ; 2 cycles
+    SBC c               ; 3 cycles
+    STA result          ; 3 cycles
+; Total: 16 cycles, 12 bytes
+
+; Register-targeted:
+    LD $00, a           ; R0 = a
+    CLC
+    ADC $00, b          ; R0 += b
+    SEC
+    SBC $00, c          ; R0 -= c
+    LD result, $00      ; result = R0
+; Total: Similar cycles but R0 stays "hot" for reuse
+```
+
+### Shifter/Rotate Instructions ($02 $E9)
+
+Single-cycle barrel shifter and rotate operations between register window locations.
+
+**Encoding:** `$02 $E9 [op|cnt] [dest_dp] [src_dp]`
+
+The `[op|cnt]` byte encodes:
+- **Bits 7-5:** Operation (0=SHL, 1=SHR, 2=SAR, 3=ROL, 4=ROR)
+- **Bits 4-0:** Shift count (0-31), or $1F for shift by A (low 5 bits)
+
+| Op | Operation | Description |
+|----|-----------|-------------|
+| 0 | SHL | Shift left logical (fill with 0) |
+| 1 | SHR | Shift right logical (fill with 0) |
+| 2 | SAR | Shift right arithmetic (sign extend) |
+| 3 | ROL | Rotate left through carry |
+| 4 | ROR | Rotate right through carry |
+
+**Flags Affected:** N, Z, C
+
+**Assembly Syntax:**
+
+```asm
+; Shift left by constant
+    SHL $08, $04, #4      ; [$08] = [$04] << 4
+
+; Shift right logical by constant
+    SHR $0C, $04, #8      ; [$0C] = [$04] >> 8
+
+; Shift right arithmetic (preserves sign)
+    SAR $10, $08, #4      ; [$10] = [$08] >>> 4
+
+; Rotate through carry
+    ROL $14, $10, #1      ; [$14] = [$10] rotate left 1
+    ROR $18, $14, #1      ; [$18] = [$14] rotate right 1
+
+; Variable shift by A register
+    SHL $08, $04, A       ; [$08] = [$04] << (A & $1F)
+    SHR $0C, $04, A       ; [$0C] = [$04] >> (A & $1F)
+```
+
+**Instruction Length:** 5 bytes ($02 $E9 op|cnt dest src)
+
+### Sign/Zero Extend Instructions ($02 $EA)
+
+Extend operations for converting between data sizes.
+
+**Encoding:** `$02 $EA [subop] [dest_dp] [src_dp]`
+
+| Subop | Operation | Description |
+|-------|-----------|-------------|
+| $00 | SEXT8 | Sign extend 8-bit to 32-bit |
+| $01 | SEXT16 | Sign extend 16-bit to 32-bit |
+| $02 | ZEXT8 | Zero extend 8-bit to 32-bit |
+| $03 | ZEXT16 | Zero extend 16-bit to 32-bit |
+| $04 | CLZ | Count leading zeros |
+| $05 | CTZ | Count trailing zeros |
+| $06 | POPCNT | Population count (count 1 bits) |
+
+**Flags Affected:** N, Z
+
+**Assembly Syntax:**
+
+```asm
+; Sign extend byte to full width
+    SEXT8 $10, $0C        ; [$10] = sign_extend_8([$0C])
+                          ; $FF -> $FFFFFFFF
+
+; Zero extend byte to full width
+    ZEXT8 $14, $0C        ; [$14] = zero_extend_8([$0C])
+                          ; $FF -> $000000FF
+
+; Count leading zeros
+    CLZ $18, $04          ; [$18] = count_leading_zeros([$04])
+
+; Count trailing zeros
+    CTZ $1C, $04          ; [$1C] = count_trailing_zeros([$04])
+
+; Population count (bit count)
+    POPCNT $20, $04       ; [$20] = popcount([$04])
+```
+
+**Instruction Length:** 5 bytes ($02 $EA subop dest src)
+
+**Example - Compiler Code Generation:**
+
+```asm
+; C: int32_t y = (int32_t)(int8_t)x;  // sign extend char to int
+    SEXT8 $08, $04        ; R2 = sign_extend(R1)
+
+; C: uint32_t mask = (1u << n) - 1;
+    LDA #1
+    LD $04, A             ; R1 = 1
+    SHL $08, $04, n       ; R2 = 1 << n
+    DEC $08               ; R2 = (1 << n) - 1
+```
 
 ---
 

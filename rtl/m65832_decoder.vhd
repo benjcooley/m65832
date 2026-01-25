@@ -18,7 +18,9 @@ entity M65832_Decoder is
         -- Instruction input
         IR              : in  std_logic_vector(7 downto 0);   -- Instruction register
         IR_EXT          : in  std_logic_vector(7 downto 0);   -- Extended opcode (after $02)
+        IR_EXT2         : in  std_logic_vector(7 downto 0);   -- Second extended byte (for $E8 reg-ALU)
         IS_EXTENDED     : in  std_logic;                       -- Using extended opcode page
+        IS_REGALU_EXT   : in  std_logic;                       -- Reading register-ALU op|mode byte
         
         -- Mode flags
         E_MODE          : in  std_logic;  -- Emulation mode
@@ -133,7 +135,22 @@ entity M65832_Decoder is
         IS_CAS          : out std_logic;  -- Compare and swap
         IS_LLI          : out std_logic;  -- Load linked
         IS_SCI          : out std_logic;  -- Store conditional
-        ILLEGAL_OP      : out std_logic
+        ILLEGAL_OP      : out std_logic;
+        
+        -- Register-Targeted ALU ($02 $E8)
+        IS_REGALU       : out std_logic;  -- Register-targeted ALU operation
+        REGALU_OP       : out std_logic_vector(3 downto 0);  -- Operation (LD/ADC/SBC/AND/ORA/EOR/CMP)
+        REGALU_SRC_MODE : out std_logic_vector(3 downto 0);  -- Source addressing mode
+        REGALU_DEST_DP  : out std_logic_vector(7 downto 0);  -- Destination DP address (from IR_EXT2)
+        
+        -- Shifter ($02 $E9)
+        IS_SHIFTER      : out std_logic;  -- Shifter operation
+        SHIFT_OP        : out std_logic_vector(2 downto 0);  -- Shift type (SHL/SHR/SAR/ROL/ROR)
+        SHIFT_COUNT     : out std_logic_vector(4 downto 0);  -- Shift count (or 11111 for A)
+        
+        -- Extend ($02 $EA)
+        IS_EXTEND       : out std_logic;  -- Sign/zero extend operation
+        EXTEND_OP       : out std_logic_vector(3 downto 0)   -- Extend type
     );
 end M65832_Decoder;
 
@@ -158,7 +175,8 @@ begin
     -- Main Instruction Decoder
     ---------------------------------------------------------------------------
     
-    process(IR, IR_EXT, IS_EXTENDED, E_MODE, M_WIDTH, X_WIDTH, COMPAT_MODE, cc, bbb, aaa)
+    process(IR, IR_EXT, IR_EXT2, IS_EXTENDED, IS_REGALU_EXT, E_MODE, M_WIDTH, X_WIDTH, COMPAT_MODE, cc, bbb, aaa)
+        variable regalu_src : std_logic_vector(3 downto 0);
     begin
         -- Default outputs
         IS_ALU_OP     <= '0';
@@ -206,6 +224,21 @@ begin
         IS_LLI    <= '0';
         IS_SCI    <= '0';
         ILLEGAL_OP <= '0';
+        
+        -- Register-targeted ALU defaults
+        IS_REGALU       <= '0';
+        REGALU_OP       <= "0000";
+        REGALU_SRC_MODE <= "0000";
+        REGALU_DEST_DP  <= (others => '0');
+        
+        -- Shifter defaults
+        IS_SHIFTER      <= '0';
+        SHIFT_OP        <= "000";
+        SHIFT_COUNT     <= "00000";
+        
+        -- Extend defaults
+        IS_EXTEND       <= '0';
+        EXTEND_OP       <= "0000";
         
         if IS_EXTENDED = '1' then
             -- Extended opcode page (after $02 prefix)
@@ -285,6 +318,105 @@ begin
                 when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" |
                      x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
                     INSTR_LEN <= "010";
+                
+                -- Register-Targeted ALU ($02 $E8)
+                when x"E8" =>
+                    IS_EXT_OP <= '1';
+                    IS_REGALU <= '1';
+                    -- op|mode byte is in IR_EXT2 when IS_REGALU_EXT='1'
+                    if IS_REGALU_EXT = '1' then
+                        REGALU_OP <= IR_EXT2(7 downto 4);
+                        REGALU_SRC_MODE <= IR_EXT2(3 downto 0);
+                        regalu_src := IR_EXT2(3 downto 0);
+                        
+                        -- Determine instruction length based on source mode
+                        -- Base: $02 $E8 op|mode dest_dp = 4 bytes minimum
+                        case regalu_src is
+                            when "0011" =>  -- Source = A (no additional operand)
+                                INSTR_LEN <= "100";  -- 4 bytes
+                                ADDR_MODE <= "0000"; -- Implied/A
+                            when "0001" | "0101" | "1001" | "1010" | "1011" | "1100" | "1101" =>
+                                -- dp, dp,X, (dp), [dp], [dp],Y, sr,S, (sr,S),Y
+                                INSTR_LEN <= "101";  -- 5 bytes
+                                if regalu_src = "0001" then
+                                    ADDR_MODE <= "0010";  -- dp
+                                elsif regalu_src = "0101" then
+                                    ADDR_MODE <= "0011";  -- dp,X
+                                elsif regalu_src = "1001" then
+                                    ADDR_MODE <= "1000";  -- (dp)
+                                elsif regalu_src = "1010" then
+                                    ADDR_MODE <= "1011";  -- [dp]
+                                elsif regalu_src = "1011" then
+                                    ADDR_MODE <= "1100";  -- [dp],Y
+                                elsif regalu_src = "1100" then
+                                    ADDR_MODE <= "1101";  -- sr,S
+                                elsif regalu_src = "1101" then
+                                    ADDR_MODE <= "1110";  -- (sr,S),Y
+                                end if;
+                            when "0000" | "0100" =>
+                                -- (dp,X), (dp),Y
+                                INSTR_LEN <= "101";  -- 5 bytes
+                                if regalu_src = "0000" then
+                                    ADDR_MODE <= "1001";  -- (dp,X)
+                                else
+                                    ADDR_MODE <= "1010";  -- (dp),Y
+                                end if;
+                            when "0010" =>  -- #imm (width dependent)
+                                ADDR_MODE <= "0001";  -- Immediate
+                                if M_WIDTH = WIDTH_32 then
+                                    INSTR_LEN <= "000";  -- 8 bytes (need to represent >7)
+                                elsif M_WIDTH = WIDTH_16 then
+                                    INSTR_LEN <= "110";  -- 6 bytes
+                                else
+                                    INSTR_LEN <= "101";  -- 5 bytes
+                                end if;
+                            when "0110" | "0111" | "1000" =>
+                                -- abs, abs,X, abs,Y
+                                INSTR_LEN <= "110";  -- 6 bytes
+                                if regalu_src = "0110" then
+                                    ADDR_MODE <= "0101";  -- abs
+                                elsif regalu_src = "0111" then
+                                    ADDR_MODE <= "0110";  -- abs,X
+                                else
+                                    ADDR_MODE <= "0111";  -- abs,Y
+                                end if;
+                            when others =>
+                                INSTR_LEN <= "100";  -- 4 bytes default
+                                ILLEGAL_OP <= '1';
+                        end case;
+                    else
+                        -- Not yet fetched op|mode byte
+                        INSTR_LEN <= "011";  -- At least 3 bytes so far
+                    end if;
+                
+                -- Shifter/Rotate ($02 $E9)
+                -- Format: $02 $E9 [op|cnt] [dest_dp] [src_dp]
+                when x"E9" =>
+                    IS_EXT_OP <= '1';
+                    IS_SHIFTER <= '1';
+                    if IS_REGALU_EXT = '1' then
+                        -- op|cnt byte is in IR_EXT2
+                        SHIFT_OP <= IR_EXT2(7 downto 5);
+                        SHIFT_COUNT <= IR_EXT2(4 downto 0);
+                        INSTR_LEN <= "101";  -- 5 bytes: $02 $E9 op|cnt dest_dp src_dp
+                        ADDR_MODE <= "0010"; -- dp-like (two DP operands)
+                    else
+                        INSTR_LEN <= "011";  -- At least 3 bytes so far
+                    end if;
+                
+                -- Sign/Zero Extend ($02 $EA)
+                -- Format: $02 $EA [subop] [dest_dp] [src_dp]
+                when x"EA" =>
+                    IS_EXT_OP <= '1';
+                    IS_EXTEND <= '1';
+                    if IS_REGALU_EXT = '1' then
+                        EXTEND_OP <= IR_EXT2(3 downto 0);
+                        INSTR_LEN <= "101";  -- 5 bytes: $02 $EA subop dest_dp src_dp
+                        ADDR_MODE <= "0010"; -- dp-like (two DP operands)
+                    else
+                        INSTR_LEN <= "011";  -- At least 3 bytes so far
+                    end if;
+                
                 when others =>
                     if IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
                        IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
