@@ -3,8 +3,10 @@
 **Modern 65832 Microprocessor**  
 *A 32-bit evolution of the 65816, with 65-bit physical addressing*
 
-Version 0.1 Draft  
+Version 0.2  
 January 2026
+
+> **Implementation Status:** Core RTL implemented and verified in simulation. See individual sections for specific implementation notes.
 
 ---
 
@@ -58,19 +60,20 @@ The M65832 is a direct evolution of the WDC 65C816, extending it to a true 32-bi
 - **Two-Level Paging**: 32-bit VA → 65-bit PA translation
 - **Supervisor/User Modes**: Full privilege separation for OS support
 - **Atomic Operations**: Compare-and-swap for lock-free programming
-- **Classic Coprocessor**: Three-core architecture with dedicated 6502 and servicer cores
+- **Classic Coprocessor**: Two-core architecture with dedicated 6502 coprocessor
 
 ### 1.4 Classic Coprocessor (SoC Feature)
 
-For authentic classic system emulation, the M65832 SoC includes two additional cores:
+For authentic classic system emulation, the M65832 SoC includes a dedicated 6502 coprocessor core:
 
 | Core | Purpose | ISA |
 |------|---------|-----|
 | **M65832** | Linux, modern apps | Full 32-bit |
-| **Servicer** | I/O handling, chip emulation | Extended 6502 |
-| **6502** | Classic game code | Pure 6502 |
+| **6502** | Classic game code | Pure 6502/65C02 |
 
-These cores are interleaved: the 6502 runs 1 instruction per 50 master cycles (achieving 1 MHz at 50 MHz master clock), the servicer handles I/O on-demand, and M65832 gets the remaining ~90% of cycles for Linux.
+These cores are time-sliced using a fractional accumulator: the 6502 runs at a configurable exact frequency (e.g., 1.022727 MHz for C64 NTSC), while M65832 gets the remaining cycles (~90%+). I/O accesses from the 6502 are handled via shadow registers and an IRQ-based interface to the main core.
+
+> **RTL Reference:** `m65832_coprocessor_top.vhd`, `m65832_6502_coprocessor.vhd`, `m65832_interleave.vhd`
 
 See [Classic Coprocessor Architecture](M65832_Classic_Coprocessor.md) for full details.
 
@@ -93,31 +96,43 @@ Value:    $78    $56    $34    $12     ; Represents $12345678
 
 ### 2.1 Block Diagram
 
+> **RTL Reference:** Module structure in `rtl/` directory
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         M65832 Core                              │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────────┐ │
-│  │   A     │  │   X     │  │   Y     │  │   Register Window   │ │
-│  │ 32-bit  │  │ 32-bit  │  │ 32-bit  │  │   R0-R63 (32-bit)   │ │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └──────────┬──────────┘ │
-│       │            │            │                   │            │
-│       └────────────┴────────────┴───────────────────┘            │
+│                         M65832 Core (m65832_core.vhd)            │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │              Register File (m65832_regfile.vhd)              │ │
+│  │  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────────────────────┐ │ │
+│  │  │   A   │  │   X   │  │   Y   │  │   Register Window     │ │ │
+│  │  │32-bit │  │32-bit │  │32-bit │  │   R0-R63 (32-bit)     │ │ │
+│  │  └───────┘  └───────┘  └───────┘  └───────────────────────┘ │ │
+│  │  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────────┐ │ │
+│  │  │  SP   │  │   D   │  │   B   │  │  VBR  │  │     T     │ │ │
+│  │  │32-bit │  │32-bit │  │32-bit │  │32-bit │  │  32-bit   │ │ │
+│  │  └───────┘  └───────┘  └───────┘  └───────┘  └───────────┘ │ │
+│  │  ┌─────────────────────────────────────────────────────────┐ │ │
+│  │  │  P: C Z I D X1 X0 M1 M0 V N E S R K (14 bits)          │ │ │
+│  │  └─────────────────────────────────────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────┘ │
 │                              │                                   │
-│  ┌─────────┐  ┌─────────┐  ┌─┴───────┐  ┌─────────────────────┐ │
-│  │   PC    │  │   S     │  │   ALU   │  │    Status (P)       │ │
-│  │ 32-bit  │  │ 32-bit  │  │ 32-bit  │  │ N V - B D I Z C     │ │
-│  └─────────┘  └─────────┘  └─────────┘  │ M1M0 X1X0 E S R W   │ │
-│                                          └─────────────────────┘ │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────────┐ │
-│  │   D     │  │   B     │  │  VBR    │  │   Instruction       │ │
-│  │ 32-bit  │  │ 32-bit  │  │ 32-bit  │  │   Decoder           │ │
-│  │DP Base  │  │Abs Base │  │6502 Base│  └─────────────────────┘ │
-│  └─────────┘  └─────────┘  └─────────┘                          │
+│  ┌─────────────┐  ┌──────────┴──────────┐  ┌──────────────────┐ │
+│  │   Decoder   │  │        ALU          │  │   Address Gen    │ │
+│  │m65832_      │  │   m65832_alu.vhd    │  │  m65832_         │ │
+│  │decoder.vhd  │  │   8/16/32-bit       │  │  addrgen.vhd     │ │
+│  │             │  │   +BCD (8/16 only)  │  │                  │ │
+│  └─────────────┘  └─────────────────────┘  └──────────────────┘ │
+│                              │                                   │
+│  ┌───────────────────────────┴───────────────────────────────┐  │
+│  │                 State Machine (FSM)                        │  │
+│  │  ST_FETCH → ST_DECODE → ST_ADDRn → ST_READn → ST_EXECUTE  │  │
+│  └───────────────────────────────────────────────────────────┘  │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ 32-bit Virtual Address
                     ┌───────┴───────┐
                     │      MMU      │
-                    │  TLB + PTW    │
+                    │m65832_mmu.vhd │
+                    │ 16-entry TLB  │
                     └───────┬───────┘
                             │ 65-bit Physical Address
                     ┌───────┴───────┐
@@ -133,10 +148,13 @@ Value:    $78    $56    $34    $12     ; Represents $12345678
 | Virtual address | 32 bits (4 GB) |
 | Physical address | 65 bits (32 exabytes) |
 | Page size | 4 KB |
+| TLB | 16-entry fully-associative, ASID-tagged |
 | Registers | A, X, Y (width-variable), 64×32-bit register window |
 | Stack | 32-bit pointer, anywhere in address space |
-| Pipeline | 3-stage (Fetch, Decode, Execute) |
+| Pipeline | Multi-cycle state machine |
 | Privilege levels | 2 (Supervisor, User) |
+
+> **RTL Reference:** Feature constants defined in `m65832_pkg.vhd`
 
 ---
 
@@ -194,46 +212,73 @@ This keeps absolute instructions short (3 bytes) while addressing full 4GB.
 
 Allows running 6502 code anywhere in the address space.
 
+#### 3.1.8 Temp Register (T)
+
+32-bit temporary register used for:
+- High word of 64-bit operations (LDQ/STQ store T:A pair)
+- Remainder from DIV/DIVU operations
+- Intermediate results during extended operations
+
+Accessible via TTA (T→A) and TAT (A→T) instructions.
+
 ### 3.2 Status Register (P)
 
-The status register is extended from 65816:
+The status register is a 14-bit internal register extending the 65816 model. The implementation stores flags in the following layout:
 
 ```
- Bit 7   6   5   4   3   2   1   0
-    ┌───┬───┬───┬───┬───┬───┬───┬───┐
-    │ N │ V │ - │ B │ D │ I │ Z │ C │  Standard P (8-bit)
-    └───┴───┴───┴───┴───┴───┴───┴───┘
-
-Extended Status (directly follows P in push/pop):
- Bit 7   6   5   4   3   2   1   0
-    ┌───┬───┬───┬───┬───┬───┬───┬───┐
-    │M1 │M0 │X1 │X0 │ E │ S │ R │ K │  Extended P
-    └───┴───┴───┴───┴───┴───┴───┴───┘
+Internal P Register (14 bits):
+ Bit 13  12  11  10   9   8   7   6   5   4   3   2   1   0
+    ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
+    │ K │ R │ S │ E │ N │ V │M1 │M0 │X1 │X0 │ D │ I │ Z │ C │
+    └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
-#### Standard Flags (Byte 0)
+> **RTL Reference:** Bit positions defined as constants `P_C` through `P_K` in `m65832_pkg.vhd`
+
+#### Arithmetic/Logic Flags
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| N | Negative | Set if result has MSB=1 |
-| V | Overflow | Set on signed overflow |
-| - | Reserved | Always 1 in emulation mode |
-| B | Break | Set by BRK instruction |
-| D | Decimal | Enable BCD arithmetic |
-| I | IRQ Disable | Mask IRQ when set |
-| Z | Zero | Set if result is zero |
-| C | Carry | Carry/borrow from arithmetic |
+| 0 | C | Carry/borrow from arithmetic |
+| 1 | Z | Zero - set if result is zero |
+| 2 | I | IRQ Disable - mask IRQ when set |
+| 3 | D | Decimal - enable BCD arithmetic (8/16-bit only) |
+| 8 | V | Overflow - set on signed overflow |
+| 9 | N | Negative - set if result has MSB=1 |
 
-#### Extended Flags (Byte 1)
+#### Width Control Flags
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 5:4 | X1:X0 | Index width: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved |
+| 7:6 | M1:M0 | Accumulator width: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved |
+
+#### Mode/Privilege Flags
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| M1:M0 | Memory/Acc Width | 00=8, 01=16, 10=32 |
-| X1:X0 | Index Width | 00=8, 01=16, 10=32 |
-| E | Emulation | 1=6502 mode, 0=Native mode |
-| S | Supervisor | 1=Supervisor, 0=User |
-| R | Register Window | 1=DP→Registers, 0=DP→Memory |
-| K | Compat | 1=illegal opcodes become NOP in 8/16-bit; 32-bit always treats illegal ops as NOP |
+| 10 | E | Emulation mode: 1=6502 mode, 0=Native mode |
+| 11 | S | Supervisor: 1=Supervisor privilege, 0=User privilege |
+| 12 | R | Register Window: 1=DP accesses register file, 0=DP accesses memory |
+| 13 | K | Compatibility: 1=illegal opcodes become NOP |
+
+#### 65816-Compatible Push/Pull Format
+
+When pushed to the stack (PHP/PLP), flags are packed into one or two bytes in a 65816-compatible format:
+
+```
+Standard byte (always pushed):
+ Bit 7   6   5   4   3   2   1   0
+    ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    │ N │ V │ 1 │ B │ D │ I │ Z │ C │
+    └───┴───┴───┴───┴───┴───┴───┴───┘
+
+Extended byte (pushed in native mode):
+ Bit 7   6   5   4   3   2   1   0
+    ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    │M1 │M0 │X1 │X0 │ E │ S │ R │ K │
+    └───┴───┴───┴───┴───┴───┴───┴───┘
+```
 
 ### 3.3 Register Window (R0-R63)
 
@@ -260,12 +305,14 @@ This gives 6502-style short encodings with register-machine performance.
 
 ## 4. Processor Modes
 
+> **RTL Reference:** Mode handling in `m65832_core.vhd`, width functions in `m65832_pkg.vhd`
+
 ### 4.1 Emulation Mode (E=1)
 
 Binary-compatible 6502 behavior:
-- 8-bit A, X, Y
+- 8-bit A, X, Y (enforced by `get_data_width`/`get_index_width` functions)
 - 16-bit PC (relative to VBR)
-- Stack at VBR + $0100-$01FF
+- Stack at VBR + $0100-$01FF (high byte of SP locked to $01)
 - Zero Page at VBR + $0000-$00FF
 - 64KB address space window (VBR-relative)
 
@@ -360,38 +407,47 @@ Emulation mode:
 
 ## 6. Instruction Set Overview
 
+> **RTL Reference:** Instruction decoding in `m65832_decoder.vhd`
+
 ### 6.1 Instruction Categories
 
 | Category | Examples | Count |
 |----------|----------|-------|
-| Load/Store | LDA, STA, LDX, STX, LDY, STY | 6 |
+| Load/Store | LDA, STA, LDX, STX, LDY, STY, STZ | 7 |
 | Arithmetic | ADC, SBC, INC, DEC | 4 |
-| Logic | AND, ORA, EOR, BIT | 4 |
+| Logic | AND, ORA, EOR, BIT, TSB, TRB | 6 |
 | Shift/Rotate | ASL, LSR, ROL, ROR | 4 |
 | Compare | CMP, CPX, CPY | 3 |
-| Branch | BEQ, BNE, BCS, BCC, BMI, BPL, BVS, BVC | 8 |
-| Jump/Call | JMP, JSR, RTS, RTI | 4 |
-| Stack | PHA, PLA, PHX, PLX, PHY, PLY, PHP, PLP | 8 |
-| Status | SEC, CLC, SED, CLD, SEI, CLI, CLV | 7 |
-| Transfer | TAX, TXA, TAY, TYA, TSX, TXS | 6 |
-| System | BRK, NOP, WAI, STP | 4 |
-| **New: Multiply** | MUL, MULU | 2 |
-| **New: Divide** | DIV, DIVU | 2 |
-| **New: Atomic** | CAS, CASA, LLI, SCI | 4 |
-| **New: System** | SVBR, SB, RSET, RCLR, TRAP | 5 |
+| Branch | BEQ, BNE, BCS, BCC, BMI, BPL, BVS, BVC, BRA, BRL | 10 |
+| Jump/Call | JMP, JML, JSR, JSL, RTS, RTL, RTI | 7 |
+| Stack | PHA, PLA, PHX, PLX, PHY, PLY, PHP, PLP, PHD, PLD, PHB, PLB | 12 |
+| Status | SEC, CLC, SED, CLD, SEI, CLI, CLV, REP, SEP, XCE | 10 |
+| Transfer | TAX, TXA, TAY, TYA, TSX, TXS, TXY, TYX, TCD, TDC, TCS, TSC | 12 |
+| Block Move | MVN, MVP | 2 |
+| System | BRK, COP, NOP, WAI, STP | 5 |
+| **Extended: Multiply/Divide** | MUL, MULU, DIV, DIVU | 4 |
+| **Extended: Atomic** | CAS, LLI, SCI | 3 |
+| **Extended: Base Registers** | SVBR, SB, SD | 3 |
+| **Extended: Register Window** | RSET, RCLR | 2 |
+| **Extended: System** | TRAP, FENCE, FENCER, FENCEW | 4 |
+| **Extended: 64-bit** | LDQ, STQ, TTA, TAT | 4 |
+| **Extended: Address** | LEA | 1 |
+| **Extended: Status** | REPE, SEPE | 2 |
 
 ### 6.2 Instruction Encoding
 
-Most instructions preserve 6502/65816 encodings. New features use:
+Most instructions preserve 6502/65816 encodings. M65832 extensions use:
 
 1. **WID Prefix ($42)**: Signals 32-bit immediate or absolute follows
-2. **New Opcode Page ($02 prefix)**: Extended operations
+2. **Extended Opcode Page ($02 prefix)**: Extended operations (in native mode only)
 
 ```
 Standard instruction:     [opcode] [operand...]
 Wide immediate/address:   [$42] [opcode] [32-bit operand]
 Extended operation:       [$02] [ext-opcode] [operand...]
 ```
+
+> **Note:** The $02 opcode is COP in emulation mode (E=1). In native mode (E=0), it serves as the extended opcode prefix.
 
 ### 6.3 Instruction Timing (Cycles)
 
@@ -538,6 +594,8 @@ Flags affected: None
 Same patterns, for X and Y registers.
 
 ### 8.2 Arithmetic
+
+> **RTL Reference:** `m65832_alu.vhd` - Note: BCD mode (D flag) is only supported for 8-bit and 16-bit operations. 32-bit arithmetic is always binary.
 
 #### ADC - Add with Carry
 ```
@@ -738,51 +796,57 @@ TBA             A = B
 TAB             B = A
 ```
 
-### 8.11 New: Multiply and Divide
+### 8.11 Extended: Multiply and Divide
+
+> **RTL Reference:** Extended opcode handling in `m65832_decoder.vhd`, core execution in `m65832_core.vhd`
 
 #### MUL - Signed Multiply
 ```
 MUL dp          A = A * [dp] (signed)
 MUL abs         A = A * [abs] (signed)
 ```
+Result width depends on operand width:
 - 8×8→16: A[7:0] × operand → A[15:0]
 - 16×16→32: A[15:0] × operand → A[31:0]
-- 32×32→64: A × operand → R0:A (high:low)
+- 32×32→64: A × operand → T:A (T=high, A=low)
 
 #### MULU - Unsigned Multiply
-Same as MUL, unsigned.
+Same as MUL, but unsigned arithmetic.
 
 #### DIV - Signed Divide
 ```
-DIV dp          A = A / [dp], R0 = A % [dp]
+DIV dp          A = A / [dp], T = A % [dp]
+DIV abs         A = A / [abs], T = A % [abs]
 ```
+Quotient stored in A, remainder stored in T register.
 
 #### DIVU - Unsigned Divide
-Same as DIV, unsigned.
+Same as DIV, but unsigned arithmetic.
 
-### 8.12 New: Atomic Operations
+### 8.12 Extended: Atomic Operations
 
 #### CAS - Compare and Swap
 ```
 CAS dp          if [dp] == X then [dp] = A; Z=1 else X = [dp]; Z=0
 CAS abs         (same for absolute)
 ```
-Atomic test-and-set. Essential for locks.
+Atomic test-and-set. Essential for locks. If comparison fails, X is loaded with the current memory value.
 
 #### LLI - Load Linked
 ```
 LLI dp          A = [dp]; set internal link flag for address
 LLI abs
 ```
+Marks the address for subsequent SCI instruction.
 
 #### SCI - Store Conditional
 ```
 SCI dp          if link valid then [dp] = A; Z=1 else Z=0
 SCI abs
 ```
-LL/SC pair for lock-free algorithms. Any intervening write to the linked address clears the link.
+LL/SC pair for lock-free algorithms. Any intervening write to the linked address clears the link, causing SCI to fail (Z=0).
 
-### 8.13 New: System Operations
+### 8.13 Extended: System Operations
 
 #### SVBR - Set Virtual Base Register
 ```
@@ -816,7 +880,7 @@ RCLR            R = 0 (DP accesses memory)
 ```
 TRAP #imm8      Trigger supervisor trap with code imm8
 ```
-Used for system calls. Saves state, enters supervisor mode, vectors through trap table.
+Used for system calls. Saves state, enters supervisor mode, vectors through SYSCALL vector ($0000FFD4).
 
 #### WAI - Wait for Interrupt
 ```
@@ -828,22 +892,125 @@ WAI             Halt until interrupt
 STP             Halt until reset
 ```
 
+### 8.14 Extended: 64-bit Operations
+
+#### LDQ - Load Quad (64-bit)
+```
+LDQ dp          Load 64-bit value: T = [dp+4], A = [dp]
+LDQ abs         Load 64-bit value: T = [abs+4], A = [abs]
+```
+Loads a 64-bit value into the T:A register pair (T=high, A=low).
+
+#### STQ - Store Quad (64-bit)
+```
+STQ dp          Store 64-bit value: [dp+4] = T, [dp] = A
+STQ abs         Store 64-bit value: [abs+4] = T, [abs] = A
+```
+Stores the T:A register pair as a 64-bit value.
+
+#### TTA - Transfer T to A
+```
+TTA             A = T (copy temp register to accumulator)
+```
+
+#### TAT - Transfer A to T
+```
+TAT             T = A (copy accumulator to temp register)
+```
+
+### 8.15 Extended: Address Operations
+
+#### LEA - Load Effective Address
+```
+LEA dp          A = D + dp (effective address of direct page operand)
+LEA dp,X        A = D + dp + X
+LEA abs         A = B + abs (effective address of absolute operand)
+LEA abs,X       A = B + abs + X
+```
+Computes the effective address without accessing memory. Useful for pointer arithmetic.
+
+### 8.16 Extended: Memory Barriers
+
+#### FENCE - Full Memory Fence
+```
+FENCE           Order all loads and stores
+```
+Ensures all previous memory operations complete before subsequent ones begin.
+
+#### FENCER - Read Fence
+```
+FENCER          Order all loads
+```
+
+#### FENCEW - Write Fence
+```
+FENCEW          Order all stores
+```
+
+### 8.17 Extended: Status Operations
+
+#### REPE - REP for Extended Flags
+```
+REPE #imm8      Clear bits in extended P where imm8 bit is 1
+```
+Affects bits M1, M0, X1, X0, E, S, R, K.
+
+#### SEPE - SEP for Extended Flags
+```
+SEPE #imm8      Set bits in extended P where imm8 bit is 1
+```
+Affects bits M1, M0, X1, X0, E, S, R, K.
+
+### 8.18 Extended: 32-bit Stack Operations
+
+When using the extended opcode page ($02 prefix):
+
+```
+PHD             Push D (32-bit direct page base)
+PLD             Pull D
+PHB             Push B (32-bit absolute base)
+PLB             Pull B
+PHVBR           Push VBR (32-bit virtual base register)
+PLVBR           Pull VBR
+```
+
+These always push/pull full 32-bit values regardless of width flags.
+
 ---
 
 ## 9. Exceptions and Interrupts
 
+> **RTL Reference:** Vector constants in `m65832_pkg.vhd`
+
 ### 9.1 Exception Types
 
-| Vector | Exception | Priority | Description |
-|--------|-----------|----------|-------------|
-| $FFFF_FFE0 | Reset | 1 (highest) | Power-on/reset |
-| $FFFF_FFE4 | NMI | 2 | Non-maskable interrupt |
-| $FFFF_FFE8 | IRQ | 5 | Maskable interrupt |
-| $FFFF_FFEC | BRK | 6 | Software breakpoint |
-| $FFFF_FFF0 | TRAP | 4 | System call |
-| $FFFF_FFF4 | Page Fault | 3 | MMU page fault |
-| $FFFF_FFF8 | Illegal Op | 3 | Invalid instruction |
-| $FFFF_FFFC | Alignment | 3 | Misaligned access |
+#### Native Mode Vectors (Bank 0)
+
+| Vector | Exception | Description |
+|--------|-----------|-------------|
+| $0000_FFE4 | COP | Coprocessor instruction |
+| $0000_FFE6 | BRK | Software breakpoint |
+| $0000_FFE8 | ABORT | Abort signal |
+| $0000_FFEA | NMI | Non-maskable interrupt |
+| $0000_FFEE | IRQ | Maskable interrupt |
+
+#### M65832 Extended Vectors
+
+| Vector | Exception | Description |
+|--------|-----------|-------------|
+| $0000_FFD0 | Page Fault | MMU page fault |
+| $0000_FFD4 | SYSCALL | System call (TRAP instruction) |
+| $0000_FFF8 | Illegal Op | Invalid instruction |
+
+#### Emulation Mode Vectors
+
+| Vector | Exception | Description |
+|--------|-----------|-------------|
+| $0000_FFF4 | COP | Coprocessor instruction |
+| $0000_FFF8 | ABORT | Abort signal |
+| $0000_FFFA | NMI | Non-maskable interrupt |
+| $0000_FFFC | RESET | Power-on/reset |
+| $0000_FFFE | IRQ/BRK | Maskable interrupt or BRK |
 
 ### 9.2 Exception Processing
 
@@ -871,9 +1038,11 @@ When E=1, vectors are relative to VBR:
 
 ## 10. Memory Management Unit
 
+> **RTL Reference:** `m65832_mmu.vhd`
+
 ### 10.1 Overview
 
-The MMU translates 32-bit virtual addresses to 65-bit physical addresses using two-level page tables.
+The MMU translates 32-bit virtual addresses to 65-bit physical addresses using two-level page tables. The implementation features a 16-entry fully-associative TLB with ASID tagging for efficient context switching.
 
 ### 10.2 Address Translation
 
@@ -923,12 +1092,26 @@ Flags (bits 7-0):
 
 ### 10.4 MMU Control Registers
 
-| Register | Bits | Description |
-|----------|------|-------------|
-| PTBR | 65 | Page Table Base (physical addr, 4KB aligned) |
-| ASID | 16 | Address Space ID (TLB tag) |
-| MMUCR | 32 | MMU Control (enable, fault info) |
-| FAULTVA | 32 | Faulting virtual address |
+The MMU registers are memory-mapped at fixed addresses in the system register space:
+
+| Address | Register | Bits | Description |
+|---------|----------|------|-------------|
+| $FFFFF000 | MMUCR | 32 | MMU Control (enable, fault info) |
+| $FFFFF004 | TLBINVAL | 32 | TLB invalidate (write VA to flush) |
+| $FFFFF008 | ASID | 8 | Address Space ID (TLB tag) |
+| $FFFFF00C | ASIDINVAL | 8 | Invalidate entries with this ASID |
+| $FFFFF010 | FAULTVA | 32 | Faulting virtual address |
+| $FFFFF014 | PTBR_LO | 32 | Page Table Base low 32 bits |
+| $FFFFF018 | PTBR_HI | 33 | Page Table Base high 33 bits |
+| $FFFFF01C | TLBFLUSH | 1 | Write 1 to flush entire TLB |
+
+#### Timer Registers (also MMIO)
+
+| Address | Register | Bits | Description |
+|---------|----------|------|-------------|
+| $FFFFF040 | TIMER_CTRL | 8 | Timer control |
+| $FFFFF044 | TIMER_CMP | 32 | Timer compare value |
+| $FFFFF048 | TIMER_COUNT | 32 | Current timer count |
 
 #### MMUCR Bits
 
@@ -936,15 +1119,27 @@ Flags (bits 7-0):
 |-----|------|-------------|
 | 0 | PG | Paging enable |
 | 1 | WP | Write-protect supervisor pages |
-| 4:2 | FAULTTYPE | Last fault type (read/write/exec) |
+| 2 | NX | No-execute bit enabled |
+| 4:3 | FAULTTYPE | Last fault type (00=read, 01=write, 10=exec) |
 | 31:5 | Reserved | |
 
 ### 10.5 TLB
 
-Implementation-defined, but suggested:
-- 64-entry fully-associative
-- ASID-tagged (no flush on context switch if ASID differs)
-- Separate I-TLB and D-TLB optional
+The current implementation provides:
+- 16-entry fully-associative TLB
+- 8-bit ASID tagging (no flush needed on context switch if ASID differs)
+- Global bit support (entry not flushed on ASID change)
+- Round-robin replacement policy
+- Unified I/D TLB (no separate instruction and data TLBs)
+
+#### TLB Entry Format (Internal)
+
+```
+┌─────────┬──────────┬─────────────┬────────┬──────────┬──────┬───────┬──────────┬────────┬──────────┐
+│  valid  │   asid   │     vpn     │  ppn   │  global  │write │ user  │executable│ dirty  │ accessed │
+│ (1 bit) │ (8 bits) │  (20 bits)  │(53 bit)│ (1 bit)  │(1 b) │(1 bit)│ (1 bit)  │(1 bit) │ (1 bit)  │
+└─────────┴──────────┴─────────────┴────────┴──────────┴──────┴───────┴──────────┴────────┴──────────┘
+```
 
 ### 10.6 Page Fault Handling
 
@@ -959,6 +1154,8 @@ On page fault:
 
 ## 11. Atomic Operations
 
+> **RTL Reference:** Atomic operation support in `m65832_core.vhd`, extended opcodes in `m65832_decoder.vhd`
+
 ### 11.1 Compare-and-Swap (CAS)
 
 ```asm
@@ -971,29 +1168,37 @@ retry:
     BNE retry           ; Z=0 means failed, retry
 ```
 
+The CAS instruction atomically compares the memory location with X and, if equal, stores A. The Z flag indicates success (Z=1) or failure (Z=0). On failure, X is loaded with the current memory value.
+
 ### 11.2 Load-Linked / Store-Conditional (LL/SC)
 
 ```asm
 ; Lock-free stack push
 push_item:
-    LLI stack_head      ; A = head, link address
+    LLI stack_head      ; A = head, link address marked
     STA new_node+NEXT   ; new_node.next = head
     LDA #new_node       ; A = &new_node
-    SCI stack_head      ; Try store
-    BNE push_item       ; Retry if link broken
+    SCI stack_head      ; Try store (fails if link broken)
+    BNE push_item       ; Retry if link broken (Z=0)
 ```
+
+The LLI (Load Linked) instruction loads a value and sets an internal link flag for that address. The SCI (Store Conditional) instruction stores only if the link is still valid (no intervening write to the address). Z=1 indicates success.
 
 ### 11.3 Memory Barriers
 
 ```asm
 FENCE           ; Full memory fence (order all loads/stores)
-FENCER          ; Read fence
-FENCEW          ; Write fence
+FENCER          ; Read fence (order loads)
+FENCEW          ; Write fence (order stores)
 ```
+
+These instructions ensure memory ordering for multiprocessor systems or when interacting with DMA/peripherals.
 
 ---
 
 ## 12. Privilege Model
+
+> **RTL Reference:** S flag (bit 11) in status register, privilege checking in `m65832_core.vhd`
 
 ### 12.1 Privilege Levels
 
@@ -1004,12 +1209,13 @@ FENCEW          ; Write fence
 
 ### 12.2 Privileged Operations
 
-Supervisor-only (trap if S=0):
-- Modify PTBR, MMUCR, VBR
-- Execute RSET/RCLR if R-bit locked
-- Access I/O space (if protected)
-- Modify E, S bits directly
-- Execute STP
+Supervisor-only (privilege violation trap if S=0):
+- Modify PTBR, MMUCR, ASID, or other MMU control registers
+- Execute SVBR (Set VBR)
+- Access system register MMIO space ($FFFFF000-$FFFFF0FF)
+- Modify E, S bits directly via SEPE/REPE
+- Execute STP (Stop Processor)
+- Execute WAI (Wait for Interrupt) in some configurations
 
 ### 12.3 System Calls
 
@@ -1123,9 +1329,11 @@ Low addresses
 
 ## 14. Virtual 6502 Mode
 
+> **Note:** For dedicated 6502 coprocessor execution (with cycle-accurate timing), see [Classic Coprocessor Architecture](M65832_Classic_Coprocessor.md). This section describes the M65832 core's emulation mode.
+
 ### 14.1 Overview
 
-The M65832 can run unmodified 6502 code by setting E=1 and configuring VBR to place the 64KB address space anywhere in virtual memory.
+The M65832 can run unmodified 6502 code by setting E=1 and configuring VBR to place the 64KB address space anywhere in virtual memory. This mode runs on the main M65832 core with 6502 semantics, but does not provide cycle-accurate timing for classic system emulation.
 
 ### 14.2 Setup
 
@@ -1381,25 +1589,102 @@ $42 $4C abs32    WID JMP abs32     ; Jump to 32-bit address
 
 ### A.3 Extended Opcode Page ($02 Prefix)
 
+> **RTL Reference:** Extended opcode decoding in `m65832_decoder.vhd` (lines 210-303)
+
+#### Multiply/Divide Operations
 ```
-$02 $00          MUL dp            ; Signed multiply
-$02 $01          MULU dp           ; Unsigned multiply
-$02 $02          DIV dp            ; Signed divide
-$02 $03          DIVU dp           ; Unsigned divide
-$02 $10          CAS dp            ; Compare and swap
-$02 $11          LLI dp            ; Load linked
-$02 $12          SCI dp            ; Store conditional
-$02 $20          SVBR #imm32       ; Set VBR
-$02 $21          SB #imm32         ; Set B
-$02 $22          SD #imm32         ; Set D
-$02 $30          RSET              ; Register window set
-$02 $31          RCLR              ; Register window clear
+$02 $00          MUL dp            ; Signed multiply (dp)
+$02 $01          MULU dp           ; Unsigned multiply (dp)
+$02 $02          MUL abs           ; Signed multiply (abs)
+$02 $03          MULU abs          ; Unsigned multiply (abs)
+$02 $04          DIV dp            ; Signed divide (dp)
+$02 $05          DIVU dp           ; Unsigned divide (dp)
+$02 $06          DIV abs           ; Signed divide (abs)
+$02 $07          DIVU abs          ; Unsigned divide (abs)
+```
+
+#### Atomic Operations
+```
+$02 $10          CAS dp            ; Compare and swap (dp)
+$02 $11          CAS abs           ; Compare and swap (abs)
+$02 $12          LLI dp            ; Load linked (dp)
+$02 $13          LLI abs           ; Load linked (abs)
+$02 $14          SCI dp            ; Store conditional (dp)
+$02 $15          SCI abs           ; Store conditional (abs)
+```
+
+#### Base Register Operations
+```
+$02 $20          SVBR #imm32       ; Set VBR (imm32)
+$02 $21          SVBR dp           ; Set VBR (dp)
+$02 $22          SB #imm32         ; Set B (imm32)
+$02 $23          SB dp             ; Set B (dp)
+$02 $24          SD #imm32         ; Set D (imm32)
+$02 $25          SD dp             ; Set D (dp)
+```
+
+#### Register Window Control
+```
+$02 $30          RSET              ; Enable register window (R=1)
+$02 $31          RCLR              ; Disable register window (R=0)
+```
+
+#### System Operations
+```
 $02 $40          TRAP #imm8        ; System trap
-$02 $50          FENCE             ; Memory fence
+$02 $50          FENCE             ; Full memory fence
 $02 $51          FENCER            ; Read fence
 $02 $52          FENCEW            ; Write fence
+```
+
+#### Extended Status Operations
+```
 $02 $60          REPE #imm8        ; REP for extended flags
 $02 $61          SEPE #imm8        ; SEP for extended flags
+```
+
+#### 32-bit Stack Operations
+```
+$02 $70          PHD               ; Push D (32-bit)
+$02 $71          PLD               ; Pull D (32-bit)
+$02 $72          PHB               ; Push B (32-bit)
+$02 $73          PLB               ; Pull B (32-bit)
+$02 $74          PHVBR             ; Push VBR (32-bit)
+$02 $75          PLVBR             ; Pull VBR (32-bit)
+```
+
+#### Temp Register Operations
+```
+$02 $86          TTA               ; A = T (temp to accumulator)
+$02 $87          TAT               ; T = A (accumulator to temp)
+```
+
+#### 64-bit Load/Store
+```
+$02 $88          LDQ dp            ; Load 64-bit (T:A = [dp])
+$02 $89          LDQ abs           ; Load 64-bit (T:A = [abs])
+$02 $8A          STQ dp            ; Store 64-bit ([dp] = T:A)
+$02 $8B          STQ abs           ; Store 64-bit ([abs] = T:A)
+```
+
+#### WAI/STP (Extended)
+```
+$02 $91          WAI               ; Wait for interrupt
+$02 $92          STP               ; Stop processor
+```
+
+#### LEA (Load Effective Address)
+```
+$02 $A0          LEA dp            ; A = effective address of dp
+$02 $A1          LEA dp,X          ; A = effective address of dp,X
+$02 $A2          LEA abs           ; A = effective address of abs
+$02 $A3          LEA abs,X         ; A = effective address of abs,X
+```
+
+#### FPU Operations (Reserved Range)
+```
+$02 $B0-$BB      LDF/STF           ; FPU load/store operations
+$02 $C0-$E6      FPU ops           ; FPU arithmetic (reserved)
 ```
 
 ---
@@ -1421,31 +1706,83 @@ $02 $61          SEPE #imm8        ; SEP for extended flags
 
 ## Appendix C: Implementation Notes (FPGA)
 
+> **RTL Reference:** All components in `rtl/` directory
+
 ### C.1 Resource Estimates (Xilinx Artix-7)
 
 | Component | LUTs | FFs | BRAMs |
 |-----------|------|-----|-------|
-| Core (no MMU) | ~3,000 | ~2,000 | 2 |
-| Register window | ~500 | ~2,000 | 0 |
-| MMU + TLB | ~2,000 | ~1,500 | 2 |
-| **Total** | ~5,500 | ~5,500 | 4 |
+| M65832 Core | ~5,000 | ~2,000 | 2 |
+| Register window (64×32) | ~500 | ~2,048 | 0 |
+| MMU + 16-entry TLB | ~2,000 | ~1,500 | 0 |
+| 6502 Coprocessor | ~500 | ~100 | 0 |
+| Shadow I/O + FIFO | ~200 | ~2,200 | 1 |
+| Interleaver | ~100 | ~100 | 0 |
+| **Total (with coprocessor)** | ~8,300 | ~8,000 | 3 |
 
 Fits comfortably in XC7A35T with room for peripherals.
 
 ### C.2 Target Clock
 
-- Conservative: 50 MHz
-- Optimized: 100+ MHz
+- Conservative: 50 MHz (verified in simulation)
+- Optimized: 100+ MHz (timing closure dependent on FPGA)
 
-### C.3 Pipeline Stages
+### C.3 Execution Model
 
-1. **Fetch**: Read instruction from memory/cache
-2. **Decode**: Decode opcode, read operands
-3. **Execute**: ALU operation, memory access
-4. **Writeback**: (merged with Execute for simple ops)
+The M65832 uses a multi-cycle state machine rather than a traditional pipeline. Key states:
+
+```
+ST_RESET → ST_FETCH → ST_DECODE → [address phases] → [read/write phases] → ST_EXECUTE → ...
+```
+
+| State | Description |
+|-------|-------------|
+| ST_FETCH | Read opcode byte from PC |
+| ST_DECODE | Decode instruction, begin operand fetch |
+| ST_ADDR1-4 | Address calculation phases (for indexed/indirect modes) |
+| ST_READ1-4 | Memory read phases (width-dependent) |
+| ST_EXECUTE | ALU operation, result computation |
+| ST_WRITE1-4 | Memory write phases (for store/RMW) |
+| ST_PUSH/PULL | Stack operations |
+| ST_BRANCH | Branch target calculation |
+| ST_VECTOR1-4 | Interrupt/exception vector fetch |
+| ST_WAI/STOP | Wait for interrupt / stopped states |
+| ST_BM_READ/WRITE | Block move (MVN/MVP) data phases |
+
+### C.4 Module Hierarchy
+
+```
+m65832_coprocessor_top        ; Top-level SoC with coprocessor
+├── m65832_core               ; Main 32-bit CPU core
+│   ├── m65832_regfile        ; Register file (A,X,Y,SP,D,B,VBR,T + window)
+│   ├── m65832_alu            ; 8/16/32-bit ALU with BCD
+│   ├── m65832_addrgen        ; Address generator with base registers
+│   ├── m65832_decoder        ; Instruction decoder
+│   └── m65832_mmu            ; Memory management unit
+├── m65832_6502_coprocessor   ; 6502 coprocessor wrapper
+│   └── mx65                  ; External 6502 core (MX65)
+├── m65832_interleave         ; Cycle-accurate interleaver
+└── m65832_shadow_io          ; Shadow registers + write FIFO
+```
+
+### C.5 Testbenches
+
+Available testbenches in `tb/` directory:
+
+| Testbench | Description |
+|-----------|-------------|
+| `tb_m65832_core.vhd` | Main core functional tests |
+| `tb_m65832_core_smoke.vhd` | Quick smoke test |
+| `tb_m65832_mmu.vhd` | MMU and TLB tests |
+| `tb_m65832_tlb_flush.vhd` | TLB flush operation tests |
+| `tb_m65832_faultva.vhd` | Page fault VA capture tests |
+| `tb_m65832_coprocessor.vhd` | Coprocessor integration tests |
+| `tb_m65832_coprocessor_soak.vhd` | Long-running soak tests |
+| `tb_m65832_interleave.vhd` | Interleaver timing tests |
+| `tb_m65832_maincore_timeslice.vhd` | Time-slicing verification |
 
 ---
 
-*Document Version: 0.1 Draft*  
+*Document Version: 0.2*  
 *Last Updated: January 2026*  
-*Status: Design specification, not yet implemented*
+*Status: RTL implemented, simulation verified*

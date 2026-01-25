@@ -46,7 +46,7 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - **[Architecture Reference](docs/M65832_Architecture_Reference.md)** - Complete CPU specification
 - **[Instruction Set](docs/M65832_Instruction_Set.md)** - Detailed opcode reference
 - **[Linux Porting Guide](docs/M65832_Linux_Porting_Guide.md)** - OS implementation notes
-- **[Mixed-Mode Multitasking](docs/M65832_Mixed_Mode_Multitasking.md)** - Running 8/16/32-bit processes together
+- **[System Programming Guide](docs/M65832_System_Programming_Guide.md)** - Supervisor mode, MMU, interrupts, and multitasking
 - **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core architecture, 6502 compatibility, cycle-accurate timing
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
 
@@ -193,6 +193,7 @@ m65832/
 │   ├── M65832_Architecture_Reference.md
 │   ├── M65832_Instruction_Set.md
 │   ├── M65832_Linux_Porting_Guide.md
+│   ├── M65832_System_Programming_Guide.md
 │   ├── M65832_Classic_Coprocessor.md
 │   └── M65832_Quick_Reference.md
 ├── cores/                  # Reference VHDL cores

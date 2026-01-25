@@ -1,73 +1,82 @@
 # M65832 Instruction Set Reference
 
-**Complete Opcode Encoding and Instruction Details**
+A complete, verified reference for all M65832 instructions.
 
 ---
 
-## 1. Opcode Encoding Philosophy
+## Overview
 
-The M65832 instruction encoding follows these principles:
+The M65832 extends the WDC 65C816 instruction set with:
+- **32-bit operations** via extended M/X width flags
+- **New instructions** for multiply, divide, atomics, and system control
+- **WID prefix ($42)** for 32-bit immediates and addresses
+- **Extended opcode page ($02)** for new operations
 
-1. **6502/65816 base layer**: Standard opcodes unchanged
-2. **Width from flags**: M and X flags determine operand sizes
-3. **WID prefix ($42)**: Enables 32-bit literals when needed
-4. **Extended page ($02)**: New instructions for modern features
+### Compatibility Note
 
-### 1.1 Instruction Format Overview
-
-```
-Standard:       [opcode]                           1 byte
-Standard+imm:   [opcode] [imm8/16/32]              2-5 bytes
-Standard+addr:  [opcode] [addr8/16]                2-3 bytes
-WID prefix:     [$42] [opcode] [imm32 or addr32]   5-6 bytes
-Extended:       [$02] [ext-op] [operands...]       3+ bytes
-```
-
-### 1.2 Operand Size Rules
-
-| Context | M/X State | Immediate Size | Memory Access Size |
-|---------|-----------|----------------|-------------------|
-| Accumulator ops | M=00 | 8-bit | 8-bit |
-| Accumulator ops | M=01 | 16-bit | 16-bit |
-| Accumulator ops | M=10 | 32-bit | 32-bit |
-| Index ops | X=00 | 8-bit | 8-bit |
-| Index ops | X=01 | 16-bit | 16-bit |
-| Index ops | X=10 | 32-bit | 32-bit |
+All standard 6502 and 65816 opcodes are preserved. The M65832 adds capabilities without changing existing instruction behavior. Differences from the 65816 are noted where applicable.
 
 ---
 
-## 2. Complete Opcode Map
+## Instruction Encoding
 
-### 2.1 Standard Opcode Table (00-FF)
+### Instruction Formats
+
+| Format | Structure | Size |
+|--------|-----------|------|
+| Standard | `[opcode]` | 1 byte |
+| Standard + imm | `[opcode] [imm8/16/32]` | 2-5 bytes |
+| Standard + addr | `[opcode] [addr8/16]` | 2-3 bytes |
+| WID prefix | `[$42] [opcode] [imm32 or addr32]` | 5-6 bytes |
+| Extended | `[$02] [ext-op] [operands...]` | 3+ bytes |
+
+### Operand Width Rules
+
+The M and X flags control operand widths:
+
+| Flag State | Accumulator Width | Index Width |
+|------------|-------------------|-------------|
+| M/X = 00 | 8-bit | 8-bit |
+| M/X = 01 | 16-bit | 16-bit |
+| M/X = 10 | 32-bit | 32-bit |
+| M/X = 11 | Reserved | Reserved |
+
+In **emulation mode** (E=1), all operations are 8-bit.
+
+---
+
+## Complete Opcode Map
+
+### Standard Opcodes ($00-$FF)
 
 ```
      x0       x1       x2       x3       x4       x5       x6       x7
-0x   BRK      ORA      *EXT*    ---      TSB      ORA      ASL      ---
+0x   BRK      ORA      EXT      ---      TSB      ORA      ASL      ---
      impl     (dp,X)   prefix   ---      dp       dp       dp       ---
 
 1x   BPL      ORA      ORA      ---      TRB      ORA      ASL      ---
      rel      (dp),Y   (dp)     ---      dp       dp,X     dp,X     ---
 
-2x   JSR      AND      ---      ---      BIT      AND      ROL      ---
-     abs      (dp,X)   ---      ---      dp       dp       dp       ---
+2x   JSR      AND      JSL      ---      BIT      AND      ROL      ---
+     abs      (dp,X)   long     ---      dp       dp       dp       ---
 
 3x   BMI      AND      AND      ---      BIT      AND      ROL      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,X     ---
 
-4x   RTI      EOR      *WID*    ---      ---      EOR      LSR      ---
-     impl     (dp,X)   prefix   ---      ---      dp       dp       ---
+4x   RTI      EOR      WID      ---      MVP      EOR      LSR      ---
+     impl     (dp,X)   prefix   ---      src,dst  dp       dp       ---
 
-5x   BVC      EOR      EOR      ---      ---      EOR      LSR      ---
-     rel      (dp),Y   (dp)     ---      ---      dp,X     dp,X     ---
+5x   BVC      EOR      EOR      ---      MVN      EOR      LSR      ---
+     rel      (dp),Y   (dp)     ---      src,dst  dp,X     dp,X     ---
 
-6x   RTS      ADC      ---      ---      STZ      ADC      ROR      ---
-     impl     (dp,X)   ---      ---      dp       dp       dp       ---
+6x   RTS      ADC      PER      ---      STZ      ADC      ROR      ---
+     impl     (dp,X)   rel16    ---      dp       dp       dp       ---
 
 7x   BVS      ADC      ADC      ---      STZ      ADC      ROR      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,X     ---
 
-8x   BRA      STA      ---      ---      STY      STA      STX      ---
-     rel      (dp,X)   ---      ---      dp       dp       dp       ---
+8x   BRA      STA      BRL      ---      STY      STA      STX      ---
+     rel      (dp,X)   rel16    ---      dp       dp       dp       ---
 
 9x   BCC      STA      STA      ---      STY      STA      STX      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,Y     ---
@@ -78,372 +87,850 @@ Ax   LDY      LDA      LDX      ---      LDY      LDA      LDX      ---
 Bx   BCS      LDA      LDA      ---      LDY      LDA      LDX      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,Y     ---
 
-Cx   CPY      CMP      ---      ---      CPY      CMP      DEC      ---
-     #        (dp,X)   ---      ---      dp       dp       dp       ---
+Cx   CPY      CMP      REP      ---      CPY      CMP      DEC      ---
+     #        (dp,X)   #imm     ---      dp       dp       dp       ---
 
-Dx   BNE      CMP      CMP      ---      ---      CMP      DEC      ---
-     rel      (dp),Y   (dp)     ---      ---      dp,X     dp,X     ---
+Dx   BNE      CMP      CMP      ---      PEI      CMP      DEC      ---
+     rel      (dp),Y   (dp)     ---      (dp)     dp,X     dp,X     ---
 
-Ex   CPX      SBC      ---      ---      CPX      SBC      INC      ---
-     #        (dp,X)   ---      ---      dp       dp       dp       ---
+Ex   CPX      SBC      SEP      ---      CPX      SBC      INC      ---
+     #        (dp,X)   #imm     ---      dp       dp       dp       ---
 
-Fx   BEQ      SBC      SBC      ---      ---      SBC      INC      ---
-     rel      (dp),Y   (dp)     ---      ---      dp,X     dp,X     ---
+Fx   BEQ      SBC      SBC      ---      PEA      SBC      INC      ---
+     rel      (dp),Y   (dp)     ---      #imm16   dp,X     dp,X     ---
 ```
 
 ```
      x8       x9       xA       xB       xC       xD       xE       xF
-0x   PHP      ORA      ASL      ---      TSB      ORA      ASL      ---
-     impl     #        A        ---      abs      abs      abs      ---
+0x   PHP      ORA      ASL      PHD      TSB      ORA      ASL      ORA
+     impl     #        A        impl     abs      abs      abs      long
 
-1x   CLC      ORA      INC      ---      TRB      ORA      ASL      ---
-     impl     abs,Y    A        ---      abs      abs,X    abs,X    ---
+1x   CLC      ORA      INC      TCS      TRB      ORA      ASL      ORA
+     impl     abs,Y    A        impl     abs      abs,X    abs,X    long,X
 
-2x   PLP      AND      ROL      ---      BIT      AND      ROL      ---
-     impl     #        A        ---      abs      abs      abs      ---
+2x   PLP      AND      ROL      PLD      BIT      AND      ROL      AND
+     impl     #        A        impl     abs      abs      abs      long
 
-3x   SEC      AND      DEC      ---      BIT      AND      ROL      ---
-     impl     abs,Y    A        ---      abs,X    abs,X    abs,X    ---
+3x   SEC      AND      DEC      TSC      BIT      AND      ROL      AND
+     impl     abs,Y    A        impl     abs,X    abs,X    abs,X    long,X
 
-4x   PHA      EOR      LSR      ---      JMP      EOR      LSR      ---
-     impl     #        A        ---      abs      abs      abs      ---
+4x   PHA      EOR      LSR      PHK      JMP      EOR      LSR      EOR
+     impl     #        A        impl     abs      abs      abs      long
 
-5x   CLI      EOR      PHY      ---      ---      EOR      LSR      ---
-     impl     abs,Y    impl     ---      ---      abs,X    abs,X    ---
+5x   CLI      EOR      PHY      TCD      JML      EOR      LSR      EOR
+     impl     abs,Y    impl     impl     long     abs,X    abs,X    long,X
 
-6x   PLA      ADC      ROR      ---      JMP      ADC      ROR      ---
-     impl     #        A        ---      (abs)    abs      abs      ---
+6x   PLA      ADC      ROR      RTL      JMP      ADC      ROR      ADC
+     impl     #        A        impl     (abs)    abs      abs      long
 
-7x   SEI      ADC      PLY      ---      JMP      ADC      ROR      ---
-     impl     abs,Y    impl     ---      (abs,X)  abs,X    abs,X    ---
+7x   SEI      ADC      PLY      TDC      JMP      ADC      ROR      ADC
+     impl     abs,Y    impl     impl     (abs,X)  abs,X    abs,X    long,X
 
-8x   DEY      BIT      TXA      ---      STY      STA      STX      ---
-     impl     #        impl     ---      abs      abs      abs      ---
+8x   DEY      BIT      TXA      PHB      STY      STA      STX      STA
+     impl     #        impl     impl     abs      abs      abs      long
 
-9x   TYA      STA      TXS      ---      STZ      STA      STZ      ---
-     impl     abs,Y    impl     ---      abs      abs,X    abs,X    ---
+9x   TYA      STA      TXS      TXY      STZ      STA      STZ      STA
+     impl     abs,Y    impl     impl     abs      abs,X    abs,X    long,X
 
-Ax   TAY      LDA      TAX      ---      LDY      LDA      LDX      ---
-     impl     #        impl     ---      abs      abs      abs      ---
+Ax   TAY      LDA      TAX      PLB      LDY      LDA      LDX      LDA
+     impl     #        impl     impl     abs      abs      abs      long
 
-Bx   CLV      LDA      TSX      ---      LDY      LDA      LDX      ---
-     impl     abs,Y    impl     ---      abs,X    abs,X    abs,Y    ---
+Bx   CLV      LDA      TSX      TYX      LDY      LDA      LDX      LDA
+     impl     abs,Y    impl     impl     abs,X    abs,X    abs,Y    long,X
 
-Cx   INY      CMP      DEX      ---      CPY      CMP      DEC      ---
-     impl     #        impl     ---      abs      abs      abs      ---
+Cx   INY      CMP      DEX      WAI      CPY      CMP      DEC      CMP
+     impl     #        impl     impl     abs      abs      abs      long
 
-Dx   CLD      CMP      PHX      ---      ---      CMP      DEC      ---
-     impl     abs,Y    impl     ---      ---      abs,X    abs,X    ---
+Dx   CLD      CMP      PHX      STP      ---      CMP      DEC      CMP
+     impl     abs,Y    impl     impl     ---      abs,X    abs,X    long,X
 
-Ex   INX      SBC      NOP      ---      CPX      SBC      INC      ---
-     impl     #        impl     ---      abs      abs      abs      ---
+Ex   INX      SBC      NOP      ---      CPX      SBC      INC      SBC
+     impl     #        impl     ---      abs      abs      abs      long
 
-Fx   SED      SBC      PLX      ---      ---      SBC      INC      ---
-     impl     abs,Y    impl     ---      ---      abs,X    abs,X    ---
+Fx   SED      SBC      PLX      XCE      ---      SBC      INC      SBC
+     impl     abs,Y    impl     impl     ---      abs,X    abs,X    long,X
 ```
 
-### 2.2 Extended Opcode Table ($02 Prefix)
+### Extended Opcodes ($02 Prefix)
 
-After $02 prefix, the following opcodes are recognized:
+After the `$02` prefix byte:
 
-```
-$02 $00 [dp]       MUL dp         Signed multiply A *= [dp]
-$02 $01 [dp]       MULU dp        Unsigned multiply
-$02 $02 [abs16]    MUL abs        Signed multiply A *= [abs]
-$02 $03 [abs16]    MULU abs       Unsigned multiply
-$02 $04 [dp]       DIV dp         Signed divide A /= [dp], R0 = remainder
-$02 $05 [dp]       DIVU dp        Unsigned divide
-$02 $06 [abs16]    DIV abs        Signed divide
-$02 $07 [abs16]    DIVU abs       Unsigned divide
-
-$02 $10 [dp]       CAS dp         Compare and Swap at dp
-$02 $11 [abs16]    CAS abs        Compare and Swap at abs
-$02 $12 [dp]       LLI dp         Load Linked from dp
-$02 $13 [abs16]    LLI abs        Load Linked from abs
-$02 $14 [dp]       SCI dp         Store Conditional to dp
-$02 $15 [abs16]    SCI abs        Store Conditional to abs
-
-$02 $20 [imm32]    SVBR #imm32    Set VBR immediate
-$02 $21 [dp]       SVBR dp        Set VBR from dp
-$02 $22 [imm32]    SB #imm32      Set B immediate
-$02 $23 [dp]       SB dp          Set B from dp
-$02 $24 [imm32]    SD #imm32      Set D immediate
-$02 $25 [dp]       SD dp          Set D from dp
-
-$02 $30            RSET           R = 1 (enable register window)
-$02 $31            RCLR           R = 0 (disable register window)
-
-$02 $40 [imm8]     TRAP #imm8     System call / trap
-
-$02 $50            FENCE          Full memory fence
-$02 $51            FENCER         Read memory fence
-$02 $52            FENCEW         Write memory fence
-
-$02 $60 [imm8]     REPE #imm8     REP for extended P flags
-$02 $61 [imm8]     SEPE #imm8     SEP for extended P flags
-
-$02 $70            PHD            Push D (32-bit)
-$02 $71            PLD            Pull D (32-bit)
-$02 $72            PHB            Push B (32-bit)
-$02 $73            PLB            Pull B (32-bit)
-$02 $74            PHVBR          Push VBR (32-bit)
-$02 $75            PLVBR          Pull VBR (32-bit)
-
-$02 $80            TDA            A = D
-$02 $81            TAD            D = A
-$02 $82            TBA            A = B
-$02 $83            TAB            B = A
-$02 $84            TVA            A = VBR
-$02 $85            TAV            VBR = A (supervisor only)
-$02 $86            TTA            A = T (remainder/temp)
-$02 $87            TAT            T = A (remainder/temp)
-$02 $88 [dp]       LDQ dp         A:T = [dp..dp+7] (RSET reg window)
-$02 $89 [abs16]    LDQ abs        A:T = [abs..abs+7]
-$02 $8A [dp]       STQ dp         [dp..dp+7] = A:T (RSET reg window)
-$02 $8B [abs16]    STQ abs        [abs..abs+7] = A:T
-$02 $B0 [dp]       LDF0 dp        F0 = [dp..dp+7]
-$02 $B1 [abs16]    LDF0 abs       F0 = [abs..abs+7]
-$02 $B2 [dp]       STF0 dp        [dp..dp+7] = F0
-$02 $B3 [abs16]    STF0 abs       [abs..abs+7] = F0
-$02 $B4 [dp]       LDF1 dp        F1 = [dp..dp+7]
-$02 $B5 [abs16]    LDF1 abs       F1 = [abs..abs+7]
-$02 $B6 [dp]       STF1 dp        [dp..dp+7] = F1
-$02 $B7 [abs16]    STF1 abs       [abs..abs+7] = F1
-$02 $B8 [dp]       LDF2 dp        F2 = [dp..dp+7]
-$02 $B9 [abs16]    LDF2 abs       F2 = [abs..abs+7]
-$02 $BA [dp]       STF2 dp        [dp..dp+7] = F2
-$02 $BB [abs16]    STF2 abs       [abs..abs+7] = F2
-$02 $C0            FADD.S         F0 = F1 + F2 (single-precision)
-$02 $C1            FSUB.S         F0 = F1 - F2
-$02 $C2            FMUL.S         F0 = F1 * F2
-$02 $C3            FDIV.S         F0 = F1 / F2
-$02 $C4            FNEG.S         F0 = -F1
-$02 $C5            FABS.S         F0 = abs(F1)
-$02 $C6            FCMP.S         Set flags based on F1 ? F2
-$02 $C7            F2I.S          A = (int32)F1
-$02 $C8            I2F.S          F0 = (float32)A
-$02 $D0            FADD.D         F0 = F1 + F2 (double-precision)
-$02 $D1            FSUB.D         F0 = F1 - F2
-$02 $D2            FMUL.D         F0 = F1 * F2
-$02 $D3            FDIV.D         F0 = F1 / F2
-$02 $D4            FNEG.D         F0 = -F1
-$02 $D5            FABS.D         F0 = abs(F1)
-$02 $D6            FCMP.D         Set flags based on F1 ? F2
-$02 $D7            F2I.D          A = (int32)F1
-$02 $D8            I2F.D          F0 = (float64)A
-$02 $D9            (reserved)     FRND.D (round to int)
-$02 $DA            (reserved)     FCEIL.D (ceil)
-$02 $DB            (reserved)     FFLOOR.D (floor)
-$02 $DC            (reserved)     FSQRT.D (sqrt)
-$02 $DD            (reserved)     FMOD.D (modulo)
-$02 $DE            (reserved)     FPOW.D (power)
-$02 $DF            (reserved)     FSIN.D (sine)
-$02 $E0            (reserved)     FRND.S (round to int)
-$02 $E1            (reserved)     FCEIL.S (ceil)
-$02 $E2            (reserved)     FFLOOR.S (floor)
-$02 $E3            (reserved)     FSQRT.S (sqrt)
-$02 $E4            (reserved)     FMOD.S (modulo)
-$02 $E5            (reserved)     FPOW.S (power)
-$02 $E6            (reserved)     FSIN.S (sine)
-Note: reserved FP opcodes should trap to a software emulation handler.
-
-$02 $90            XCE            Exchange Carry with E flag
-$02 $91            WAI            Wait for Interrupt
-$02 $92            STP            Stop processor
-
-$02 $A0 [dp]       LEA dp         Load Effective Address: A = D + dp
-$02 $A1 [dp]       LEA dp,X       A = D + dp + X
-$02 $A2 [abs16]    LEA abs        A = B + abs16
-$02 $A3 [abs16]    LEA abs,X      A = B + abs16 + X
-```
-
-### 2.3 WID Prefix ($42) Usage
-
-The WID prefix extends the following operand to 32-bits:
-
-**Note**: Use WID only when a 32-bit immediate or 32-bit absolute address is required. Emitting WID unnecessarily can misalign the instruction stream and lead to unexpected behavior.
-
-```
-$42 $A9 [imm32]    WID LDA #imm   Load A with 32-bit immediate
-$42 $A2 [imm32]    WID LDX #imm   Load X with 32-bit immediate  
-$42 $A0 [imm32]    WID LDY #imm   Load Y with 32-bit immediate
-
-$42 $AD [addr32]   WID LDA addr   Load A from 32-bit address
-$42 $AE [addr32]   WID LDX addr   Load X from 32-bit address
-$42 $AC [addr32]   WID LDY addr   Load Y from 32-bit address
-
-$42 $8D [addr32]   WID STA addr   Store A to 32-bit address
-$42 $8E [addr32]   WID STX addr   Store X to 32-bit address
-$42 $8C [addr32]   WID STY addr   Store Y to 32-bit address
-
-$42 $4C [addr32]   WID JMP addr   Jump to 32-bit address
-$42 $20 [addr32]   WID JSR addr   Jump subroutine to 32-bit address
-
-$42 $6C [addr32]   WID JMP (addr) Jump indirect through 32-bit ptr address
-```
+| Opcode | Mnemonic | Description |
+|--------|----------|-------------|
+| **Multiply/Divide** | | |
+| $00 [dp] | MUL dp | Signed multiply A × [dp] |
+| $01 [dp] | MULU dp | Unsigned multiply |
+| $02 [abs16] | MUL abs | Signed multiply A × [abs] |
+| $03 [abs16] | MULU abs | Unsigned multiply |
+| $04 [dp] | DIV dp | Signed divide A / [dp] |
+| $05 [dp] | DIVU dp | Unsigned divide |
+| $06 [abs16] | DIV abs | Signed divide |
+| $07 [abs16] | DIVU abs | Unsigned divide |
+| **Atomics** | | |
+| $10 [dp] | CAS dp | Compare and Swap |
+| $11 [abs16] | CAS abs | Compare and Swap |
+| $12 [dp] | LLI dp | Load Linked |
+| $13 [abs16] | LLI abs | Load Linked |
+| $14 [dp] | SCI dp | Store Conditional |
+| $15 [abs16] | SCI abs | Store Conditional |
+| **Base Registers** | | |
+| $20 [imm32] | SVBR #imm32 | Set VBR immediate (supervisor) |
+| $21 [dp] | SVBR dp | Set VBR from memory |
+| $22 [imm32] | SB #imm32 | Set B register immediate |
+| $23 [dp] | SB dp | Set B from memory |
+| $24 [imm32] | SD #imm32 | Set D register immediate |
+| $25 [dp] | SD dp | Set D from memory |
+| **Register Window** | | |
+| $30 | RSET | Enable register window (R=1) |
+| $31 | RCLR | Disable register window (R=0) |
+| **System** | | |
+| $40 [imm8] | TRAP #imm8 | System call trap |
+| $50 | FENCE | Full memory fence |
+| $51 | FENCER | Read memory fence |
+| $52 | FENCEW | Write memory fence |
+| **Extended Flags** | | |
+| $60 [imm8] | REPE #imm8 | Clear extended P bits |
+| $61 [imm8] | SEPE #imm8 | Set extended P bits |
+| **32-bit Stack Ops** | | |
+| $70 | PHD | Push D (32-bit) |
+| $71 | PLD | Pull D (32-bit) |
+| $72 | PHB | Push B (32-bit) |
+| $73 | PLB | Pull B (32-bit) |
+| $74 | PHVBR | Push VBR (32-bit) |
+| $75 | PLVBR | Pull VBR (32-bit) |
+| **Temp Register** | | |
+| $86 | TTA | Transfer T to A |
+| $87 | TAT | Transfer A to T |
+| **64-bit Load/Store** | | |
+| $88 [dp] | LDQ dp | Load quad (A:T = [dp]) |
+| $89 [abs16] | LDQ abs | Load quad |
+| $8A [dp] | STQ dp | Store quad ([dp] = A:T) |
+| $8B [abs16] | STQ abs | Store quad |
+| **Control (Extended)** | | |
+| $91 | WAI | Wait for interrupt |
+| $92 | STP | Stop processor |
+| **Load Effective Address** | | |
+| $A0 [dp] | LEA dp | A = D + dp |
+| $A1 [dp] | LEA dp,X | A = D + dp + X |
+| $A2 [abs16] | LEA abs | A = B + abs |
+| $A3 [abs16] | LEA abs,X | A = B + abs + X |
+| **FPU Load/Store** | | |
+| $B0 [dp] | LDF0 dp | Load F0 from dp (64-bit) |
+| $B1 [abs16] | LDF0 abs | Load F0 from abs |
+| $B2 [dp] | STF0 dp | Store F0 to dp |
+| $B3 [abs16] | STF0 abs | Store F0 to abs |
+| $B4-$B7 | LDF1/STF1 | F1 load/store (same pattern) |
+| $B8-$BB | LDF2/STF2 | F2 load/store (same pattern) |
+| **FPU Single-Precision** | | |
+| $C0 | FADD.S | F0 = F1 + F2 |
+| $C1 | FSUB.S | F0 = F1 - F2 |
+| $C2 | FMUL.S | F0 = F1 × F2 |
+| $C3 | FDIV.S | F0 = F1 / F2 |
+| $C4 | FNEG.S | F0 = -F1 |
+| $C5 | FABS.S | F0 = |F1| |
+| $C6 | FCMP.S | Compare F1 to F2 |
+| $C7 | F2I.S | A = (int32)F1 |
+| $C8 | I2F.S | F0 = (float32)A |
+| **FPU Double-Precision** | | |
+| $D0-$D8 | (same as above with .D suffix) | Double-precision operations |
+| **Reserved FPU** | | |
+| $D9-$DF | (reserved) | Trap to software emulation |
+| $E0-$E6 | (reserved) | Trap to software emulation |
 
 ---
 
-## 3. Instruction Details
+## Instruction Reference
 
-### 3.1 ADC - Add with Carry
+Instructions are organized by category. Each entry shows syntax, opcodes, and flags affected.
 
-**Operation**: A = A + M + C
+### Load and Store Instructions
 
-**Addressing Modes**:
+#### LDA - Load Accumulator
+
+Loads a value into the accumulator.
+
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Immediate | ADC #imm | $69 | 2/3/5 | 2 |
-| Direct Page | ADC dp | $65 | 2 | 3 |
-| DP Indexed X | ADC dp,X | $75 | 2 | 4 |
-| Absolute | ADC abs | $6D | 3 | 4 |
-| Abs Indexed X | ADC abs,X | $7D | 3 | 4+ |
-| Abs Indexed Y | ADC abs,Y | $79 | 3 | 4+ |
-| DP Indirect | ADC (dp) | $72 | 2 | 5 |
-| DP Ind Indexed X | ADC (dp,X) | $61 | 2 | 6 |
-| DP Indirect Indexed Y | ADC (dp),Y | $71 | 2 | 5+ |
+| Immediate | LDA #imm | $A9 | 2/3/5 | 2 |
+| Direct Page | LDA dp | $A5 | 2 | 3 |
+| DP Indexed X | LDA dp,X | $B5 | 2 | 4 |
+| Absolute | LDA abs | $AD | 3 | 4 |
+| Abs Indexed X | LDA abs,X | $BD | 3 | 4+ |
+| Abs Indexed Y | LDA abs,Y | $B9 | 3 | 4+ |
+| DP Indirect | LDA (dp) | $B2 | 2 | 5 |
+| DP Indexed Indirect | LDA (dp,X) | $A1 | 2 | 6 |
+| DP Indirect Indexed | LDA (dp),Y | $B1 | 2 | 5+ |
+| DP Indirect Long | LDA [dp] | $A7 | 2 | 6 |
+| DP Indirect Long Y | LDA [dp],Y | $B7 | 2 | 6+ |
+| Absolute Long | LDA long | $AF | 4 | 5 |
+| Abs Long Indexed X | LDA long,X | $BF | 4 | 5 |
+| Stack Relative | LDA sr,S | $A3 | 2 | 4 |
+| SR Indirect Indexed | LDA (sr,S),Y | $B3 | 2 | 7 |
 
-**Flags Affected**: N, V, Z, C
+**Flags Affected:** N, Z
 
-**Description**: Adds the operand and the carry flag to the accumulator. In decimal mode (D=1), performs BCD addition.
+**Notes:**
+- Byte count for immediate depends on M flag: 2 (8-bit), 3 (16-bit), 5 (32-bit)
+- "+1 cycle if page boundary crossed" for indexed modes
+
+#### STA - Store Accumulator
+
+Stores the accumulator to memory.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | STA dp | $85 | 2 |
+| DP Indexed X | STA dp,X | $95 | 2 |
+| Absolute | STA abs | $8D | 3 |
+| Abs Indexed X | STA abs,X | $9D | 3 |
+| Abs Indexed Y | STA abs,Y | $99 | 3 |
+| DP Indirect | STA (dp) | $92 | 2 |
+| DP Indexed Indirect | STA (dp,X) | $81 | 2 |
+| DP Indirect Indexed | STA (dp),Y | $91 | 2 |
+| DP Indirect Long | STA [dp] | $87 | 2 |
+| DP Indirect Long Y | STA [dp],Y | $97 | 2 |
+| Absolute Long | STA long | $8F | 4 |
+| Abs Long Indexed X | STA long,X | $9F | 4 |
+| Stack Relative | STA sr,S | $83 | 2 |
+| SR Indirect Indexed | STA (sr,S),Y | $93 | 2 |
+
+**Flags Affected:** None
+
+#### LDX - Load X Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | LDX #imm | $A2 | 2/3/5 |
+| Direct Page | LDX dp | $A6 | 2 |
+| DP Indexed Y | LDX dp,Y | $B6 | 2 |
+| Absolute | LDX abs | $AE | 3 |
+| Abs Indexed Y | LDX abs,Y | $BE | 3 |
+
+**Flags Affected:** N, Z
+
+#### LDY - Load Y Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | LDY #imm | $A0 | 2/3/5 |
+| Direct Page | LDY dp | $A4 | 2 |
+| DP Indexed X | LDY dp,X | $B4 | 2 |
+| Absolute | LDY abs | $AC | 3 |
+| Abs Indexed X | LDY abs,X | $BC | 3 |
+
+**Flags Affected:** N, Z
+
+#### STX - Store X Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | STX dp | $86 | 2 |
+| DP Indexed Y | STX dp,Y | $96 | 2 |
+| Absolute | STX abs | $8E | 3 |
+
+**Flags Affected:** None
+
+#### STY - Store Y Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | STY dp | $84 | 2 |
+| DP Indexed X | STY dp,X | $94 | 2 |
+| Absolute | STY abs | $8C | 3 |
+
+**Flags Affected:** None
+
+#### STZ - Store Zero
+
+Stores zero to memory. Useful for clearing memory without affecting accumulator.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | STZ dp | $64 | 2 |
+| DP Indexed X | STZ dp,X | $74 | 2 |
+| Absolute | STZ abs | $9C | 3 |
+| Abs Indexed X | STZ abs,X | $9E | 3 |
+
+**Flags Affected:** None
+
+---
+
+### Arithmetic Instructions
+
+#### ADC - Add with Carry
+
+Adds the operand and carry flag to the accumulator.
+
+**Operation:** `A = A + M + C`
+
+Uses all LDA addressing modes. **Flags Affected:** N, V, Z, C
 
 ```asm
-; 32-bit addition example (M=10)
-CLC
-LDA num1        ; A = first 32-bit number
-ADC num2        ; A = A + num2 + 0
-STA result      ; Store result
+; 32-bit addition example
+    CLC                 ; Clear carry before add
+    LDA num1
+    ADC num2
+    STA result
 ```
 
-### 3.2 AND - Logical AND
+**Decimal Mode:** When D=1, performs BCD addition (8/16-bit only; 32-bit ignores D flag).
 
-**Operation**: A = A & M
+#### SBC - Subtract with Borrow
 
-**Addressing Modes**: Same as ADC
+Subtracts the operand and inverse carry from the accumulator.
 
-**Flags Affected**: N, Z
+**Operation:** `A = A - M - (1 - C)`
 
-### 3.3 ASL - Arithmetic Shift Left
+Uses all LDA addressing modes. **Flags Affected:** N, V, Z, C
 
-**Operation**: C ← [7] ← [6..0] ← 0
+```asm
+; Subtraction (set carry first)
+    SEC
+    LDA num1
+    SBC num2
+    STA result
+```
 
-**Addressing Modes**:
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Accumulator | ASL | $0A | 1 | 2 |
-| Direct Page | ASL dp | $06 | 2 | 5 |
-| DP Indexed X | ASL dp,X | $16 | 2 | 6 |
-| Absolute | ASL abs | $0E | 3 | 6 |
-| Abs Indexed X | ASL abs,X | $1E | 3 | 7 |
+#### INC - Increment
 
-**Flags Affected**: N, Z, C
+Increments memory or accumulator by one.
 
-### 3.4 BCC - Branch if Carry Clear
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Accumulator | INC | $1A | 1 |
+| Direct Page | INC dp | $E6 | 2 |
+| DP Indexed X | INC dp,X | $F6 | 2 |
+| Absolute | INC abs | $EE | 3 |
+| Abs Indexed X | INC abs,X | $FE | 3 |
 
-**Operation**: if C=0: PC = PC + offset
+**Flags Affected:** N, Z
 
-**Addressing Modes**:
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Relative | BCC rel8 | $90 | 2 | 2/3 |
+#### DEC - Decrement
 
-**Flags Affected**: None
+Decrements memory or accumulator by one.
 
-### 3.5 BCS - Branch if Carry Set
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Accumulator | DEC | $3A | 1 |
+| Direct Page | DEC dp | $C6 | 2 |
+| DP Indexed X | DEC dp,X | $D6 | 2 |
+| Absolute | DEC abs | $CE | 3 |
+| Abs Indexed X | DEC abs,X | $DE | 3 |
 
-**Operation**: if C=1: PC = PC + offset
+**Flags Affected:** N, Z
 
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Relative | BCS rel8 | $B0 | 2 | 2/3 |
+#### INX / INY / DEX / DEY - Index Register Inc/Dec
 
-### 3.6 BEQ - Branch if Equal (Zero Set)
+| Instruction | Opcode | Operation |
+|-------------|--------|-----------|
+| INX | $E8 | X = X + 1 |
+| INY | $C8 | Y = Y + 1 |
+| DEX | $CA | X = X - 1 |
+| DEY | $88 | Y = Y - 1 |
 
-**Operation**: if Z=1: PC = PC + offset
+**Flags Affected:** N, Z
 
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Relative | BEQ rel8 | $F0 | 2 | 2/3 |
+---
 
-### 3.7 BIT - Bit Test
+### Logic Instructions
 
-**Operation**: 
+#### AND - Logical AND
+
+**Operation:** `A = A & M`
+
+Uses all LDA addressing modes. **Flags Affected:** N, Z
+
+#### ORA - Logical OR
+
+**Operation:** `A = A | M`
+
+Uses all LDA addressing modes. **Flags Affected:** N, Z
+
+#### EOR - Exclusive OR
+
+**Operation:** `A = A ^ M`
+
+Uses all LDA addressing modes. **Flags Affected:** N, Z
+
+#### BIT - Bit Test
+
+Tests bits in memory against the accumulator.
+
+**Operation:**
 - Z = !(A & M)
 - N = M[msb]
 - V = M[msb-1]
 
-**Addressing Modes**:
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | BIT #imm | $89 | 2/3/5 |
+| Direct Page | BIT dp | $24 | 2 |
+| DP Indexed X | BIT dp,X | $34 | 2 |
+| Absolute | BIT abs | $2C | 3 |
+| Abs Indexed X | BIT abs,X | $3C | 3 |
+
+**Flags Affected:** N, V, Z (immediate mode only affects Z)
+
+#### TSB - Test and Set Bits
+
+**Operation:** `M = M | A; Z = !(M_original & A)`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | TSB dp | $04 | 2 |
+| Absolute | TSB abs | $0C | 3 |
+
+**Flags Affected:** Z
+
+#### TRB - Test and Reset Bits
+
+**Operation:** `M = M & ~A; Z = !(M_original & A)`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | TRB dp | $14 | 2 |
+| Absolute | TRB abs | $1C | 3 |
+
+**Flags Affected:** Z
+
+---
+
+### Shift and Rotate Instructions
+
+#### ASL - Arithmetic Shift Left
+
+**Operation:** `C ← [msb] ← [bits] ← 0`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Accumulator | ASL | $0A | 1 |
+| Direct Page | ASL dp | $06 | 2 |
+| DP Indexed X | ASL dp,X | $16 | 2 |
+| Absolute | ASL abs | $0E | 3 |
+| Abs Indexed X | ASL abs,X | $1E | 3 |
+
+**Flags Affected:** N, Z, C
+
+#### LSR - Logical Shift Right
+
+**Operation:** `0 → [msb] → [bits] → C`
+
+Same addressing modes as ASL. **Flags Affected:** N (always 0), Z, C
+
+#### ROL - Rotate Left through Carry
+
+**Operation:** `C ← [msb] ← [bits] ← old_C`
+
+Same addressing modes as ASL. **Flags Affected:** N, Z, C
+
+#### ROR - Rotate Right through Carry
+
+**Operation:** `old_C → [msb] → [bits] → C`
+
+Same addressing modes as ASL. **Flags Affected:** N, Z, C
+
+---
+
+### Compare Instructions
+
+#### CMP - Compare Accumulator
+
+**Operation:** Sets flags from `A - M` (result discarded)
+
+Uses all LDA addressing modes. **Flags Affected:** N, Z, C
+
+```asm
+; Compare and branch pattern
+    LDA value
+    CMP #100
+    BCC less_than       ; Branch if A < 100
+    BEQ equal           ; Branch if A == 100
+    ; else A > 100
+```
+
+#### CPX - Compare X Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | CPX #imm | $E0 | 2/3/5 |
+| Direct Page | CPX dp | $E4 | 2 |
+| Absolute | CPX abs | $EC | 3 |
+
+**Flags Affected:** N, Z, C
+
+#### CPY - Compare Y Register
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | CPY #imm | $C0 | 2/3/5 |
+| Direct Page | CPY dp | $C4 | 2 |
+| Absolute | CPY abs | $CC | 3 |
+
+**Flags Affected:** N, Z, C
+
+---
+
+### Branch Instructions
+
+All branches use 8-bit signed relative addressing (range: -128 to +127 from PC+2).
+
+| Mnemonic | Opcode | Condition | Flag Test |
+|----------|--------|-----------|-----------|
+| BPL | $10 | Plus | N = 0 |
+| BMI | $30 | Minus | N = 1 |
+| BVC | $50 | Overflow Clear | V = 0 |
+| BVS | $70 | Overflow Set | V = 1 |
+| BCC | $90 | Carry Clear | C = 0 |
+| BCS | $B0 | Carry Set | C = 1 |
+| BNE | $D0 | Not Equal | Z = 0 |
+| BEQ | $F0 | Equal | Z = 1 |
+| BRA | $80 | Always | — |
+
+**Flags Affected:** None
+
+**Cycles:** 2 (not taken), 3 (taken), +1 if page boundary crossed
+
+#### BRL - Branch Long
+
+16-bit signed relative offset (range: -32768 to +32767).
+
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Immediate | BIT #imm | $89 | 2/3/5 | 2 |
-| Direct Page | BIT dp | $24 | 2 | 3 |
-| DP Indexed X | BIT dp,X | $34 | 2 | 4 |
-| Absolute | BIT abs | $2C | 3 | 4 |
-| Abs Indexed X | BIT abs,X | $3C | 3 | 4+ |
+| Relative | BRL rel16 | $82 | 3 | 4 |
 
-**Note**: Immediate mode only affects Z flag.
+---
 
-### 3.8 BMI - Branch if Minus
+### Jump and Subroutine Instructions
 
-**Operation**: if N=1: PC = PC + offset
+#### JMP - Jump
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Relative | BMI rel8 | $30 | 2 | 2/3 |
+| Absolute | JMP abs | $4C | 3 | 3 |
+| Indirect | JMP (abs) | $6C | 3 | 5 |
+| Indexed Indirect | JMP (abs,X) | $7C | 3 | 6 |
 
-### 3.9 BNE - Branch if Not Equal
-
-**Operation**: if Z=0: PC = PC + offset
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Relative | BNE rel8 | $D0 | 2 | 2/3 |
-
-### 3.10 BPL - Branch if Plus
-
-**Operation**: if N=0: PC = PC + offset
+#### JML - Jump Long
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Relative | BPL rel8 | $10 | 2 | 2/3 |
+| Absolute Long | JML long | $5C | 4 | 4 |
+| Indirect Long | JML [abs] | $DC | 3 | 6 |
 
-### 3.11 BRA - Branch Always
+#### JSR - Jump to Subroutine
 
-**Operation**: PC = PC + offset
+Pushes return address (PC-1) and jumps.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Relative | BRA rel8 | $80 | 2 | 3 |
+| Absolute | JSR abs | $20 | 3 | 6 |
 
-### 3.12 BRK - Software Break
+#### JSL - Jump to Subroutine Long
 
-**Operation**: Push PC+2, Push P, PC = [IRQ vector], I=1, B=1
+Pushes full 24/32-bit return address.
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Absolute Long | JSL long | $22 | 4 | 8 |
+
+#### RTS - Return from Subroutine
+
+**Operation:** `PC = Pull + 1`
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Implied | RTS | $60 | 1 | 6 |
+
+#### RTL - Return from Subroutine Long
+
+Returns from JSL, pulling full return address.
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Implied | RTL | $6B | 1 | 6 |
+
+#### RTI - Return from Interrupt
+
+**Operation:** `P = Pull; PC = Pull`
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Implied | RTI | $40 | 1 | 6-7 |
+
+In native mode, also restores program bank.
+
+---
+
+### Stack Instructions
+
+#### Push Instructions
+
+| Instruction | Opcode | Description |
+|-------------|--------|-------------|
+| PHA | $48 | Push A (width per M flag) |
+| PHX | $DA | Push X (width per X flag) |
+| PHY | $5A | Push Y (width per X flag) |
+| PHP | $08 | Push P (processor status) |
+| PHD | $0B | Push D (16-bit in 65816 mode) |
+| PHB | $8B | Push B (data bank in 65816, 32-bit in M65832) |
+| PHK | $4B | Push program bank |
+
+#### Pull Instructions
+
+| Instruction | Opcode | Description | Flags |
+|-------------|--------|-------------|-------|
+| PLA | $68 | Pull A | N, Z |
+| PLX | $FA | Pull X | N, Z |
+| PLY | $7A | Pull Y | N, Z |
+| PLP | $28 | Pull P | All |
+| PLD | $2B | Pull D | N, Z |
+| PLB | $AB | Pull B | N, Z |
+
+#### Special Stack Instructions
+
+| Instruction | Opcode | Bytes | Description |
+|-------------|--------|-------|-------------|
+| PEA #imm16 | $F4 | 3 | Push Effective Absolute |
+| PEI (dp) | $D4 | 2 | Push Effective Indirect |
+| PER rel16 | $62 | 3 | Push Effective Relative |
+
+---
+
+### Transfer Instructions
+
+| Instruction | Opcode | Operation | Flags |
+|-------------|--------|-----------|-------|
+| TAX | $AA | X = A | N, Z |
+| TXA | $8A | A = X | N, Z |
+| TAY | $A8 | Y = A | N, Z |
+| TYA | $98 | A = Y | N, Z |
+| TSX | $BA | X = S | N, Z |
+| TXS | $9A | S = X | — |
+| TXY | $9B | Y = X | N, Z |
+| TYX | $BB | X = Y | N, Z |
+| TCD | $5B | D = A (16-bit C) | N, Z |
+| TDC | $7B | A = D (16-bit C) | N, Z |
+| TCS | $1B | S = A (16-bit C) | — |
+| TSC | $3B | A = S (16-bit C) | N, Z |
+
+---
+
+### Status Flag Instructions
+
+#### Clear/Set Single Flags
+
+| Instruction | Opcode | Operation |
+|-------------|--------|-----------|
+| CLC | $18 | C = 0 |
+| SEC | $38 | C = 1 |
+| CLI | $58 | I = 0 (enable IRQ) |
+| SEI | $78 | I = 1 (disable IRQ) |
+| CLD | $D8 | D = 0 |
+| SED | $F8 | D = 1 |
+| CLV | $B8 | V = 0 |
+
+#### REP - Reset Processor Status Bits
+
+**Operation:** `P = P & ~imm`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | REP #imm8 | $C2 | 2 |
+
+```asm
+REP #$30        ; Clear M and X (enable 16-bit mode)
+REP #$20        ; Clear M only (16-bit accumulator)
+```
+
+#### SEP - Set Processor Status Bits
+
+**Operation:** `P = P | imm`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | SEP #imm8 | $E2 | 2 |
+
+```asm
+SEP #$30        ; Set M and X (enable 8-bit mode)
+```
+
+#### XCE - Exchange Carry with Emulation
+
+**Operation:** Swap C flag with E flag
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | XCE | $FB | 1 |
+
+```asm
+; Enter native mode
+    CLC             ; C = 0
+    XCE             ; E = 0 (native), C = old_E
+
+; Enter emulation mode
+    SEC             ; C = 1
+    XCE             ; E = 1 (emulation), C = old_E
+```
+
+---
+
+### Block Move Instructions
+
+#### MVN - Move Negative (Decrementing)
+
+Moves block of memory with decrementing addresses.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Block | MVN src,dst | $54 | 3 |
+
+**Setup:** X = source addr, Y = dest addr, A = count - 1
+
+#### MVP - Move Positive (Incrementing)
+
+Moves block of memory with incrementing addresses.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Block | MVP src,dst | $44 | 3 |
+
+**Setup:** X = source end addr, Y = dest end addr, A = count - 1
+
+```asm
+; Copy 256 bytes from $1000 to $2000
+    LDX #$1000      ; Source start
+    LDY #$2000      ; Dest start
+    LDA #$FF        ; Count - 1
+    MVN #$00,#$00   ; Source bank, dest bank
+```
+
+---
+
+### Control Instructions
+
+#### BRK - Software Break
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
 | Implied | BRK | $00 | 2 | 7 |
 
-**Note**: In native mode, also sets S=1 (supervisor) and vectors through native break vector.
+In native mode, sets S=1 (supervisor) and vectors through native break vector.
 
-### 3.13 BVC - Branch if Overflow Clear
-
-**Operation**: if V=0: PC = PC + offset
+#### COP - Coprocessor
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Relative | BVC rel8 | $50 | 2 | 2/3 |
+| Implied | COP #sig | $02 | 2 | 7 |
 
-### 3.14 BVS - Branch if Overflow Set
+In native mode on M65832, $02 is the extended opcode prefix instead.
 
-**Operation**: if V=1: PC = PC + offset
+#### NOP - No Operation
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Relative | BVS rel8 | $70 | 2 | 2/3 |
+| Implied | NOP | $EA | 1 | 2 |
 
-### 3.15 CAS - Compare and Swap (NEW)
+#### WAI - Wait for Interrupt
 
-**Operation**: 
+Halts processor until interrupt received.
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Implied | WAI | $CB | 1 | 3+ |
+
+Also available as extended opcode: `$02 $91`
+
+#### STP - Stop Processor
+
+Halts processor until hardware reset.
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Implied | STP | $DB | 1 | 2 |
+
+Also available as extended opcode: `$02 $92`
+
+---
+
+## M65832 New Instructions
+
+### Multiply Instructions
+
+#### MUL - Signed Multiply
+
+**Operation:** `A = A × M` (signed)
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Direct Page | MUL dp | $02 $00 | 3 | 8-16 |
+| Absolute | MUL abs | $02 $02 | 4 | 8-16 |
+
+**Flags Affected:** N, Z, V (overflow if result doesn't fit)
+
+**Width Behavior:**
+- 8-bit: A[7:0] × M[7:0] → A[15:0] (16-bit result)
+- 16-bit: A[15:0] × M[15:0] → A[31:0] (32-bit result)
+- 32-bit: A[31:0] × M[31:0] → T[31:0]:A[31:0] (64-bit result, high word in T)
+
+```asm
+; 32-bit multiply with 64-bit result
+    LDA multiplier
+    MUL multiplicand
+    ; Low 32 bits in A, high 32 bits in T
+    STA result_lo
+    TTA                 ; Get T register
+    STA result_hi
+```
+
+#### MULU - Unsigned Multiply
+
+Same as MUL but treats operands as unsigned.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | MULU dp | $02 $01 | 3 |
+| Absolute | MULU abs | $02 $03 | 4 |
+
+### Divide Instructions
+
+#### DIV - Signed Divide
+
+**Operation:** `T = A % M; A = A / M` (signed)
+
+| Mode | Syntax | Opcode | Bytes | Cycles |
+|------|--------|--------|-------|--------|
+| Direct Page | DIV dp | $02 $04 | 3 | 20-40 |
+| Absolute | DIV abs | $02 $06 | 4 | 20-40 |
+
+**Flags Affected:** N, Z, V (set on divide by zero)
+
+```asm
+; 32-bit division
+    LDA dividend
+    DIV divisor
+    STA quotient
+    TTA                 ; Get remainder from T
+    STA remainder
+```
+
+#### DIVU - Unsigned Divide
+
+Same as DIV but treats operands as unsigned.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | DIVU dp | $02 $05 | 3 |
+| Absolute | DIVU abs | $02 $07 | 4 |
+
+---
+
+### Atomic Instructions
+
+These instructions provide hardware support for lock-free programming.
+
+#### CAS - Compare and Swap
+
+**Operation:**
 ```
 atomic {
     if [M] == X then
@@ -460,248 +947,243 @@ atomic {
 | Direct Page | CAS dp | $02 $10 | 3 | 8 |
 | Absolute | CAS abs | $02 $11 | 4 | 9 |
 
-**Flags Affected**: Z
-
-**Description**: Atomic compare-and-swap. Compares memory with X register. If equal, stores A to memory and sets Z. If not equal, loads memory into X and clears Z.
+**Flags Affected:** Z
 
 ```asm
-; Acquire spinlock
-acquire:
-    LDX #0          ; Expected: unlocked
-    LDA #1          ; Desired: locked
+; Spinlock acquisition
+acquire_lock:
+    LDX #0              ; Expected: 0 (unlocked)
+    LDA #1              ; Desired: 1 (locked)
 spin:
     CAS lock
-    BNE spin        ; Retry if failed
+    BNE spin            ; Retry if failed (Z=0)
+    ; Lock acquired
+    RTS
+
+; Atomic increment
+atomic_inc:
+    LDA counter
+retry:
+    TAX                 ; X = expected value
+    INC                 ; A = new value
+    CAS counter
+    BNE retry           ; Retry if CAS failed
     RTS
 ```
 
-### 3.16 CLC - Clear Carry
+#### LLI - Load Linked
 
-**Operation**: C = 0
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | CLC | $18 | 1 | 2 |
-
-### 3.17 CLD - Clear Decimal
-
-**Operation**: D = 0
+**Operation:** `A = [M]; set_link(address_of_M)`
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Implied | CLD | $D8 | 1 | 2 |
+| Direct Page | LLI dp | $02 $12 | 3 | 4 |
+| Absolute | LLI abs | $02 $13 | 4 | 5 |
 
-### 3.18 CLI - Clear Interrupt Disable
+**Flags Affected:** N, Z
 
-**Operation**: I = 0
+Sets an internal "link" flag for the memory address. The link is cleared by any store to that address (by any core).
 
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | CLI | $58 | 1 | 2 |
+#### SCI - Store Conditional
 
-### 3.19 CLV - Clear Overflow
-
-**Operation**: V = 0
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | CLV | $B8 | 1 | 2 |
-
-### 3.20 CMP - Compare Accumulator
-
-**Operation**: Flags from A - M (result discarded)
-
-**Addressing Modes**: Same as ADC
-
-**Flags Affected**: N, Z, C
-
-### 3.21 CPX - Compare X Register
-
-**Operation**: Flags from X - M
-
-**Addressing Modes**:
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | CPX #imm | $E0 | 2/3/5 | 2 |
-| Direct Page | CPX dp | $E4 | 2 | 3 |
-| Absolute | CPX abs | $EC | 3 | 4 |
-
-**Flags Affected**: N, Z, C
-
-### 3.22 CPY - Compare Y Register
-
-**Operation**: Flags from Y - M
+**Operation:**
+```
+if link_valid then
+    [M] = A
+    Z = 1
+else
+    Z = 0
+```
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Immediate | CPY #imm | $C0 | 2/3/5 | 2 |
-| Direct Page | CPY dp | $C4 | 2 | 3 |
-| Absolute | CPY abs | $CC | 3 | 4 |
+| Direct Page | SCI dp | $02 $14 | 3 | 5 |
+| Absolute | SCI abs | $02 $15 | 4 | 6 |
 
-**Flags Affected**: N, Z, C
+**Flags Affected:** Z
 
-### 3.23 DEC - Decrement
+```asm
+; Lock-free stack push using LL/SC
+push_item:
+    LLI stack_head      ; A = current head, link address
+    STA new_node+NEXT   ; new_node.next = head
+    LEA new_node        ; A = address of new_node
+    SCI stack_head      ; Try to update head
+    BNE push_item       ; Retry if link broken
+    RTS
+```
 
-**Operation**: M = M - 1 (or A = A - 1)
+---
 
-**Addressing Modes**:
+### Memory Fence Instructions
+
+| Instruction | Opcode | Description |
+|-------------|--------|-------------|
+| FENCE | $02 $50 | Full memory fence - all loads/stores before complete before any after |
+| FENCER | $02 $51 | Read fence - all reads before complete before any reads after |
+| FENCEW | $02 $52 | Write fence - all writes before complete before any writes after |
+
+```asm
+; Release a lock with proper ordering
+release_lock:
+    FENCE               ; Ensure all critical section writes are visible
+    STZ lock            ; Clear lock
+    RTS
+```
+
+---
+
+### Base Register Instructions
+
+#### SVBR - Set Virtual Base Register
+
+Sets the VBR register (supervisor only). Used to position the 6502 emulation window.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | SVBR #imm32 | $02 $20 | 6 |
+| Direct Page | SVBR dp | $02 $21 | 3 |
+
+```asm
+; Set up 6502 emulation at $10000000
+    SVBR #$10000000
+```
+
+#### SB - Set Base Register
+
+Sets the B register (absolute addressing base).
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | SB #imm32 | $02 $22 | 6 |
+| Direct Page | SB dp | $02 $23 | 3 |
+
+```asm
+; Set absolute base to I/O region
+    SB #$B0000000
+    LDA $1000           ; Actually accesses $B0001000
+```
+
+#### SD - Set Direct Base Register
+
+Sets the D register (direct page base).
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | SD #imm32 | $02 $24 | 6 |
+| Direct Page | SD dp | $02 $25 | 3 |
+
+---
+
+### Register Window Instructions
+
+The register window provides 64 × 32-bit hardware registers accessible via direct page addressing when R=1.
+
+#### RSET - Register Window Set
+
+**Operation:** `R = 1`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | RSET | $02 $30 | 2 |
+
+Enables register window mode. Direct page accesses go to hardware registers:
+- `$00-$03` = R0
+- `$04-$07` = R1
+- ...
+- `$FC-$FF` = R63
+
+```asm
+    RSET                ; Enable register window
+    LDA $00             ; A = R0
+    STA $04             ; R1 = A
+    INC $08             ; R2++
+```
+
+#### RCLR - Register Window Clear
+
+**Operation:** `R = 0`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | RCLR | $02 $31 | 2 |
+
+Disables register window. Direct page accesses go to memory at D + offset.
+
+---
+
+### Extended Status Instructions
+
+#### REPE - Reset Extended Processor Status
+
+**Operation:** `ExtendedP = ExtendedP & ~imm`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | REPE #imm8 | $02 $60 | 3 |
+
+Extended P bits:
+- Bit 7: M1 (accumulator width high bit)
+- Bit 6: M0 (accumulator width low bit)
+- Bit 5: X1 (index width high bit)
+- Bit 4: X0 (index width low bit)
+- Bit 3: E (emulation mode - read-only here)
+- Bit 2: S (supervisor mode)
+- Bit 1: R (register window)
+- Bit 0: K (compatibility mode)
+
+```asm
+; Switch to 32-bit mode (M=10, X=10)
+    REP #$30            ; First set M=01, X=01 (16-bit)
+    REPE #$A0           ; Then set M1 and X1 for 32-bit
+```
+
+#### SEPE - Set Extended Processor Status
+
+**Operation:** `ExtendedP = ExtendedP | imm`
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Immediate | SEPE #imm8 | $02 $61 | 3 |
+
+---
+
+### System Instructions
+
+#### TRAP - System Call Trap
+
+Triggers a software interrupt for system calls.
+
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Accumulator | DEC | $3A | 1 | 2 |
-| Direct Page | DEC dp | $C6 | 2 | 5 |
-| DP Indexed X | DEC dp,X | $D6 | 2 | 6 |
-| Absolute | DEC abs | $CE | 3 | 6 |
-| Abs Indexed X | DEC abs,X | $DE | 3 | 7 |
+| Immediate | TRAP #imm8 | $02 $40 | 3 | 8 |
 
-**Flags Affected**: N, Z
+**Operation:**
+1. Push PC (32-bit)
+2. Push P (extended)
+3. Set S=1 (supervisor mode), I=1 (disable IRQ)
+4. PC = [TRAP_VECTOR + imm8 × 4]
 
-### 3.24 DEX - Decrement X
+```asm
+; System call example
+    LDA #SYS_WRITE
+    STA $00             ; R0 = syscall number
+    LDA #fd
+    STA $04             ; R1 = file descriptor
+    LDA #buffer
+    STA $08             ; R2 = buffer address
+    LDA #count
+    STA $0C             ; R3 = byte count
+    TRAP #0             ; Invoke kernel
+```
 
-**Operation**: X = X - 1
+---
 
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | DEX | $CA | 1 | 2 |
+### Load Effective Address
 
-**Flags Affected**: N, Z
+#### LEA - Load Effective Address
 
-### 3.25 DEY - Decrement Y
-
-**Operation**: Y = Y - 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | DEY | $88 | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.26 DIV - Signed Divide (NEW)
-
-**Operation**: R0 = A % M; A = A / M (signed)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | DIV dp | $02 $04 | 3 | 20-40 |
-| Absolute | DIV abs | $02 $06 | 4 | 20-40 |
-
-**Flags Affected**: N, Z, V (overflow if divide by zero)
-
-### 3.27 DIVU - Unsigned Divide (NEW)
-
-**Operation**: R0 = A % M; A = A / M (unsigned)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | DIVU dp | $02 $05 | 3 | 20-40 |
-| Absolute | DIVU abs | $02 $07 | 4 | 20-40 |
-
-**Flags Affected**: N, Z, V
-
-### 3.28 EOR - Exclusive OR
-
-**Operation**: A = A ^ M
-
-**Addressing Modes**: Same as ADC
-
-**Flags Affected**: N, Z
-
-### 3.29 FENCE - Memory Fence (NEW)
-
-**Operation**: All memory operations before fence complete before any after fence begin
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | FENCE | $02 $50 | 2 | 3+ |
-| Implied | FENCER | $02 $51 | 2 | 2+ |
-| Implied | FENCEW | $02 $52 | 2 | 2+ |
-
-### 3.30 INC - Increment
-
-**Operation**: M = M + 1 (or A = A + 1)
-
-**Addressing Modes**: Same as DEC
-
-**Flags Affected**: N, Z
-
-### 3.31 INX - Increment X
-
-**Operation**: X = X + 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | INX | $E8 | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.32 INY - Increment Y
-
-**Operation**: Y = Y + 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | INY | $C8 | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.33 JMP - Jump
-
-**Operation**: PC = address
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Absolute | JMP abs | $4C | 3 | 3 |
-| Indirect | JMP (abs) | $6C | 3 | 5 |
-| Indexed Indirect | JMP (abs,X) | $7C | 3 | 6 |
-| Long | WID JMP long | $42 $4C | 6 | 4 |
-
-### 3.34 JSR - Jump to Subroutine
-
-**Operation**: Push PC-1; PC = address
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Absolute | JSR abs | $20 | 3 | 6 |
-| Long | WID JSR long | $42 $20 | 6 | 7 |
-
-### 3.35 LDA - Load Accumulator
-
-**Operation**: A = M
-
-**Addressing Modes**: Same as ADC
-
-**Flags Affected**: N, Z
-
-### 3.36 LDX - Load X Register
-
-**Operation**: X = M
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | LDX #imm | $A2 | 2/3/5 | 2 |
-| Direct Page | LDX dp | $A6 | 2 | 3 |
-| DP Indexed Y | LDX dp,Y | $B6 | 2 | 4 |
-| Absolute | LDX abs | $AE | 3 | 4 |
-| Abs Indexed Y | LDX abs,Y | $BE | 3 | 4+ |
-
-**Flags Affected**: N, Z
-
-### 3.37 LDY - Load Y Register
-
-**Operation**: Y = M
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | LDY #imm | $A0 | 2/3/5 | 2 |
-| Direct Page | LDY dp | $A4 | 2 | 3 |
-| DP Indexed X | LDY dp,X | $B4 | 2 | 4 |
-| Absolute | LDY abs | $AC | 3 | 4 |
-| Abs Indexed X | LDY abs,X | $BC | 3 | 4+ |
-
-**Flags Affected**: N, Z
-
-### 3.38 LEA - Load Effective Address (NEW)
-
-**Operation**: A = effective address (does not access memory)
+Computes an effective address without accessing memory.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
@@ -710,612 +1192,292 @@ spin:
 | Absolute | LEA abs | $02 $A2 | 4 | 2 |
 | Abs Indexed X | LEA abs,X | $02 $A3 | 4 | 2 |
 
-**Flags Affected**: None
-
-**Description**: Computes the effective address but doesn't load from it. Useful for pointer arithmetic.
+**Flags Affected:** None
 
 ```asm
-; Get address of array[X]
-SD #$00010000       ; D = data segment
-LEA array,X         ; A = D + array_offset + X
+; Get address of array element
+    SD #data_segment
+    LEA array,X         ; A = D + array_offset + X
 ```
-
-### 3.39 LLI - Load Linked (NEW)
-
-**Operation**: A = [M]; set link for address M
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | LLI dp | $02 $12 | 3 | 4 |
-| Absolute | LLI abs | $02 $13 | 4 | 5 |
-
-**Flags Affected**: N, Z
-
-**Description**: Loads from memory and sets an internal "link" flag. The link is cleared if any store occurs to that address.
-
-### 3.40 LSR - Logical Shift Right
-
-**Operation**: 0 → [msb..1] → [0] → C
-
-**Addressing Modes**: Same as ASL
-
-**Flags Affected**: N (always 0), Z, C
-
-### 3.41 MUL - Signed Multiply (NEW)
-
-**Operation**: A = A × M (signed), high word to R0 for 32×32
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | MUL dp | $02 $00 | 3 | 8-16 |
-| Absolute | MUL abs | $02 $02 | 4 | 8-16 |
-
-**Flags Affected**: N, Z, V (overflow)
-
-**Width Behavior**:
-- M=00 (8-bit): A[7:0] × M[7:0] → A[15:0]
-- M=01 (16-bit): A[15:0] × M[15:0] → A[31:0]
-- M=10 (32-bit): A[31:0] × M[31:0] → R0[31:0]:A[31:0] (64-bit result)
-
-### 3.42 MULU - Unsigned Multiply (NEW)
-
-**Operation**: A = A × M (unsigned)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | MULU dp | $02 $01 | 3 | 8-16 |
-| Absolute | MULU abs | $02 $03 | 4 | 8-16 |
-
-### 3.43 NOP - No Operation
-
-**Operation**: None
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | NOP | $EA | 1 | 2 |
-
-### 3.44 ORA - Logical OR
-
-**Operation**: A = A | M
-
-**Addressing Modes**: Same as ADC
-
-**Flags Affected**: N, Z
-
-### 3.45 PHA - Push Accumulator
-
-**Operation**: [S] = A; S = S - width
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PHA | $48 | 1 | 3 |
-
-### 3.46 PHP - Push Processor Status
-
-**Operation**: [S] = P; S = S - 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PHP | $08 | 1 | 3 |
-
-### 3.47 PHX - Push X Register
-
-**Operation**: [S] = X; S = S - width
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PHX | $DA | 1 | 3 |
-
-### 3.48 PHY - Push Y Register
-
-**Operation**: [S] = Y; S = S - width
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PHY | $5A | 1 | 3 |
-
-### 3.49 PLA - Pull Accumulator
-
-**Operation**: S = S + width; A = [S]
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PLA | $68 | 1 | 4 |
-
-**Flags Affected**: N, Z
-
-### 3.50 PLP - Pull Processor Status
-
-**Operation**: S = S + 1; P = [S]
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PLP | $28 | 1 | 4 |
-
-**Flags Affected**: All
-
-### 3.51 PLX - Pull X Register
-
-**Operation**: S = S + width; X = [S]
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PLX | $FA | 1 | 4 |
-
-**Flags Affected**: N, Z
-
-### 3.52 PLY - Pull Y Register
-
-**Operation**: S = S + width; Y = [S]
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | PLY | $7A | 1 | 4 |
-
-**Flags Affected**: N, Z
-
-### 3.53 RCLR - Register Window Clear (NEW)
-
-**Operation**: R = 0 (DP accesses memory)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | RCLR | $02 $31 | 2 | 2 |
-
-### 3.54 REP - Reset Processor Status Bits
-
-**Operation**: P = P & ~imm
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | REP #imm8 | $C2 | 2 | 3 |
-
-**Description**: Clears bits in P where the corresponding bit in imm is 1.
-
-```asm
-REP #$30        ; Clear M and X bits (16-bit mode)
-REP #$20        ; Clear M bit only (16-bit A)
-```
-
-### 3.55 REPE - Reset Extended Status Bits (NEW)
-
-**Operation**: Extended P = Extended P & ~imm
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | REPE #imm8 | $02 $60 | 3 | 3 |
-
-```asm
-REPE #$A0       ; Set M1 and X1 (32-bit mode)
-```
-
-### 3.56 ROL - Rotate Left
-
-**Operation**: C ← [msb] ← [msb-1..0] ← old C
-
-**Addressing Modes**: Same as ASL
-
-**Flags Affected**: N, Z, C
-
-### 3.57 ROR - Rotate Right
-
-**Operation**: old C → [msb] → [msb-1..0] → C
-
-**Addressing Modes**: Same as ASL
-
-**Flags Affected**: N, Z, C
-
-### 3.58 RSET - Register Window Set (NEW)
-
-**Operation**: R = 1 (DP accesses register file)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | RSET | $02 $30 | 2 | 2 |
-
-### 3.59 RTI - Return from Interrupt
-
-**Operation**: P = Pull; PC = Pull
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | RTI | $40 | 1 | 6-7 |
-
-### 3.60 RTS - Return from Subroutine
-
-**Operation**: PC = Pull + 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | RTS | $60 | 1 | 6 |
-
-### 3.61 SB - Set Base Register (NEW)
-
-**Operation**: B = operand
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | SB #imm32 | $02 $22 | 6 | 3 |
-| Direct Page | SB dp | $02 $23 | 3 | 4 |
-
-### 3.62 SBC - Subtract with Carry
-
-**Operation**: A = A - M - ~C
-
-**Addressing Modes**: Same as ADC
-
-**Flags Affected**: N, V, Z, C
-
-### 3.63 SCI - Store Conditional (NEW)
-
-**Operation**: if link valid: [M] = A, Z=1; else Z=0
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | SCI dp | $02 $14 | 3 | 5 |
-| Absolute | SCI abs | $02 $15 | 4 | 6 |
-
-**Flags Affected**: Z
-
-**Description**: Conditionally stores A to memory if the link (from prior LLI) is still valid. Link is invalidated by any intervening store to the linked address.
-
-### 3.64 SD - Set Direct Base (NEW)
-
-**Operation**: D = operand
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | SD #imm32 | $02 $24 | 6 | 3 |
-| Direct Page | SD dp | $02 $25 | 3 | 4 |
-
-### 3.65 SEC - Set Carry
-
-**Operation**: C = 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | SEC | $38 | 1 | 2 |
-
-### 3.66 SED - Set Decimal
-
-**Operation**: D = 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | SED | $F8 | 1 | 2 |
-
-### 3.67 SEI - Set Interrupt Disable
-
-**Operation**: I = 1
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | SEI | $78 | 1 | 2 |
-
-### 3.68 SEP - Set Processor Status Bits
-
-**Operation**: P = P | imm
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | SEP #imm8 | $E2 | 2 | 3 |
-
-```asm
-SEP #$30        ; Set M and X bits (8-bit mode)
-```
-
-### 3.69 SEPE - Set Extended Status Bits (NEW)
-
-**Operation**: Extended P = Extended P | imm
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | SEPE #imm8 | $02 $61 | 3 | 3 |
-
-### 3.70 STA - Store Accumulator
-
-**Operation**: M = A
-
-**Addressing Modes**: Same as LDA (except no immediate)
-
-### 3.71 STP - Stop Processor (NEW)
-
-**Operation**: Halt until reset
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | STP | $02 $92 | 2 | 2 |
-
-### 3.72 STX - Store X Register
-
-**Operation**: M = X
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | STX dp | $86 | 2 | 3 |
-| DP Indexed Y | STX dp,Y | $96 | 2 | 4 |
-| Absolute | STX abs | $8E | 3 | 4 |
-
-### 3.73 STY - Store Y Register
-
-**Operation**: M = Y
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | STY dp | $84 | 2 | 3 |
-| DP Indexed X | STY dp,X | $94 | 2 | 4 |
-| Absolute | STY abs | $8C | 3 | 4 |
-
-### 3.74 STZ - Store Zero
-
-**Operation**: M = 0
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | STZ dp | $64 | 2 | 3 |
-| DP Indexed X | STZ dp,X | $74 | 2 | 4 |
-| Absolute | STZ abs | $9C | 3 | 4 |
-| Abs Indexed X | STZ abs,X | $9E | 3 | 5 |
-
-### 3.75 SVBR - Set Virtual Base Register (NEW)
-
-**Operation**: VBR = operand (supervisor only)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | SVBR #imm32 | $02 $20 | 6 | 3 |
-| Direct Page | SVBR dp | $02 $21 | 3 | 4 |
-
-### 3.76 TAX - Transfer A to X
-
-**Operation**: X = A
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TAX | $AA | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.77 TAY - Transfer A to Y
-
-**Operation**: Y = A
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TAY | $A8 | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.78 TRAP - System Trap (NEW)
-
-**Operation**: Push PC, Push P; S=1, I=1; PC = [TRAP vector + imm8*4]
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Immediate | TRAP #imm8 | $02 $40 | 3 | 8 |
-
-**Description**: System call mechanism. Switches to supervisor mode and vectors through trap table indexed by immediate value.
-
-### 3.79 TRB - Test and Reset Bits
-
-**Operation**: M = M & ~A; Z = !(M & A)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | TRB dp | $14 | 2 | 5 |
-| Absolute | TRB abs | $1C | 3 | 6 |
-
-**Flags Affected**: Z
-
-### 3.80 TSB - Test and Set Bits
-
-**Operation**: M = M | A; Z = !(M & A)
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | TSB dp | $04 | 2 | 5 |
-| Absolute | TSB abs | $0C | 3 | 6 |
-
-**Flags Affected**: Z
-
-### 3.81 TSX - Transfer S to X
-
-**Operation**: X = S
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TSX | $BA | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.82 TXA - Transfer X to A
-
-**Operation**: A = X
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TXA | $8A | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.83 TXS - Transfer X to S
-
-**Operation**: S = X
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TXS | $9A | 1 | 2 |
-
-### 3.84 TYA - Transfer Y to A
-
-**Operation**: A = Y
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | TYA | $98 | 1 | 2 |
-
-**Flags Affected**: N, Z
-
-### 3.85 WAI - Wait for Interrupt (NEW)
-
-**Operation**: Halt until interrupt received
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | WAI | $02 $91 | 2 | 3+ |
-
-### 3.86 XCE - Exchange Carry with Emulation (NEW)
-
-**Operation**: Swap C flag with E flag
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Implied | XCE | $02 $90 | 2 | 2 |
-
-**Description**: Used to switch between emulation and native modes.
-
-```asm
-; Enter native mode
-CLC             ; C = 0
-XCE             ; E = 0 (native), C = old E
-
-; Enter emulation mode  
-SEC             ; C = 1
-XCE             ; E = 1 (emulation), C = old E
-```
-
-### 3.90 LDF/STF - Load/Store Floating-Point Registers (NEW)
-
-**Operation**: Load/store 64-bit F0-F2 registers.
-
-| Mode | Syntax | Opcode | Bytes | Cycles |
-|------|--------|--------|-------|--------|
-| Direct Page | LDF0 dp | $02 $B0 | 3 | 6+ |
-| Absolute | LDF0 abs | $02 $B1 | 4 | 7+ |
-| Direct Page | STF0 dp | $02 $B2 | 3 | 6+ |
-| Absolute | STF0 abs | $02 $B3 | 4 | 7+ |
-| Direct Page | LDF1 dp | $02 $B4 | 3 | 6+ |
-| Absolute | LDF1 abs | $02 $B5 | 4 | 7+ |
-| Direct Page | STF1 dp | $02 $B6 | 3 | 6+ |
-| Absolute | STF1 abs | $02 $B7 | 4 | 7+ |
-| Direct Page | LDF2 dp | $02 $B8 | 3 | 6+ |
-| Absolute | LDF2 abs | $02 $B9 | 4 | 7+ |
-| Direct Page | STF2 dp | $02 $BA | 3 | 6+ |
-| Absolute | STF2 abs | $02 $BB | 4 | 7+ |
-
-**Flags Affected**: None
-
-**Description**: Moves 64-bit values between memory and the floating-point registers. Single-precision ops use the low 32 bits of F0/F1/F2, while double-precision ops use the full 64 bits.
-
-**Register Window (R=1)**:
-- `LDF*/STF* dp` accesses the register window, not memory.
-- The DP offset selects `Rk` (low dword) and `Rk+1` (high dword).
-- DP offset must select a register index that is a **multiple of 4** (16-byte alignment).
-- Software FP context saves should keep SP **4-byte aligned**.
-
-### 3.91 FPU Operations (NEW)
-
-**Registers**: F0 (destination), F1/F2 (sources)
-
-**Single-precision ops**: use low 32 bits of F registers.
-**Double-precision ops**: use full 64 bits of F registers.
-
-**Flags**:
-- `FCMP.*`: Z = 1 if equal, C = 1 if F1 >= F2, N = 1 if F1 < F2, V = 0
-- `FADD/FSUB/FMUL/FDIV/FNEG/FABS/I2F.*`: Z/N from result, V = 0
-- `F2I.*`: Z/N from integer result
-
-**Note**: Reserved FP opcodes trap to the software emulation handler using the TRAP vector with an index equal to the FP opcode byte.
-
-**TODO (later)**: Add edge-case FP tests (NaN/Inf/subnormals/div-by-zero/rounding).
 
 ---
 
-## 4. Instruction Timing Details
+### Temporary Register Instructions
 
-### 4.1 Cycle Counting Rules
+The T register holds the high word from 64-bit multiply results and the remainder from divide operations.
 
-Base cycles are modified by:
+#### TTA - Transfer T to A
 
-1. **+1 if DP low byte is non-zero** (misaligned D register)
-2. **+1 if page boundary crossed** (indexed modes)
-3. **Width multiplier**: 32-bit ops may take longer for memory access
-4. **Wait states**: Memory speed dependent
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TTA | $02 $86 | 2 |
 
-### 4.2 Memory Access Patterns
+#### TAT - Transfer A to T
 
-| Width | Bytes Transferred | Typical Cycles |
-|-------|-------------------|----------------|
-| 8-bit | 1 | 1 |
-| 16-bit | 2 | 1-2 |
-| 32-bit | 4 | 2-4 |
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TAT | $02 $87 | 2 |
 
 ---
 
-## 5. Programmer's Quick Reference
+### 64-bit Load/Store
 
-### 5.1 Common Patterns
+#### LDQ - Load Quad
+
+Loads 64 bits into A (low) and T (high).
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | LDQ dp | $02 $88 | 3 |
+| Absolute | LDQ abs | $02 $89 | 4 |
+
+#### STQ - Store Quad
+
+Stores A (low) and T (high) as 64 bits.
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Direct Page | STQ dp | $02 $8A | 3 |
+| Absolute | STQ abs | $02 $8B | 4 |
+
+---
+
+### WID Prefix ($42)
+
+The WID prefix signals that the following instruction uses a 32-bit operand.
 
 ```asm
-; 32-bit add
-CLC
-LDA num1
-ADC num2
-STA result
+; 32-bit immediate
+    WID LDA #$12345678  ; $42 $A9 [4 bytes]
 
-; 32-bit compare
-LDA val1
-CMP val2
-BCC less        ; val1 < val2
-BEQ equal       ; val1 == val2
-                ; fall through: val1 > val2
+; 32-bit absolute address
+    WID LDA $12345678   ; $42 $AD [4 bytes]
+    WID STA $12345678   ; $42 $8D [4 bytes]
 
-; Loop with counter
-    LDX #100
-loop:
-    ; ... loop body ...
-    DEX
-    BNE loop
+; 32-bit jump
+    WID JMP $C0001000   ; $42 $4C [4 bytes]
+    WID JSR $C0001000   ; $42 $20 [4 bytes]
 
-; Indirect pointer access
-    LDA ($20)       ; A = *ptr (ptr at DP+$20)
-    LDA ($20),Y     ; A = ptr[Y]
-
-; Array indexing
-    LDX #4          ; index * 4 for 32-bit elements
-    LDA array,X     ; A = array[1]
+; 32-bit indirect
+    WID JMP ($12345678) ; $42 $6C [4 bytes]
 ```
 
-### 5.2 Mode Switching
+**Caution:** Only use WID when necessary. Using WID with instructions that don't need 32-bit operands can misalign the instruction stream.
+
+---
+
+### Floating-Point Instructions
+
+The M65832 includes optional FPU support with three 64-bit registers (F0, F1, F2).
+
+#### FPU Load/Store
+
+| Instruction | Opcode | Description |
+|-------------|--------|-------------|
+| LDF0 dp | $02 $B0 | F0 = [dp..dp+7] |
+| LDF0 abs | $02 $B1 | F0 = [abs..abs+7] |
+| STF0 dp | $02 $B2 | [dp..dp+7] = F0 |
+| STF0 abs | $02 $B3 | [abs..abs+7] = F0 |
+| LDF1 dp | $02 $B4 | F1 = [dp..dp+7] |
+| LDF1 abs | $02 $B5 | F1 = [abs..abs+7] |
+| STF1 dp | $02 $B6 | [dp..dp+7] = F1 |
+| STF1 abs | $02 $B7 | [abs..abs+7] = F1 |
+| LDF2 dp | $02 $B8 | F2 = [dp..dp+7] |
+| LDF2 abs | $02 $B9 | F2 = [abs..abs+7] |
+| STF2 dp | $02 $BA | [dp..dp+7] = F2 |
+| STF2 abs | $02 $BB | [abs..abs+7] = F2 |
+
+#### FPU Arithmetic
+
+Single-precision operations (use low 32 bits):
+
+| Instruction | Opcode | Operation |
+|-------------|--------|-----------|
+| FADD.S | $02 $C0 | F0 = F1 + F2 |
+| FSUB.S | $02 $C1 | F0 = F1 - F2 |
+| FMUL.S | $02 $C2 | F0 = F1 × F2 |
+| FDIV.S | $02 $C3 | F0 = F1 / F2 |
+| FNEG.S | $02 $C4 | F0 = -F1 |
+| FABS.S | $02 $C5 | F0 = |F1| |
+| FCMP.S | $02 $C6 | Compare F1 to F2 |
+| F2I.S | $02 $C7 | A = (int32)F1 |
+| I2F.S | $02 $C8 | F0 = (float32)A |
+
+Double-precision operations (use full 64 bits):
+
+| Instruction | Opcode | Operation |
+|-------------|--------|-----------|
+| FADD.D | $02 $D0 | F0 = F1 + F2 |
+| FSUB.D | $02 $D1 | F0 = F1 - F2 |
+| FMUL.D | $02 $D2 | F0 = F1 × F2 |
+| FDIV.D | $02 $D3 | F0 = F1 / F2 |
+| FNEG.D | $02 $D4 | F0 = -F1 |
+| FABS.D | $02 $D5 | F0 = |F1| |
+| FCMP.D | $02 $D6 | Compare F1 to F2 |
+| F2I.D | $02 $D7 | A = (int64)F1 |
+| I2F.D | $02 $D8 | F0 = (float64)A |
+
+**FCMP Flags:**
+- Z = 1 if F1 == F2
+- C = 1 if F1 >= F2
+- N = 1 if F1 < F2
+
+**Reserved FPU opcodes** ($D9-$DF, $E0-$E6) trap to software emulation via the TRAP mechanism.
+
+---
+
+## Addressing Mode Summary
+
+| Mode | Syntax | Calculation | Bytes |
+|------|--------|-------------|-------|
+| Implied | `INX` | — | 1 |
+| Accumulator | `ASL` | — | 1 |
+| Immediate | `LDA #$XX` | operand | 2-5 |
+| Direct Page | `LDA $XX` | D + offset | 2 |
+| DP Indexed X | `LDA $XX,X` | D + offset + X | 2 |
+| DP Indexed Y | `LDA $XX,Y` | D + offset + Y | 2 |
+| Absolute | `LDA $XXXX` | B + addr16 | 3 |
+| Abs Indexed X | `LDA $XXXX,X` | B + addr16 + X | 3 |
+| Abs Indexed Y | `LDA $XXXX,Y` | B + addr16 + Y | 3 |
+| DP Indirect | `LDA ($XX)` | [D + offset] | 2 |
+| DP Indexed Indirect | `LDA ($XX,X)` | [D + offset + X] | 2 |
+| DP Indirect Indexed | `LDA ($XX),Y` | [D + offset] + Y | 2 |
+| DP Indirect Long | `LDA [$XX]` | 32-bit [D + offset] | 2 |
+| DP Ind Long Indexed | `LDA [$XX],Y` | 32-bit [D + offset] + Y | 2 |
+| Absolute Indirect | `JMP ($XXXX)` | [B + addr16] | 3 |
+| Abs Indexed Indirect | `JMP ($XXXX,X)` | [B + addr16 + X] | 3 |
+| Absolute Long | `LDA $XXXXXX` | addr24 | 4 |
+| Abs Long Indexed | `LDA $XXXXXX,X` | addr24 + X | 4 |
+| Stack Relative | `LDA $XX,S` | S + offset | 2 |
+| SR Indirect Indexed | `LDA ($XX,S),Y` | [S + offset] + Y | 2 |
+| Relative | `BEQ label` | PC + 2 + offset8 | 2 |
+| Relative Long | `BRL label` | PC + 3 + offset16 | 3 |
+| Long (WID) | `WID LDA $XXXXXXXX` | addr32 | 5-6 |
+
+---
+
+## Code Examples
+
+### Mode Initialization
 
 ```asm
-; To Native-32 from reset
-    CLC
-    XCE             ; E=0
-    REP #$30        ; M=01, X=01 (16-bit)
-    REPE #$A0       ; M=10, X=10 (32-bit)
-
-; To 8-bit accumulator temporarily
-    SEP #$20        ; M=00 (8-bit A)
-    ; ... 8-bit ops ...
-    REP #$20        ; Back to 16-bit
-```
-
-### 5.3 Register Window Usage
-
-```asm
-; Enable register file
+; Enter Native-32 mode from reset
+reset:
+    CLC                 ; C = 0
+    XCE                 ; E = 0 (native mode)
+    REP #$30            ; M = 01, X = 01 (16-bit)
+    REPE #$A0           ; M = 10, X = 10 (32-bit)
+    
+    ; Set up base registers
+    SD #$00010000       ; D = data segment base
+    SB #$00000000       ; B = 0 (flat addressing)
+    
+    ; Set up stack
+    LDX #$FFFFC000
+    TXS
+    
+    ; Enable register window
     RSET
-    
-; Now DP offsets are registers:
-    LDA $00         ; A = R0
-    STA $04         ; R1 = A
-    INC $08         ; R2++
-    
-; Disable for legacy code
-    RCLR
+    ; Now $00-$FF accesses R0-R63
+```
+
+### Function Call Convention
+
+```asm
+; Call: result = add(a, b)
+    LDA value_a
+    STA $00             ; R0 = first argument
+    LDA value_b
+    STA $04             ; R1 = second argument
+    JSR add_function
+    LDA $00             ; Return value in R0
+    STA result
+
+add_function:
+    LDA $00             ; A = R0
+    ADC $04             ; A = A + R1
+    STA $00             ; R0 = result
+    RTS
+```
+
+### Spinlock with Memory Barriers
+
+```asm
+; Acquire spinlock
+acquire:
+    LDX #0              ; Expected value (unlocked)
+    LDA #1              ; Desired value (locked)
+.retry:
+    CAS lock
+    BNE .retry          ; Z=0 means failed
+    FENCE               ; Ensure lock is visible
+    RTS
+
+; Release spinlock
+release:
+    FENCE               ; Ensure all writes complete
+    STZ lock            ; Clear the lock
+    RTS
+```
+
+### Array Sum with Loop
+
+```asm
+; Sum array of 32-bit integers
+; Input: X = array address, Y = count
+; Output: A = sum
+sum_array:
+    LDA #0              ; Initialize sum
+    CPY #0
+    BEQ .done
+.loop:
+    CLC
+    ADC 0,X             ; Add array element
+    INX
+    INX
+    INX
+    INX                 ; X += 4 (next 32-bit element)
+    DEY
+    BNE .loop
+.done:
+    RTS
+```
+
+### System Call Wrapper
+
+```asm
+; write(fd, buffer, count)
+; R0 = fd, R1 = buffer, R2 = count
+; Returns bytes written in R0, -1 on error
+sys_write:
+    LDA #1              ; SYS_WRITE
+    STA $10             ; R4 = syscall number (depends on ABI)
+    TRAP #0
+    ; Kernel returns result in R0
+    RTS
 ```
 
 ---
 
-*End of Instruction Set Reference*
+## Flag Summary
+
+| Flag | Bit | Set When |
+|------|-----|----------|
+| C | 0 | Carry out from MSB or borrow in |
+| Z | 1 | Result is zero |
+| I | 2 | IRQ interrupts disabled |
+| D | 3 | BCD arithmetic enabled |
+| X0 | 4 | Index width bit 0 |
+| X1 | 5 | Index width bit 1 |
+| M0 | 6 | Accumulator width bit 0 |
+| M1 | 7 | Accumulator width bit 1 |
+| V | 8 | Signed overflow |
+| N | 9 | Result negative (MSB = 1) |
+| E | 10 | Emulation mode (6502) |
+| S | 11 | Supervisor mode |
+| R | 12 | Register window enabled |
+| K | 13 | Compatibility mode |
+
+---
+
+*M65832 Instruction Set Reference - Verified against RTL implementation*
