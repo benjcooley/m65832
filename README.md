@@ -40,6 +40,22 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 - **[6502 Compatibility](docs/M65832_6502_Compatibility.md)** - Supported variants and mode bits
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
 
+## STATUS
+
+- [x] Feature complete for the current RTL milestone
+- [x] Integer core (ALU, decode, wide data paths)
+- [x] 32-bit architectural extensions (addressing, width controls)
+- [x] Floating-point unit integration path
+- [x] MMU with page-table walk + TLB
+- [x] Cycle-accurate 6502 coprocessor and interleaving
+- [x] Privilege model, exceptions, and interrupt entry/exit
+- [ ] Assembler and ISA toolchain
+- [ ] Expanded regression and corner-case validation
+- [ ] Hardware bring-up on target FPGA
+- [ ] Performance characterization and tuning
+- [ ] C compiler support (runtime, ABI, and toolchain)
+- [ ] Linux boot and userland enablement
+
 ## Tests
 
 GHDL testbenches:
@@ -227,31 +243,6 @@ Learn CPU architecture with a clean, understandable design:
 - No microcode (direct decode)
 - Simple pipeline
 - Well-documented instruction set
-
-## Status
-
-**Current Phase**: RTL Development
-
-- [x] Architecture specification
-- [x] Instruction set definition
-- [x] Linux requirements analysis
-- [x] Classic coprocessor design (6502 + servicer interleaving)
-- [x] Reference cores acquired (MX65 6502, MiSTer 65816)
-- [x] VHDL implementation (4,300+ lines)
-  - [x] Package definitions (`m65832_pkg.vhd`)
-  - [x] 32-bit ALU (`m65832_alu.vhd`)
-  - [x] Address generator (`m65832_addrgen.vhd`)
-  - [x] 64x32 register file (`m65832_regfile.vhd`)
-  - [x] Instruction decoder (`m65832_decoder.vhd`)
-  - [x] Top-level core (`m65832_core.vhd`)
-  - [x] MMU with 16-entry TLB (`m65832_mmu.vhd`)
-  - [x] Classic interleaver (`m65832_interleave.vhd`)
-  - [x] 6502 context registers (`m65832_6502_context.vhd`)
-  - [x] Servicer context (`m65832_servicer_context.vhd`)
-  - [x] Shadow I/O + FIFO (`m65832_shadow_io.vhd`)
-- [ ] Assembler
-- [ ] Simulator/Testbench
-- [ ] Synthesis for Artix-7
 
 ### Reference Cores
 
