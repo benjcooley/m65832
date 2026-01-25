@@ -241,6 +241,13 @@ architecture rtl of M65832_Core is
     signal mmu_tlb_flush   : std_logic;
     signal mmu_tlb_flush_asid : std_logic;
     signal mmu_tlb_flush_va : std_logic;
+
+    -- Timer control (MMIO)
+    signal timer_ctrl     : std_logic_vector(7 downto 0);
+    signal timer_cmp      : std_logic_vector(31 downto 0);
+    signal timer_count    : std_logic_vector(31 downto 0);
+    signal timer_pending  : std_logic;
+    signal timer_irq      : std_logic;
     
     signal mmio_read_hit   : std_logic;
     signal mmio_read_data  : std_logic_vector(7 downto 0);
@@ -769,7 +776,7 @@ begin
                 end if;
                 
                 -- IRQ level sensitive (cleared by CPU)
-                irq_pending <= not IRQ_N and not P_reg(P_I);
+                irq_pending <= (not IRQ_N or timer_irq) and not P_reg(P_I);
                 
                 -- ABORT
                 abort_pending <= not ABORT_N;
@@ -784,6 +791,7 @@ begin
     mmu_wp <= mmu_mmucr(1);
     mmu_nx <= '1';
     mmu_bypass <= '1' when mem_addr_virt(15 downto 8) = x"F0" else '0';
+    timer_irq <= timer_pending and timer_ctrl(2);
     priv_op <= '1' when S_mode = '0' and
                         (IS_SVBR = '1' or IS_SB = '1' or IS_RSET = '1' or
                          IS_RCLR = '1' or IS_XCE = '1') else '0';
@@ -1928,6 +1936,36 @@ begin
                 when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
                     mmio_read_hit <= '1';
                     mmio_read_data <= mmu_ptbr(63 downto 56);
+
+                when MMIO_TIMER_CTRL(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_ctrl;
+                    mmio_read_data(7) <= timer_pending;
+                when MMIO_TIMER_CMP(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_cmp(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_cmp(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_cmp(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_cmp(31 downto 24);
+
+                when MMIO_TIMER_COUNT(15 downto 0) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_count(7 downto 0);
+                when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_count(15 downto 8);
+                when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_count(23 downto 16);
+                when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
+                    mmio_read_hit <= '1';
+                    mmio_read_data <= timer_count(31 downto 24);
                 
                 when MMIO_TLBINVAL(15 downto 0) =>
                     mmio_read_hit <= '1';
@@ -2097,11 +2135,27 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             mmu_tlb_flush <= '0';
             mmu_tlb_flush_asid <= '0';
             mmu_tlb_flush_va <= '0';
+            timer_ctrl <= (others => '0');
+            timer_cmp <= (others => '0');
+            timer_count <= (others => '0');
+            timer_pending <= '0';
         elsif rising_edge(CLK) then
             if CE = '1' then
                 if mmu_page_fault = '1' then
                     mmu_faultva <= mmu_fault_va;
                     mmu_mmucr(4 downto 2) <= mmu_fault_type;
+                end if;
+
+                if timer_ctrl(0) = '1' then
+                    if timer_ctrl(2) = '1' and timer_pending = '0' and timer_cmp /= x"00000000" and
+                       unsigned(timer_count) >= unsigned(timer_cmp) then
+                        timer_pending <= '1';
+                        if timer_ctrl(1) = '1' then
+                            timer_count <= (others => '0');
+                        end if;
+                    elsif timer_pending = '0' or timer_ctrl(1) = '1' then
+                        timer_count <= std_logic_vector(unsigned(timer_count) + 1);
+                    end if;
                 end if;
                 
                 if mem_ready = '1' then
@@ -2164,6 +2218,32 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                                 mmu_ptbr(55 downto 48) <= DATA_OUT;
                             when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
                                 mmu_ptbr(63 downto 56) <= DATA_OUT;
+
+                            when MMIO_TLBFLUSH(15 downto 0) =>
+                                mmu_tlb_flush <= '1';
+
+                            when MMIO_TIMER_CTRL(15 downto 0) =>
+                                timer_ctrl(2 downto 0) <= DATA_OUT(2 downto 0);
+                                if DATA_OUT(3) = '1' then
+                                    timer_pending <= '0';
+                                end if;
+                            when MMIO_TIMER_CMP(15 downto 0) =>
+                                timer_cmp(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
+                                timer_cmp(15 downto 8) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
+                                timer_cmp(23 downto 16) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
+                                timer_cmp(31 downto 24) <= DATA_OUT;
+
+                            when MMIO_TIMER_COUNT(15 downto 0) =>
+                                timer_count(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
+                                timer_count(15 downto 8) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
+                                timer_count(23 downto 16) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
+                                timer_count(31 downto 24) <= DATA_OUT;
                             
                             when others =>
                                 null;

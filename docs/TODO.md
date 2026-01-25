@@ -5,14 +5,14 @@
   Why: prevents user code from corrupting system state or MMU control. (Test 122)
 - [x] Exception/interrupt entry/exit contract: push PC + full P, RTI restores both  
   Why: kernel must reliably return to user with exact prior state. (Test 114A)
-- [ ] Page faults: precise, with FAULTVA + fault type latched  
+- [x] Page faults: precise, with FAULTVA + fault type latched  
   Why: VM subsystem needs exact fault address and cause to resolve faults.  
   Note: Works with focused test, but MMIO FAULTVA read path needs follow-up.
-- [ ] TLB invalidate: at least full flush (single-VA optional for v0)  
+- [x] TLB invalidate: at least full flush (single-VA optional for v0)  
   Why: page table updates must take effect immediately and safely.
-- [ ] Timer interrupt: periodic IRQ + readable counter  
+- [x] Timer interrupt: periodic IRQ + readable counter  
   Why: scheduler, timekeeping, and preemption depend on it.
-- [ ] Syscall mechanism: TRAP vector works + return to user  
+- [x] Syscall mechanism: TRAP vector works + return to user  
   Why: user/kernel boundary requires a stable syscall entry point.
 
 ## STRONG-SHOULD

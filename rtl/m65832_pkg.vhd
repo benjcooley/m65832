@@ -216,6 +216,10 @@ constant VEC_ILLEGAL : std_logic_vector(31 downto 0) := x"0000FFF8";
     constant MMIO_FAULTVA    : std_logic_vector(31 downto 0) := x"FFFFF010";
     constant MMIO_PTBR_LO    : std_logic_vector(31 downto 0) := x"FFFFF014";
     constant MMIO_PTBR_HI    : std_logic_vector(31 downto 0) := x"FFFFF018";
+    constant MMIO_TLBFLUSH   : std_logic_vector(31 downto 0) := x"FFFFF01C";
+    constant MMIO_TIMER_CTRL : std_logic_vector(31 downto 0) := x"FFFFF040";
+    constant MMIO_TIMER_CMP  : std_logic_vector(31 downto 0) := x"FFFFF044";
+    constant MMIO_TIMER_COUNT: std_logic_vector(31 downto 0) := x"FFFFF048";
     
     ---------------------------------------------------------------------------
     -- Helper Functions
