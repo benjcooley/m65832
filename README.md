@@ -47,9 +47,7 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - **[Instruction Set](docs/M65832_Instruction_Set.md)** - Detailed opcode reference
 - **[Linux Porting Guide](docs/M65832_Linux_Porting_Guide.md)** - OS implementation notes
 - **[Mixed-Mode Multitasking](docs/M65832_Mixed_Mode_Multitasking.md)** - Running 8/16/32-bit processes together
-- **[Timing Compatibility](docs/M65832_Timing_Compatibility.md)** - Cycle-accurate 6502, clock speed control
-- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core coprocessor architecture
-- **[6502 Compatibility](docs/M65832_6502_Compatibility.md)** - Supported variants and mode bits
+- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core architecture, 6502 compatibility, cycle-accurate timing
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
 
 ## STATUS

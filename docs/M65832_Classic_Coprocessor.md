@@ -186,7 +186,29 @@ COMPAT_65C02    = $03       ; DECIMAL_EN=1, CMOS65C02_EN=1, NMOS_ILLEGAL_EN=0
 
 ## 4. Interleaved Execution
 
-### 4.1 Precise Clock Generation
+### 4.1 Why Cycle Accuracy Matters
+
+Classic 6502 software often depends on precise timing for visual effects:
+
+```asm
+; Example: C64 raster bar effect
+; Each instruction must take EXACTLY the right number of cycles
+; or the color change appears at the wrong screen position
+
+    LDA #$00        ; 2 cycles
+    STA $D020       ; 4 cycles  ← Change border color
+    LDX #$09        ; 2 cycles
+loop:
+    DEX             ; 2 cycles
+    BNE loop        ; 3/2 cycles ← Waste exactly 43 cycles
+    NOP             ; 2 cycles
+    LDA #$01        ; 2 cycles
+    STA $D020       ; 4 cycles  ← Change color again at exact raster position
+```
+
+If the timing is wrong by even one cycle, the color change appears at the wrong horizontal position and the effect breaks. This is why the coprocessor uses a fractional accumulator rather than a simple integer divider.
+
+### 4.2 Precise Clock Generation
 
 Different classic systems require different exact CPU speeds:
 
@@ -246,7 +268,7 @@ Cycle pattern (first 10 6502 cycles):
 Over 1 second: Exactly 1,022,727 6502 cycles
 ```
 
-### 4.2 Beam Position Tracking
+### 4.3 Beam Position Tracking
 
 The interleaver tracks beam position for raster-accurate emulation. Current RTL uses hardcoded defaults:
 
@@ -258,7 +280,22 @@ constant LINES_PER_FRAME : unsigned(9 downto 0) := to_unsigned(312, 10);  -- C64
 
 > **TODO:** These should be made configurable via input ports for multi-system support.
 
-### 4.3 Coprocessor Top-Level Interface
+### 4.4 Video Timing Parameters
+
+For proper video synchronization, the system needs accurate blanking intervals:
+
+| System | Cycles/Line | Lines/Frame | HBlank | VBlank Lines | Frame Rate |
+|--------|-------------|-------------|--------|--------------|------------|
+| C64 PAL | 63 | 312 | ~8 cycles | ~28 lines | 50.125 Hz |
+| C64 NTSC | 65 | 263 | ~8 cycles | ~21 lines | 59.826 Hz |
+| NES NTSC | 113.67 | 262 | ~21 cycles | ~20 lines | 60.098 Hz |
+| NES PAL | 106.56 | 312 | ~20 cycles | ~70 lines | 50.007 Hz |
+| Apple II | 65 | 262 | ~25 cycles | ~70 lines | 60 Hz |
+| Atari 2600 | 76 | 262 | ~22 cycles | ~37 lines | 59.92 Hz |
+
+The interleaver provides beam position (`BEAM_X`, `BEAM_Y`) and cycle count (`CYCLE_COUNT`) outputs for raster-accurate emulation.
+
+### 4.5 Coprocessor Top-Level Interface
 
 The coprocessor system is configured via port signals on `M65832_Coprocessor_Top`:
 
@@ -304,7 +341,7 @@ The coprocessor system is configured via port signals on `M65832_Coprocessor_Top
     STA COPROC_ENABLE
 ```
 
-### 4.4 Interleaved Execution Model
+### 4.6 Interleaved Execution Model
 
 When the accumulator triggers a 6502 cycle:
 
@@ -327,7 +364,7 @@ When the accumulator triggers a 6502 cycle:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.5 Timing Examples
+### 4.7 Timing Examples
 
 | 6502 Instruction | MMIO Work | MMIO Cycles | M65832 Cycles | M65832 % |
 |------------------|-----------|-------------|---------------|----------|
@@ -709,7 +746,20 @@ void audio_generator(void) {
 
 ---
 
-## 10. Summary
+## 10. Future Considerations
+
+The following features may be added based on compatibility requirements:
+
+1. **Turbo mode for 6502?** (2x, 4x speed for impatient users - simply adjust TARGET_FREQ)
+2. **DMA cycle stealing?** (C64 VIC-II steals cycles during badlines - can be emulated via CE gating)
+3. **Exact memory timing?** (Some protection schemes check memory access patterns)
+4. **Multiple 6502 instances?** (C64 at PAL + NES at NTSC simultaneously - requires additional interleaver instances)
+
+All are implementable with the current architecture; question is priority.
+
+---
+
+## 11. Summary
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -743,9 +793,10 @@ void audio_generator(void) {
 
 ---
 
-*Document Version: 2.1*  
+*Document Version: 2.2*  
 *Architecture: M65832 with Classic Coprocessor*  
-*Verified against RTL: m65832_6502_coprocessor.vhd, m65832_interleave.vhd, m65832_shadow_io.vhd, mx65.vhd*
+*Verified against RTL: m65832_6502_coprocessor.vhd, m65832_interleave.vhd, m65832_shadow_io.vhd, mx65.vhd*  
+*Consolidated from: M65832_6502_Compatibility.md, M65832_Timing_Compatibility.md*
 
 **RTL Issues Noted:**
 - `m65832_shadow_io.vhd`: FIFO declared as 48-bit but packs 52 bits (should be 64-bit)
