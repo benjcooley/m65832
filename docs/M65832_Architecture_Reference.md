@@ -68,8 +68,9 @@ For authentic classic system emulation, the M65832 SoC includes a dedicated 6502
 
 | Core | Purpose | ISA |
 |------|---------|-----|
-| **M65832** | Linux, modern apps | Full 32-bit |
-| **6502** | Classic game code | Pure 6502/65C02 |
+| **M65832 32bit** | Linux, modern apps | Full 32 bit |
+| **M65832 16/8bit** | Classic 6502,816 processes at chip clock rate, not cycle accurate | 8/16 bit |
+| **6502** | Classic game code | CYCLE ACCURATE 6502/65C02 + Variants |
 
 These cores are time-sliced using a fractional accumulator: the 6502 runs at a configurable exact frequency (e.g., 1.022727 MHz for C64 NTSC), while M65832 gets the remaining cycles (~90%+). I/O accesses from the 6502 are handled via shadow registers and an IRQ-based interface to the main core.
 
