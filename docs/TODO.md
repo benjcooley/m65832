@@ -6,7 +6,8 @@
 - [x] Exception/interrupt entry/exit contract: push PC + full P, RTI restores both  
   Why: kernel must reliably return to user with exact prior state. (Test 114A)
 - [ ] Page faults: precise, with FAULTVA + fault type latched  
-  Why: VM subsystem needs exact fault address and cause to resolve faults.
+  Why: VM subsystem needs exact fault address and cause to resolve faults.  
+  Note: Works with focused test, but MMIO FAULTVA read path needs follow-up.
 - [ ] TLB invalidate: at least full flush (single-VA optional for v0)  
   Why: page table updates must take effect immediately and safely.
 - [ ] Timer interrupt: periodic IRQ + readable counter  
@@ -37,3 +38,9 @@
   Why: tuning and diagnostics during bring-up.
 - [ ] Debug features (breakpoints, single-step)  
   Why: accelerates kernel debugging and toolchain work.
+
+## COMPLEXITY HOTSPOTS (watch for timing/ordering)
+- [ ] MMIO read timing (esp. FAULTVA/IRQ vectors)  
+- [ ] Exception entry + vector fetch sequencing  
+- [ ] MMU/PTW handshakes vs. core state machine  
+- [ ] Multi-width accesses (8/16/32/64) and byte-lane ordering

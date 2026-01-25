@@ -179,10 +179,11 @@ architecture rtl of M65832_MMU is
     
     signal tlb_hit      : std_logic;
     signal tlb_hit_idx  : integer range 0 to 15;
-    signal fault_reg    : std_logic;
+    signal fault_reg      : std_logic;
     signal fault_type_reg : std_logic_vector(2 downto 0);
-    signal pa_reg       : std_logic_vector(64 downto 0);
-    signal pa_valid_reg : std_logic;
+    signal fault_va_reg   : std_logic_vector(31 downto 0);
+    signal pa_reg         : std_logic_vector(64 downto 0);
+    signal pa_valid_reg   : std_logic;
     signal ptw_ack_armed : std_logic;
 
 begin
@@ -232,6 +233,7 @@ begin
             pa_valid_reg <= '0';
             fault_reg <= '0';
             fault_type_reg <= "000";
+            fault_va_reg <= (others => '0');
             ptw_ack_armed <= '0';
             saved_va <= (others => '0');
             saved_access <= "00";
@@ -319,7 +321,7 @@ begin
                             
                             if check_fail = '1' then
                                 fault_reg <= '1';
-                                FAULT_VA <= VA;
+                                fault_va_reg <= VA;
                             else
                                 -- Success: construct physical address
                                 pa_reg <= tlb(tlb_hit_idx).ppn & offset;
@@ -359,7 +361,7 @@ begin
                             -- L1 not present
                             fault_reg <= '1';
                             fault_type_reg <= "100";
-                            FAULT_VA <= saved_va;
+                            fault_va_reg <= saved_va;
                             ptw_state <= PTW_IDLE;
                         else
                             ptw_state <= PTW_L2_REQ;
@@ -389,7 +391,7 @@ begin
                             -- L2 not present
                             fault_reg <= '1';
                             fault_type_reg <= "000";
-                            FAULT_VA <= saved_va;
+                            fault_va_reg <= saved_va;
                             ptw_state <= PTW_IDLE;
                         else
                             ptw_state <= PTW_DONE;
@@ -415,7 +417,7 @@ begin
                     
                     if check_fail = '1' then
                         fault_reg <= '1';
-                        FAULT_VA <= saved_va;
+                        fault_va_reg <= saved_va;
                     else
                         -- Install in TLB
                         tlb(to_integer(tlb_replace_idx)).valid <= '1';
@@ -456,6 +458,7 @@ begin
     PA_READY <= '1' when ptw_state = PTW_IDLE else '0';
     PAGE_FAULT <= fault_reg;
     FAULT_TYPE <= fault_type_reg;
+    FAULT_VA <= fault_va_reg;
     TLB_HIT_COUNT <= std_logic_vector(hit_count);
     TLB_MISS_COUNT <= std_logic_vector(miss_count);
 

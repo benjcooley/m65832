@@ -1861,7 +1861,21 @@ begin
         
         if (state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
            ADDR_MODE /= "0001" then
-            case mmio_addr_read_lo is
+            if unsigned(mmio_addr_read_lo) >= unsigned(MMIO_FAULTVA(15 downto 0)) and
+               unsigned(mmio_addr_read_lo) <= unsigned(MMIO_FAULTVA(15 downto 0)) + 3 then
+                mmio_read_hit <= '1';
+                case to_integer(unsigned(mmio_addr_read_lo) - unsigned(MMIO_FAULTVA(15 downto 0))) is
+                    when 0 =>
+                        mmio_read_data <= mmu_faultva(7 downto 0);
+                    when 1 =>
+                        mmio_read_data <= mmu_faultva(15 downto 8);
+                    when 2 =>
+                        mmio_read_data <= mmu_faultva(23 downto 16);
+                    when others =>
+                        mmio_read_data <= mmu_faultva(31 downto 24);
+                end case;
+            else
+                case mmio_addr_read_lo is
                 when MMIO_MMUCR(15 downto 0) =>
                     mmio_read_hit <= '1';
                     mmio_read_data <= mmu_mmucr(7 downto 0);
@@ -1888,19 +1902,6 @@ begin
                 when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
                     mmio_read_hit <= '1';
                     mmio_read_data <= mmu_asid_inval(15 downto 8);
-                
-                when MMIO_FAULTVA(15 downto 0) =>
-                    mmio_read_hit <= '1';
-                    mmio_read_data <= mmu_faultva(7 downto 0);
-                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 1) =>
-                    mmio_read_hit <= '1';
-                    mmio_read_data <= mmu_faultva(15 downto 8);
-                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 2) =>
-                    mmio_read_hit <= '1';
-                    mmio_read_data <= mmu_faultva(23 downto 16);
-                when std_logic_vector(unsigned(MMIO_FAULTVA(15 downto 0)) + 3) =>
-                    mmio_read_hit <= '1';
-                    mmio_read_data <= mmu_faultva(31 downto 24);
                 
                 when MMIO_PTBR_LO(15 downto 0) =>
                     mmio_read_hit <= '1';
@@ -1943,13 +1944,28 @@ begin
                 
                 when others =>
                     null;
-            end case;
+                end case;
+            end if;
         end if;
     end process;
     
-    process(mmio_read_hit, mmio_read_data, DATA_IN)
+    process(mmio_read_hit, mmio_read_data, DATA_IN, state, ADDR_MODE, mmio_addr_read_lo, mmu_faultva)
     begin
-        if mmio_read_hit = '1' then
+        if (state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
+           ADDR_MODE /= "0001" and
+           unsigned(mmio_addr_read_lo) >= unsigned(MMIO_FAULTVA(15 downto 0)) and
+           unsigned(mmio_addr_read_lo) <= unsigned(MMIO_FAULTVA(15 downto 0)) + 3 then
+            case to_integer(unsigned(mmio_addr_read_lo) - unsigned(MMIO_FAULTVA(15 downto 0))) is
+                when 0 =>
+                    data_in_read <= mmu_faultva(7 downto 0);
+                when 1 =>
+                    data_in_read <= mmu_faultva(15 downto 8);
+                when 2 =>
+                    data_in_read <= mmu_faultva(23 downto 16);
+                when others =>
+                    data_in_read <= mmu_faultva(31 downto 24);
+            end case;
+        elsif mmio_read_hit = '1' then
             data_in_read <= mmio_read_data;
         else
             data_in_read <= DATA_IN;
@@ -2082,20 +2098,21 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             mmu_tlb_flush_asid <= '0';
             mmu_tlb_flush_va <= '0';
         elsif rising_edge(CLK) then
-            if CE = '1' and mem_ready = '1' then
-                mmu_tlb_flush <= '0';
-                mmu_tlb_flush_asid <= '0';
-                mmu_tlb_flush_va <= '0';
-                
+            if CE = '1' then
                 if mmu_page_fault = '1' then
                     mmu_faultva <= mmu_fault_va;
                     mmu_mmucr(4 downto 2) <= mmu_fault_type;
                 end if;
                 
-                if (state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4) and
-                   priv_mmio = '0' then
-                    if S_mode = '1' then
-                        case mmio_addr_write_lo is
+                if mem_ready = '1' then
+                    mmu_tlb_flush <= '0';
+                    mmu_tlb_flush_asid <= '0';
+                    mmu_tlb_flush_va <= '0';
+                    
+                    if (state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4) and
+                       priv_mmio = '0' then
+                        if S_mode = '1' then
+                            case mmio_addr_write_lo is
                             when MMIO_MMUCR(15 downto 0) =>
                                 mmu_mmucr(7 downto 0) <= DATA_OUT;
                             when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
@@ -2155,6 +2172,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                 end if;
             end if;
         end if;
+    end if;
     end process;
     
     ---------------------------------------------------------------------------
