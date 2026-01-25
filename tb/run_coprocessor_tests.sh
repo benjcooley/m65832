@@ -12,6 +12,7 @@ ghdl -a --std=08 \
   rtl/m65832_interleave.vhd \
   rtl/m65832_shadow_io.vhd \
   cores/6502-mx65/mx65.vhd \
+  tb/tb_mx65_illegal.vhd \
   rtl/m65832_6502_coprocessor.vhd \
   rtl/m65832_coprocessor_top.vhd \
   tb/tb_m65832_coprocessor.vhd \
@@ -21,6 +22,9 @@ ghdl -a --std=08 \
 
 ghdl -e --std=08 tb_M65832_Coprocessor
 ghdl -r --std=08 tb_M65832_Coprocessor --stop-time=3ms
+
+ghdl -e --std=08 tb_MX65_Illegal
+ghdl -r --std=08 tb_MX65_Illegal --stop-time=3ms
 
 ghdl -e --std=08 tb_M65832_Interleave
 ghdl -r --std=08 tb_M65832_Interleave --stop-time=2us

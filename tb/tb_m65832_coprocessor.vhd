@@ -35,6 +35,9 @@ architecture sim of tb_M65832_Coprocessor is
 
     signal vbr_in      : std_logic_vector(31 downto 0) := (others => '0');
     signal vbr_load    : std_logic := '0';
+    signal compat_in   : std_logic_vector(7 downto 0) := (others => '0');
+    signal compat_load : std_logic := '0';
+    signal compat_out  : std_logic_vector(7 downto 0);
 
     signal irq_data    : std_logic_vector(7 downto 0) := (others => '0');
     signal irq_valid   : std_logic := '0';
@@ -72,6 +75,9 @@ begin
             BUS_RDY     => bus_rdy,
             VBR_IN      => vbr_in,
             VBR_LOAD    => vbr_load,
+            COMPAT_IN   => compat_in,
+            COMPAT_LOAD => compat_load,
+            COMPAT_OUT  => compat_out,
             BANK0_BASE  => x"D000",
             BANK1_BASE  => x"D400",
             BANK2_BASE  => x"DC00",

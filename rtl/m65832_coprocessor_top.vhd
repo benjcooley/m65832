@@ -39,6 +39,13 @@ entity M65832_Coprocessor_Top is
         VBR_LOAD        : in  std_logic;
 
         ---------------------------------------------------------------------------
+        -- 6502 compatibility control
+        ---------------------------------------------------------------------------
+        COMPAT_IN       : in  std_logic_vector(7 downto 0);
+        COMPAT_LOAD     : in  std_logic;
+        COMPAT_OUT      : out std_logic_vector(7 downto 0);
+
+        ---------------------------------------------------------------------------
         -- Shadow I/O configuration
         ---------------------------------------------------------------------------
         BANK0_BASE      : in  std_logic_vector(15 downto 0);
@@ -145,6 +152,9 @@ begin
             IRQ         => '1',
             VBR_IN      => VBR_IN,
             VBR_LOAD    => VBR_LOAD,
+            COMPAT_IN   => COMPAT_IN,
+            COMPAT_LOAD => COMPAT_LOAD,
+            COMPAT_OUT  => COMPAT_OUT,
             ADDR_VA     => c_addr,
             DATA_OUT    => c_data_out,
             DATA_IN     => BUS_DATA_IN,
