@@ -4603,6 +4603,89 @@ begin
         check_mem(16#0471#, x"3C", "WAI returned to main");
         
         -----------------------------------------------------------------------
+        -- TEST 114A: IRQ stack frame (PC + full P)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 114A: IRQ stack frame";
+        
+        irq_n <= '1';
+        
+        -- 32-bit IRQ vector: $FFFE/$FFFF/$0000/$0001 -> $00008110
+        poke(16#FFFE#, x"10");
+        poke(16#FFFF#, x"81");
+        poke(16#0000#, x"00");
+        poke(16#0001#, x"00");
+        
+        -- IRQ handler at $8110: copy stack frame to $0490-$0495, RTI
+        poke(16#8110#, x"AD");  -- LDA $01FF
+        poke(16#8111#, x"FF");
+        poke(16#8112#, x"01");
+        poke(16#8113#, x"8D");  -- STA $0490
+        poke(16#8114#, x"90");
+        poke(16#8115#, x"04");
+        poke(16#8116#, x"AD");  -- LDA $01FE
+        poke(16#8117#, x"FE");
+        poke(16#8118#, x"01");
+        poke(16#8119#, x"8D");  -- STA $0491
+        poke(16#811A#, x"91");
+        poke(16#811B#, x"04");
+        poke(16#811C#, x"AD");  -- LDA $01FD
+        poke(16#811D#, x"FD");
+        poke(16#811E#, x"01");
+        poke(16#811F#, x"8D");  -- STA $0492
+        poke(16#8120#, x"92");
+        poke(16#8121#, x"04");
+        poke(16#8122#, x"AD");  -- LDA $01FC
+        poke(16#8123#, x"FC");
+        poke(16#8124#, x"01");
+        poke(16#8125#, x"8D");  -- STA $0493
+        poke(16#8126#, x"93");
+        poke(16#8127#, x"04");
+        poke(16#8128#, x"AD");  -- LDA $01FB (P high)
+        poke(16#8129#, x"FB");
+        poke(16#812A#, x"01");
+        poke(16#812B#, x"8D");  -- STA $0494
+        poke(16#812C#, x"94");
+        poke(16#812D#, x"04");
+        poke(16#812E#, x"AD");  -- LDA $01FA (P low)
+        poke(16#812F#, x"FA");
+        poke(16#8130#, x"01");
+        poke(16#8131#, x"8D");  -- STA $0495
+        poke(16#8132#, x"95");
+        poke(16#8133#, x"04");
+        poke(16#8134#, x"40");  -- RTI
+        
+        -- Program: CLI, WAI, LDA #$3D, STA $0496, STP
+        poke(16#8000#, x"58");  -- CLI
+        poke(16#8001#, x"CB");  -- WAI
+        poke(16#8002#, x"A9");  -- LDA #
+        poke(16#8003#, x"3D");
+        poke(16#8004#, x"8D");  -- STA abs
+        poke(16#8005#, x"96");  -- $0496
+        poke(16#8006#, x"04");
+        poke(16#8007#, x"02");  -- extended STP
+        poke(16#8008#, x"92");
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(20);
+        
+        irq_n <= '0';
+        wait_cycles(20);
+        irq_n <= '1';
+        wait_cycles(260);
+        
+        -- Expected PC = $00008002, P high = $0C, P low = $08 (CLI clears I)
+        check_mem(16#0490#, x"00", "IRQ PC[31:24]");
+        check_mem(16#0491#, x"00", "IRQ PC[23:16]");
+        check_mem(16#0492#, x"80", "IRQ PC[15:8]");
+        check_mem(16#0493#, x"02", "IRQ PC[7:0]");
+        check_mem(16#0494#, x"0C", "IRQ P high");
+        check_mem(16#0495#, x"08", "IRQ P low");
+        check_mem(16#0496#, x"3D", "IRQ returned to main");
+        
+        -----------------------------------------------------------------------
         -- TEST 115: JML long
         -----------------------------------------------------------------------
         report "";

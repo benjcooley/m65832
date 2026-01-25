@@ -3,8 +3,8 @@
 ## MUST (Linux-blocking)
 - [x] Privilege enforcement: trap on privileged ops + user MMIO access  
   Why: prevents user code from corrupting system state or MMU control. (Test 122)
-- [ ] Exception/interrupt entry/exit contract: push PC + full P, RTI restores both  
-  Why: kernel must reliably return to user with exact prior state.
+- [x] Exception/interrupt entry/exit contract: push PC + full P, RTI restores both  
+  Why: kernel must reliably return to user with exact prior state. (Test 114A)
 - [ ] Page faults: precise, with FAULTVA + fault type latched  
   Why: VM subsystem needs exact fault address and cause to resolve faults.
 - [ ] TLB invalidate: at least full flush (single-VA optional for v0)  
