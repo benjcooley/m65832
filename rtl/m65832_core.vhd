@@ -276,6 +276,8 @@ architecture rtl of M65832_Core is
     signal timer_ctrl     : std_logic_vector(7 downto 0);
     signal timer_cmp      : std_logic_vector(31 downto 0);
     signal timer_count    : std_logic_vector(31 downto 0);
+    signal timer_count_latched : std_logic_vector(31 downto 0);
+    signal timer_latched_valid : std_logic;
     signal timer_pending  : std_logic;
     signal timer_irq      : std_logic;
     
@@ -1773,15 +1775,7 @@ begin
                                 data_byte_count <= (others => '0');
                             end if;
                         elsif IS_SHIFTER = '1' then
-                            -- Shifter: write result to destination, update C flag
-                            P_reg(P_C) <= shifter_carry;
-                            -- Update N and Z flags based on result
-                            if shifter_result = x"00000000" then
-                                P_reg(P_Z) <= '1';
-                            else
-                                P_reg(P_Z) <= '0';
-                            end if;
-                            P_reg(P_N) <= shifter_result(31);
+                            -- Shifter: write result to destination (flags updated via flag logic)
                             if R_mode = '1' then
                                 state <= ST_FETCH;
                             else
@@ -1791,13 +1785,7 @@ begin
                             end if;
                         elsif IS_EXTEND = '1' then
                             -- Extend: write result to destination
-                            -- Update N and Z flags based on result
-                            if extend_result = x"00000000" then
-                                P_reg(P_Z) <= '1';
-                            else
-                                P_reg(P_Z) <= '0';
-                            end if;
-                            P_reg(P_N) <= extend_result(31);
+                            -- Flags updated via flag logic
                             if R_mode = '1' then
                                 state <= ST_FETCH;
                             else
@@ -2172,16 +2160,32 @@ begin
 
                 when MMIO_TIMER_COUNT(15 downto 0) =>
                     mmio_read_hit <= '1';
-                    mmio_read_data <= timer_count(7 downto 0);
+                    if timer_latched_valid = '1' then
+                        mmio_read_data <= timer_count_latched(7 downto 0);
+                    else
+                        mmio_read_data <= timer_count(7 downto 0);
+                    end if;
                 when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
                     mmio_read_hit <= '1';
-                    mmio_read_data <= timer_count(15 downto 8);
+                    if timer_latched_valid = '1' then
+                        mmio_read_data <= timer_count_latched(15 downto 8);
+                    else
+                        mmio_read_data <= timer_count(15 downto 8);
+                    end if;
                 when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
                     mmio_read_hit <= '1';
-                    mmio_read_data <= timer_count(23 downto 16);
+                    if timer_latched_valid = '1' then
+                        mmio_read_data <= timer_count_latched(23 downto 16);
+                    else
+                        mmio_read_data <= timer_count(23 downto 16);
+                    end if;
                 when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
                     mmio_read_hit <= '1';
-                    mmio_read_data <= timer_count(31 downto 24);
+                    if timer_latched_valid = '1' then
+                        mmio_read_data <= timer_count_latched(31 downto 24);
+                    else
+                        mmio_read_data <= timer_count(31 downto 24);
+                    end if;
                 
                 when MMIO_TLBINVAL(15 downto 0) =>
                     mmio_read_hit <= '1';
@@ -2354,6 +2358,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             timer_ctrl <= (others => '0');
             timer_cmp <= (others => '0');
             timer_count <= (others => '0');
+            timer_count_latched <= (others => '0');
+            timer_latched_valid <= '0';
             timer_pending <= '0';
         elsif rising_edge(CLK) then
             if CE = '1' then
@@ -2366,6 +2372,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     if timer_ctrl(2) = '1' and timer_pending = '0' and timer_cmp /= x"00000000" and
                        unsigned(timer_count) >= unsigned(timer_cmp) then
                         timer_pending <= '1';
+                        timer_count_latched <= timer_count;
+                        timer_latched_valid <= '1';
                         if timer_ctrl(1) = '1' then
                             timer_count <= (others => '0');
                         end if;
@@ -2454,12 +2462,20 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
 
                             when MMIO_TIMER_COUNT(15 downto 0) =>
                                 timer_count(7 downto 0) <= DATA_OUT;
+                                timer_count_latched(7 downto 0) <= DATA_OUT;
+                                timer_latched_valid <= '0';
                             when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
                                 timer_count(15 downto 8) <= DATA_OUT;
+                                timer_count_latched(15 downto 8) <= DATA_OUT;
+                                timer_latched_valid <= '0';
                             when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
                                 timer_count(23 downto 16) <= DATA_OUT;
+                                timer_count_latched(23 downto 16) <= DATA_OUT;
+                                timer_latched_valid <= '0';
                             when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
                                 timer_count(31 downto 24) <= DATA_OUT;
+                                timer_count_latched(31 downto 24) <= DATA_OUT;
+                                timer_latched_valid <= '0';
                             
                             when others =>
                                 null;
@@ -3104,7 +3120,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
     
     process(ext_result, ext_result_valid, ext_lea, ext_mul, ext_mulu, ext_div, ext_divu, ext_lli, ext_tta, T_reg,
-            stack_is_pull, IR, data_buffer, M_width, X_width)
+            stack_is_pull, IR, data_buffer, M_width, X_width, IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable value32 : std_logic_vector(31 downto 0);
         variable width_sel : std_logic_vector(1 downto 0);
     begin
@@ -3113,7 +3129,15 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         ext_flag_n <= '0';
         ext_flag_v <= '0';
         
-        if ext_tta = '1' then
+        if IS_SHIFTER = '1' then
+            ext_flag_load <= '1';
+            value32 := shifter_result;
+            width_sel := WIDTH_32;
+        elsif IS_EXTEND = '1' then
+            ext_flag_load <= '1';
+            value32 := extend_result;
+            width_sel := WIDTH_32;
+        elsif ext_tta = '1' then
             ext_flag_load <= '1';
             value32 := T_reg;
             width_sel := M_width;
@@ -3568,7 +3592,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     ---------------------------------------------------------------------------
     
     -- Carry flag input: ALU carry for arithmetic, or explicit set/clear for CLC/SEC
-    flag_c_in <= fpu_flag_c when fpu_flag_c_load = '1' else
+    flag_c_in <= shifter_carry when IS_SHIFTER = '1' else
+                 fpu_flag_c when fpu_flag_c_load = '1' else
                  '0' when (IS_FLAG_OP = '1' and IR = x"18") else  -- CLC
                  '1' when (IS_FLAG_OP = '1' and IR = x"38") else  -- SEC
                  ALU_CO;
@@ -3580,7 +3605,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
     flag_c_load <= '1' when state = ST_EXECUTE and 
-                   (fpu_flag_c_load = '1' or
+                   (IS_SHIFTER = '1' or
+                    fpu_flag_c_load = '1' or
                     (IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
                     (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
                     (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 

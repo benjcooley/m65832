@@ -718,6 +718,8 @@ begin
                         IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
                     elsif IR = x"6B" then
                         IS_RTL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";  -- RTL
+                    elsif IR = x"FB" then
+                        IS_XCE <= '1'; IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- XCE
                     else
                         IS_ALU_OP <= '1';
                         ALU_OP <= aaa;
