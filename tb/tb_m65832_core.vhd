@@ -3473,7 +3473,7 @@ begin
         -- Program:
         -- SD #$00001000, RSET, LDA #$AA, STA $20
         -- SD #$00002000, LDA $20 -> $0340 (should be $AA)
-        -- LDX #$01, LDA #$CC, STA $20,X, LDA $21 -> $0342 (should be $CC)
+        -- LDX #$04, LDA #$CC, STA $20,X, LDA $24 -> $0342 (should be $CC)
         -- RCLR, LDA $20 -> $0341 (should be $55 from $2020)
         poke(16#8000#, x"02");  -- EXT prefix
         poke(16#8001#, x"24");  -- SD #imm32
@@ -3499,13 +3499,13 @@ begin
         poke(16#8015#, x"40");  -- $0340
         poke(16#8016#, x"03");
         poke(16#8017#, x"A2");  -- LDX #
-        poke(16#8018#, x"01");
+        poke(16#8018#, x"04");
         poke(16#8019#, x"A9");  -- LDA #
         poke(16#801A#, x"CC");
         poke(16#801B#, x"95");  -- STA dp,X
         poke(16#801C#, x"20");
         poke(16#801D#, x"A5");  -- LDA dp
-        poke(16#801E#, x"21");
+        poke(16#801E#, x"24");
         poke(16#801F#, x"8D");  -- STA abs
         poke(16#8020#, x"42");  -- $0342
         poke(16#8021#, x"03");
@@ -3580,19 +3580,19 @@ begin
         report "";
         report "TEST 97: RSET MULU dp";
         
-        -- Program: RSET, LDA #$03, STA $22, LDA #$04,
-        -- MULU dp $22, STA $0345
+        -- Program: RSET, LDA #$03, STA $20, LDA #$04,
+        -- MULU dp $20, STA $0345
         poke(16#8000#, x"02");  -- EXT prefix
         poke(16#8001#, x"30");  -- RSET
         poke(16#8002#, x"A9");  -- LDA #
         poke(16#8003#, x"03");
         poke(16#8004#, x"85");  -- STA dp
-        poke(16#8005#, x"22");
+        poke(16#8005#, x"20");
         poke(16#8006#, x"A9");  -- LDA #
         poke(16#8007#, x"04");
         poke(16#8008#, x"02");  -- EXT prefix
         poke(16#8009#, x"01");  -- MULU dp
-        poke(16#800A#, x"22");
+        poke(16#800A#, x"20");
         poke(16#800B#, x"8D");  -- STA abs
         poke(16#800C#, x"45");  -- $0345
         poke(16#800D#, x"03");
@@ -3839,7 +3839,7 @@ begin
         poke(16#8010#, x"66");
         poke(16#8011#, x"55");
         poke(16#8012#, x"85");  -- STA dp
-        poke(16#8013#, x"01");  -- R1
+        poke(16#8013#, x"04");  -- R1 (aligned)
         poke(16#8014#, x"02");  -- EXT prefix
         poke(16#8015#, x"B0");  -- LDF0 dp
         poke(16#8016#, x"00");
@@ -3852,7 +3852,7 @@ begin
         poke(16#801D#, x"00");
         poke(16#801E#, x"07");
         poke(16#801F#, x"A5");  -- LDA dp
-        poke(16#8020#, x"09");  -- R9
+        poke(16#8020#, x"0C");  -- R3 (aligned high word)
         poke(16#8021#, x"8D");  -- STA abs
         poke(16#8022#, x"04");
         poke(16#8023#, x"07");

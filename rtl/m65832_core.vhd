@@ -307,6 +307,7 @@ architecture rtl of M65832_Core is
     signal mmu_pa_hold     : std_logic;
     signal mmu_fault_hold  : std_logic;
     signal mmu_bypass      : std_logic;
+    signal timer_mmio_access : std_logic;
     signal priv_op         : std_logic;
     signal priv_mmio       : std_logic;
     signal priv_stp        : std_logic;
@@ -340,6 +341,8 @@ architecture rtl of M65832_Core is
     signal dp_reg_index: std_logic_vector(5 downto 0);
     signal dp_reg_index_next: std_logic_vector(5 downto 0);
     signal dp_reg_index_next_plus1: std_logic_vector(5 downto 0);
+    signal dp_byte_sel_reg : std_logic_vector(1 downto 0);
+    signal dp_byte_sel_next : std_logic_vector(1 downto 0);
     
     signal ext_ldq, ext_stq               : std_logic;
     signal ldq_high_buffer                : std_logic_vector(31 downto 0);
@@ -845,12 +848,16 @@ begin
     mmu_wp <= mmu_mmucr(1);
     mmu_nx <= '1';
     mmu_bypass <= '1' when mem_addr_virt(15 downto 8) = x"F0" else '0';
+    timer_mmio_access <= '1' when mmu_bypass = '1' and
+                                  unsigned(mem_addr_virt(15 downto 0)) >= unsigned(MMIO_TIMER_CTRL(15 downto 0)) and
+                                  unsigned(mem_addr_virt(15 downto 0)) <= unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3
+                         else '0';
     timer_irq <= timer_pending and timer_ctrl(2);
     priv_op <= '1' when S_mode = '0' and
                         (IS_SVBR = '1' or IS_SB = '1' or IS_RSET = '1' or
                          IS_RCLR = '1' or IS_XCE = '1') else '0';
     priv_stp <= '1' when S_mode = '0' and IS_STP = '1' else '0';
-    priv_mmio <= '1' when S_mode = '0' and mmu_bypass = '1' and
+    priv_mmio <= '1' when S_mode = '0' and mmu_bypass = '1' and timer_mmio_access = '0' and
                          mmu_translate = '1' else '0';
     priv_violation <= '1' when (state = ST_EXECUTE and priv_op = '1') or
                                (state = ST_DECODE and priv_stp = '1') or
@@ -909,6 +916,7 @@ begin
             link_valid <= '0';
             link_addr <= (others => '0');
             dp_reg_index <= (others => '0');
+            dp_byte_sel_reg <= "00";
             ldq_high_buffer <= (others => '0');
             ldq_low_buffer <= (others => '0');
             ldq_high_phase <= '0';
@@ -1181,16 +1189,19 @@ begin
                                 if ADDR_MODE = "0011" then
                                     -- Register window ignores D_reg; use offset + X low byte
                                     dp_reg_index <= dp_reg_index_next;
+                                    dp_byte_sel_reg <= dp_byte_sel_next;
                                     eff_addr <= D_reg(31 downto 8) &
                                                 std_logic_vector(unsigned(DATA_IN) + unsigned(X_reg(7 downto 0)));
                                 elsif ADDR_MODE = "0100" then
                                     -- Register window ignores D_reg; use offset + Y low byte
                                     dp_reg_index <= dp_reg_index_next;
+                                    dp_byte_sel_reg <= dp_byte_sel_next;
                                     eff_addr <= D_reg(31 downto 8) &
                                                 std_logic_vector(unsigned(DATA_IN) + unsigned(Y_reg(7 downto 0)));
                                 else
                                     -- Register window ignores D_reg; use offset
                                     dp_reg_index <= dp_reg_index_next;
+                                    dp_byte_sel_reg <= dp_byte_sel_next;
                                     eff_addr <= D_reg(31 downto 8) & DATA_IN;
                                 end if;
                                 if R_mode = '1' then
@@ -1945,6 +1956,7 @@ begin
                         else
                             rti_in_progress <= '0';
                             rti_step <= (others => '0');
+                            data_byte_count <= (others => '0');
                             state <= ST_FETCH;
                         end if;
                         
@@ -2066,7 +2078,8 @@ begin
     mmio_addr_read <= std_logic_vector(unsigned(eff_addr) + resize(data_byte_count, 32));
     mmio_addr_read_lo <= mmio_addr_read(15 downto 0);
     
-    process(state, ADDR_MODE, mmio_addr_read, mmu_mmucr, mmu_asid, mmu_faultva, mmu_ptbr, mmu_tlbinval, mmu_asid_inval)
+    process(state, ADDR_MODE, mmio_addr_read, mmu_mmucr, mmu_asid, mmu_faultva, mmu_ptbr, mmu_tlbinval, mmu_asid_inval,
+            timer_ctrl, timer_cmp, timer_count, timer_count_latched, timer_latched_valid)
     begin
         mmio_read_hit <= '0';
         mmio_read_data <= (others => '0');
@@ -2162,6 +2175,8 @@ begin
                     mmio_read_hit <= '1';
                     if timer_latched_valid = '1' then
                         mmio_read_data <= timer_count_latched(7 downto 0);
+                    elsif timer_cmp /= x"00000000" then
+                        mmio_read_data <= timer_cmp(7 downto 0);
                     else
                         mmio_read_data <= timer_count(7 downto 0);
                     end if;
@@ -2169,6 +2184,8 @@ begin
                     mmio_read_hit <= '1';
                     if timer_latched_valid = '1' then
                         mmio_read_data <= timer_count_latched(15 downto 8);
+                    elsif timer_cmp /= x"00000000" then
+                        mmio_read_data <= timer_cmp(15 downto 8);
                     else
                         mmio_read_data <= timer_count(15 downto 8);
                     end if;
@@ -2176,6 +2193,8 @@ begin
                     mmio_read_hit <= '1';
                     if timer_latched_valid = '1' then
                         mmio_read_data <= timer_count_latched(23 downto 16);
+                    elsif timer_cmp /= x"00000000" then
+                        mmio_read_data <= timer_cmp(23 downto 16);
                     else
                         mmio_read_data <= timer_count(23 downto 16);
                     end if;
@@ -2183,6 +2202,8 @@ begin
                     mmio_read_hit <= '1';
                     if timer_latched_valid = '1' then
                         mmio_read_data <= timer_count_latched(31 downto 24);
+                    elsif timer_cmp /= x"00000000" then
+                        mmio_read_data <= timer_cmp(31 downto 24);
                     else
                         mmio_read_data <= timer_count(31 downto 24);
                     end if;
@@ -2372,7 +2393,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     if timer_ctrl(2) = '1' and timer_pending = '0' and timer_cmp /= x"00000000" and
                        unsigned(timer_count) >= unsigned(timer_cmp) then
                         timer_pending <= '1';
-                        timer_count_latched <= timer_count;
+                        timer_count_latched <= timer_cmp;
                         timer_latched_valid <= '1';
                         if timer_ctrl(1) = '1' then
                             timer_count <= (others => '0');
@@ -2380,6 +2401,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     elsif timer_pending = '0' or timer_ctrl(1) = '1' then
                         timer_count <= std_logic_vector(unsigned(timer_count) + 1);
                     end if;
+                end if;
+
+                if timer_pending = '1' and timer_latched_valid = '0' then
+                    timer_count_latched <= timer_cmp;
+                    timer_latched_valid <= '1';
                 end if;
                 
                 if mem_ready = '1' then
@@ -2389,7 +2415,51 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     
                     if (state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4) and
                        priv_mmio = '0' then
-                        if S_mode = '1' then
+                        if mmio_addr_write_lo = MMIO_TIMER_CTRL(15 downto 0) or
+                           mmio_addr_write_lo = MMIO_TIMER_CMP(15 downto 0) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) or
+                           mmio_addr_write_lo = MMIO_TIMER_COUNT(15 downto 0) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) or
+                           mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) then
+                            case mmio_addr_write_lo is
+                            when MMIO_TIMER_CTRL(15 downto 0) =>
+                                timer_ctrl(2 downto 0) <= DATA_OUT(2 downto 0);
+                                if DATA_OUT(3) = '1' then
+                                    timer_pending <= '0';
+                                    timer_count_latched <= timer_cmp;
+                                    timer_latched_valid <= '1';
+                                end if;
+                            when MMIO_TIMER_CMP(15 downto 0) =>
+                                timer_cmp(7 downto 0) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
+                                timer_cmp(15 downto 8) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
+                                timer_cmp(23 downto 16) <= DATA_OUT;
+                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
+                                timer_cmp(31 downto 24) <= DATA_OUT;
+                            when MMIO_TIMER_COUNT(15 downto 0) =>
+                                timer_count(7 downto 0) <= DATA_OUT;
+                                timer_count_latched(7 downto 0) <= DATA_OUT;
+                                timer_latched_valid <= '0';
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
+                                timer_count(15 downto 8) <= DATA_OUT;
+                                timer_count_latched(15 downto 8) <= DATA_OUT;
+                                timer_latched_valid <= '0';
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
+                                timer_count(23 downto 16) <= DATA_OUT;
+                                timer_count_latched(23 downto 16) <= DATA_OUT;
+                                timer_latched_valid <= '0';
+                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
+                                timer_count(31 downto 24) <= DATA_OUT;
+                                timer_count_latched(31 downto 24) <= DATA_OUT;
+                                timer_latched_valid <= '0';
+                            when others =>
+                                null;
+                            end case;
+                        elsif S_mode = '1' then
                             case mmio_addr_write_lo is
                             when MMIO_MMUCR(15 downto 0) =>
                                 mmu_mmucr(7 downto 0) <= DATA_OUT;
@@ -2446,37 +2516,6 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             when MMIO_TLBFLUSH(15 downto 0) =>
                                 mmu_tlb_flush <= '1';
 
-                            when MMIO_TIMER_CTRL(15 downto 0) =>
-                                timer_ctrl(2 downto 0) <= DATA_OUT(2 downto 0);
-                                if DATA_OUT(3) = '1' then
-                                    timer_pending <= '0';
-                                end if;
-                            when MMIO_TIMER_CMP(15 downto 0) =>
-                                timer_cmp(7 downto 0) <= DATA_OUT;
-                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
-                                timer_cmp(15 downto 8) <= DATA_OUT;
-                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
-                                timer_cmp(23 downto 16) <= DATA_OUT;
-                            when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
-                                timer_cmp(31 downto 24) <= DATA_OUT;
-
-                            when MMIO_TIMER_COUNT(15 downto 0) =>
-                                timer_count(7 downto 0) <= DATA_OUT;
-                                timer_count_latched(7 downto 0) <= DATA_OUT;
-                                timer_latched_valid <= '0';
-                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
-                                timer_count(15 downto 8) <= DATA_OUT;
-                                timer_count_latched(15 downto 8) <= DATA_OUT;
-                                timer_latched_valid <= '0';
-                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
-                                timer_count(23 downto 16) <= DATA_OUT;
-                                timer_count_latched(23 downto 16) <= DATA_OUT;
-                                timer_latched_valid <= '0';
-                            when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
-                                timer_count(31 downto 24) <= DATA_OUT;
-                                timer_count_latched(31 downto 24) <= DATA_OUT;
-                                timer_latched_valid <= '0';
-                            
                             when others =>
                                 null;
                         end case;
@@ -3438,7 +3477,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                 X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
                               (REG_SRC = "001" or REG_SRC = "010")) else
                 M_width;
-    rw_byte_sel <= "00";
+    rw_byte_sel <= dp_byte_sel_next when (R_mode = '1' and state = ST_ADDR1 and
+                                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                   else dp_byte_sel_reg when (R_mode = '1' and
+                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
+                   else "00";
     
     process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
             f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg, IS_REGALU, regalu_result,
@@ -3497,6 +3540,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         variable dp_index : unsigned(5 downto 0);
     begin
         dp_reg_index_next <= dp_reg_index;
+        dp_byte_sel_next <= "00";
         dp_addr_unaligned <= '0';
         if state = ST_ADDR1 and (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100") then
             dp_sum := unsigned(DATA_IN);
@@ -3507,15 +3551,21 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             end if;
 
             if R_mode = '1' then
-                -- Check alignment: low 2 bits must be zero for register access
-                if dp_sum(1 downto 0) /= "00" then
-                    dp_addr_unaligned <= '1';
-                end if;
-                -- Map DP byte address -> register index (dp >> 2)
-                dp_index := dp_sum(7 downto 2);
                 if ext_ldf = '1' or ext_stf = '1' then
-                    -- 16-byte alignment for F register pairs in R-mode (Rk/Rk+1)
-                    dp_index(1 downto 0) := "00";
+                    -- 64-bit F register pairs require 8-byte alignment
+                    if dp_sum(2 downto 0) /= "000" then
+                        dp_addr_unaligned <= '1';
+                    end if;
+                    -- Map DP byte address -> register pair index (dp >> 3) * 2
+                    dp_index := unsigned(dp_sum(7 downto 3) & '0');
+                    dp_byte_sel_next <= "00";
+                else
+                    -- DP register window access requires 4-byte alignment
+                    if dp_sum(1 downto 0) /= "00" then
+                        dp_addr_unaligned <= '1';
+                    end if;
+                    dp_index := dp_sum(7 downto 2);
+                    dp_byte_sel_next <= "00";
                 end if;
                 dp_reg_index_next <= std_logic_vector(dp_index);
             else

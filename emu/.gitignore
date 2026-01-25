@@ -1,0 +1,25 @@
+# Build artifacts
+m65832emu
+libm65832emu.a
+*.o
+
+# Test artifacts
+test/*.bin
+test/*.hex
+test/*.out
+
+# Editor files
+*.swp
+*~
+.*.swp
+
+# Debug files
+*.dSYM/
+core
+vgcore.*
+
+# Profiling
+gmon.out
+*.gcda
+*.gcno
+*.gcov
