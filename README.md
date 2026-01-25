@@ -1,4 +1,4 @@
-# M65832 - Modern 6502 Evolution
+# M65832 - A Modern (as of maybe mid 2000's) 6502 Evolution
 
 A 32-bit processor architecture extending the 65816, designed for:
 - Running classic 6502/65816 code without emulation
