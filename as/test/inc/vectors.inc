@@ -1,0 +1,7 @@
+; M65832 Vector table definitions
+
+VEC_RESET   = $FFFFFFE0
+VEC_NMI     = $FFFFFFE4
+VEC_IRQ     = $FFFFFFE8
+VEC_BRK     = $FFFFFFEC
+VEC_TRAP    = $FFFFFFF0

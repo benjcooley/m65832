@@ -45,12 +45,19 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 
 ## Documentation
 
+### Architecture
 - **[Architecture Reference](docs/M65832_Architecture_Reference.md)** - Complete CPU specification
 - **[Instruction Set](docs/M65832_Instruction_Set.md)** - Detailed opcode reference
-- **[Linux Porting Guide](docs/M65832_Linux_Porting_Guide.md)** - OS implementation notes
-- **[System Programming Guide](docs/M65832_System_Programming_Guide.md)** - Supervisor mode, MMU, interrupts, and multitasking
-- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core architecture, 6502 compatibility, cycle-accurate timing
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
+
+### Tools
+- **[Assembler Reference](docs/M65832_Assembler_Reference.md)** - Assembler usage, syntax, and directives
+- **[Disassembler Reference](docs/M65832_Disassembler_Reference.md)** - Disassembler usage and library API
+
+### System Programming
+- **[System Programming Guide](docs/M65832_System_Programming_Guide.md)** - Supervisor mode, MMU, interrupts, and multitasking
+- **[Linux Porting Guide](docs/M65832_Linux_Porting_Guide.md)** - OS implementation notes
+- **[Classic Coprocessor](docs/M65832_Classic_Coprocessor.md)** - Two-core architecture, 6502 compatibility, cycle-accurate timing
 
 ## STATUS
 
@@ -61,7 +68,8 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - [x] MMU with page-table walk + TLB
 - [x] Cycle-accurate 6502 coprocessor and interleaving
 - [x] Privilege model, exceptions, and interrupt entry/exit
-- [ ] Assembler and ISA toolchain
+- [x] Assembler (two-pass, includes, sections, full instruction set)
+- [x] Disassembler (standalone and library)
 - [ ] Expanded regression and corner-case validation
 - [ ] Hardware bring-up on target FPGA
 - [ ] Performance characterization and tuning
@@ -194,24 +202,34 @@ m65832/
 ├── docs/
 │   ├── M65832_Architecture_Reference.md
 │   ├── M65832_Instruction_Set.md
+│   ├── M65832_Assembler_Reference.md
+│   ├── M65832_Disassembler_Reference.md
 │   ├── M65832_Linux_Porting_Guide.md
 │   ├── M65832_System_Programming_Guide.md
 │   ├── M65832_Classic_Coprocessor.md
 │   └── M65832_Quick_Reference.md
+├── as/                     # Assembler and Disassembler
+│   ├── m65832as.c          # Two-pass assembler
+│   ├── m65832dis.c         # Disassembler (standalone + library)
+│   ├── Makefile
+│   ├── README.md
+│   └── test/               # Test suite
 ├── cores/                  # Reference VHDL cores
 │   ├── 6502-mx65/          # MIT-licensed 6502 (for dedicated core)
 │   │   └── mx65.vhd        # ~1000 lines, cycle-accurate
 │   └── 65816-mister/       # GPL-3 65816 (reference for M65832)
 │       └── rtl/65C816/     # Modular: ALU, AddrGen, MCode, etc.
-├── rtl/                    # M65832 VHDL implementation (planned)
+├── rtl/                    # M65832 VHDL implementation
 │   ├── m65832_pkg.vhd
 │   ├── m65832_core.vhd
 │   ├── m65832_alu.vhd
 │   ├── m65832_regfile.vhd
 │   ├── m65832_decoder.vhd
 │   └── m65832_mmu.vhd
-├── sim/                    # Simulation testbenches (planned)
-├── asm/                    # Assembler (planned)
+├── tb/                     # GHDL testbenches
+│   ├── run_core_tests.sh
+│   ├── run_coprocessor_tests.sh
+│   └── tb_*.vhd
 └── software/               # Example code (planned)
 ```
 

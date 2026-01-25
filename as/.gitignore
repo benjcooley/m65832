@@ -1,0 +1,31 @@
+# Compiled binaries
+m65832as
+m65832as.exe
+m65832dis
+m65832dis.exe
+
+# Object files
+*.o
+*.obj
+
+# Test outputs
+test/*.bin
+test/*.hex
+test/*.lst
+
+# Keep test include files
+!test/inc/
+
+# Editor backups
+*~
+*.swp
+*.swo
+.*.swp
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.dSYM/
