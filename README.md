@@ -19,15 +19,16 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 | Physical Address | 65-bit (32 exabytes, via paging) |
 | Registers | A, X, Y + 64×32-bit register window |
 | Endianness | Little-endian (6502 heritage) |
-| Compatibility | 6502 emulation mode at any address |
+| Compatibility | Cycle accurate 6502 emulation mode |
 
 ### Design Goals
 
-1. **6502/65816 Compatible** - Run classic code with minimal changes
-2. **Flat 32-bit Address Space** - Simple, predictable memory model
-3. **Linux Capable** - MMU, privilege levels, atomics
-4. **Compact Instructions** - Keep the 6502's code density
-5. **FPGA Friendly** - Implementable on mid-range FPGAs
+1. **6502/65816 Compatible** - Run 6502/816 code with minimal changes
+2. **6502 Coprocessor** - Cycle accurate 6502 mode,  multiple instruction variants, selectable clock rate
+3. **Flat 32-bit Address Space** - Simple, predictable memory model
+4. **Linux Capable** - MMU, privilege levels, atomics
+5. **Compact Instructions** - Keep the 6502's code density
+6. **FPGA Friendly** - Implementable on mid-range FPGAs
 
 ### Reference Implementations
 
