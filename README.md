@@ -23,12 +23,13 @@ The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extendin
 
 ### Design Goals
 
-1. **6502/65816 Compatible** - Run 6502/816 code with minimal changes
-2. **6502 Coprocessor** - Cycle accurate 6502 mode,  multiple instruction variants, selectable clock rate
-3. **Flat 32-bit Address Space** - Simple, predictable memory model
-4. **Linux Capable** - MMU, privilege levels, atomics
-5. **Compact Instructions** - Keep the 6502's code density
-6. **FPGA Friendly** - Implementable on mid-range FPGAs
+1. **Modern 6052 derived 32 bit isa** - 32 bit 6502 instruction set with base regs + 64 ZP registers
+2. **6502/65816 Compatible** - Run 6502/816 code with minimal changes
+3. **6502 Coprocessor** - Cycle accurate 6502 mode,  multiple instruction variants, selectable clock rate
+4. **Flat 32-bit Address Space** - Simple, predictable memory model
+5. **Linux Capable** - MMU, privilege levels, atomics
+6. **Compact Instructions** - Keep the 6502's code density
+7. **FPGA Friendly** - Implementable on mid-range FPGAs
 
 ### Reference Implementations
 
