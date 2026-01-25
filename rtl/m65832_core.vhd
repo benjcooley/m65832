@@ -292,9 +292,6 @@ architecture rtl of M65832_Core is
     signal mmio_base_write : std_logic_vector(31 downto 0);
     signal mmio_base_read_sel  : std_logic_vector(31 downto 0);
     signal mmio_base_write_sel : std_logic_vector(31 downto 0);
-    signal mmio_write_pending  : std_logic;
-    signal mmio_write_addr     : std_logic_vector(31 downto 0);
-    signal mmio_write_data     : std_logic_vector(7 downto 0);
     
     -- MMU integration
     signal mem_ready       : std_logic;
@@ -2088,54 +2085,22 @@ begin
             mmio_base_read <= (others => '0');
             mmio_base_write <= (others => '0');
         elsif rising_edge(CLK) then
-            if CE = '1' and mem_ready = '1' then
+            if CE = '1' then
                 -- Capture base address at the start of MMIO transactions
                 if state = ST_READ and data_byte_count = "000" then
-                    mmio_base_read <= eff_addr;
-                end if;
-
-                if state = ST_ADDR2 and
-                   (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
-                    if ADDR_MODE = "0110" then
-                        -- Absolute,X
-                        mmio_base_write <= std_logic_vector(
-                            resize(
-                                (resize(unsigned(DATA_IN), 16) sll 8) or
-                                resize(unsigned(data_buffer(7 downto 0)), 16),
-                                32) +
-                            unsigned(B_reg) +
-                            unsigned(X_reg));
-                    elsif ADDR_MODE = "0111" then
-                        -- Absolute,Y
-                        mmio_base_write <= std_logic_vector(
-                            resize(
-                                (resize(unsigned(DATA_IN), 16) sll 8) or
-                                resize(unsigned(data_buffer(7 downto 0)), 16),
-                                32) +
-                            unsigned(B_reg) +
-                            unsigned(Y_reg));
-                    else
-                        -- Absolute
-                        mmio_base_write <= std_logic_vector(
-                            resize(
-                                (resize(unsigned(DATA_IN), 16) sll 8) or
-                                resize(unsigned(data_buffer(7 downto 0)), 16),
-                                32) +
-                            unsigned(B_reg));
-                    end if;
+                    mmio_base_read <= ADDR;
                 elsif state = ST_WRITE and data_byte_count = "000" then
-                    -- Fallback for non-absolute addressing modes
-                    mmio_base_write <= eff_addr;
+                    mmio_base_write <= ADDR;
                 end if;
             end if;
         end if;
     end process;
 
-    mmio_base_read_sel <= eff_addr when data_byte_count = "000" else mmio_base_read;
-    mmio_base_write_sel <= mmio_base_write;
+    mmio_base_read_sel <= ADDR when data_byte_count = "000" else mmio_base_read;
+    mmio_base_write_sel <= ADDR when data_byte_count = "000" else mmio_base_write;
 
-    mmio_addr_read <= std_logic_vector(unsigned(mmio_base_read_sel) + resize(data_byte_count, 32));
-    mmio_addr_read_lo <= mmio_addr_read(15 downto 0);
+    mmio_addr_read <= ADDR;
+    mmio_addr_read_lo <= ADDR(15 downto 0);
     
     process(state, ADDR_MODE, mmio_addr_read, mmu_mmucr, mmu_asid, mmu_faultva, mmu_ptbr, mmu_tlbinval, mmu_asid_inval,
             timer_ctrl, timer_cmp, timer_count, timer_count_latched, timer_latched_valid)
@@ -2441,9 +2406,6 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             timer_count_latched <= (others => '0');
             timer_latched_valid <= '0';
             timer_pending <= '0';
-            mmio_write_pending <= '0';
-            mmio_write_addr <= (others => '0');
-            mmio_write_data <= (others => '0');
         elsif rising_edge(CLK) then
             if CE = '1' then
                 if mmu_page_fault = '1' then
@@ -2470,105 +2432,6 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     timer_latched_valid <= '1';
                 end if;
 
-                if mmio_write_pending = '1' then
-                    case mmio_write_addr(15 downto 0) is
-                    when MMIO_TIMER_CTRL(15 downto 0) =>
-                        timer_ctrl(2 downto 0) <= mmio_write_data(2 downto 0);
-                        if mmio_write_data(3) = '1' then
-                            timer_pending <= '0';
-                            timer_count_latched <= timer_cmp;
-                            timer_latched_valid <= '1';
-                        end if;
-                    when MMIO_TIMER_CMP(15 downto 0) =>
-                        timer_cmp(7 downto 0) <= mmio_write_data;
-                    when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
-                        timer_cmp(15 downto 8) <= mmio_write_data;
-                    when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
-                        timer_cmp(23 downto 16) <= mmio_write_data;
-                    when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
-                        timer_cmp(31 downto 24) <= mmio_write_data;
-                    when MMIO_TIMER_COUNT(15 downto 0) =>
-                        timer_count(7 downto 0) <= mmio_write_data;
-                        timer_count_latched(7 downto 0) <= mmio_write_data;
-                        timer_latched_valid <= '0';
-                    when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
-                        timer_count(15 downto 8) <= mmio_write_data;
-                        timer_count_latched(15 downto 8) <= mmio_write_data;
-                        timer_latched_valid <= '0';
-                    when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
-                        timer_count(23 downto 16) <= mmio_write_data;
-                        timer_count_latched(23 downto 16) <= mmio_write_data;
-                        timer_latched_valid <= '0';
-                    when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
-                        timer_count(31 downto 24) <= mmio_write_data;
-                        timer_count_latched(31 downto 24) <= mmio_write_data;
-                        timer_latched_valid <= '0';
-                    when others =>
-                        if S_mode = '1' then
-                            case mmio_write_addr(15 downto 0) is
-                            when MMIO_MMUCR(15 downto 0) =>
-                                mmu_mmucr(7 downto 0) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
-                                mmu_mmucr(15 downto 8) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
-                                mmu_mmucr(23 downto 16) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
-                                mmu_mmucr(31 downto 24) <= mmio_write_data;
-
-                            when MMIO_ASID(15 downto 0) =>
-                                mmu_asid(7 downto 0) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
-                                mmu_asid(15 downto 8) <= mmio_write_data;
-
-                            when MMIO_ASIDINVAL(15 downto 0) =>
-                                mmu_asid_inval(7 downto 0) <= mmio_write_data;
-                                mmu_tlb_flush_asid <= '1';
-                            when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
-                                mmu_asid_inval(15 downto 8) <= mmio_write_data;
-                                mmu_tlb_flush_asid <= '1';
-
-                            when MMIO_TLBINVAL(15 downto 0) =>
-                                mmu_tlbinval(7 downto 0) <= mmio_write_data;
-                                mmu_tlb_flush_va <= '1';
-                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
-                                mmu_tlbinval(15 downto 8) <= mmio_write_data;
-                                mmu_tlb_flush_va <= '1';
-                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
-                                mmu_tlbinval(23 downto 16) <= mmio_write_data;
-                                mmu_tlb_flush_va <= '1';
-                            when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
-                                mmu_tlbinval(31 downto 24) <= mmio_write_data;
-                                mmu_tlb_flush_va <= '1';
-
-                            when MMIO_PTBR_LO(15 downto 0) =>
-                                mmu_ptbr(7 downto 0) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
-                                mmu_ptbr(15 downto 8) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
-                                mmu_ptbr(23 downto 16) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
-                                mmu_ptbr(31 downto 24) <= mmio_write_data;
-
-                            when MMIO_PTBR_HI(15 downto 0) =>
-                                mmu_ptbr(39 downto 32) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
-                                mmu_ptbr(47 downto 40) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
-                                mmu_ptbr(55 downto 48) <= mmio_write_data;
-                            when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
-                                mmu_ptbr(63 downto 56) <= mmio_write_data;
-
-                            when MMIO_TLBFLUSH(15 downto 0) =>
-                                mmu_tlb_flush <= '1';
-
-                            when others =>
-                                null;
-                            end case;
-                        end if;
-                    end case;
-                    mmio_write_pending <= '0';
-                end if;
-                
                 if mem_ready = '1' then
                     mmu_tlb_flush <= '0';
                     mmu_tlb_flush_asid <= '0';
@@ -2577,9 +2440,111 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
 
                 if (state = ST_WRITE or state = ST_WRITE2 or state = ST_WRITE3 or state = ST_WRITE4) and
                    priv_mmio = '0' then
-                    mmio_write_pending <= '1';
-                    mmio_write_addr <= ADDR;
-                    mmio_write_data <= DATA_OUT;
+                    if mmio_addr_write_lo = MMIO_TIMER_CTRL(15 downto 0) or
+                       mmio_addr_write_lo = MMIO_TIMER_CMP(15 downto 0) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) or
+                       mmio_addr_write_lo = MMIO_TIMER_COUNT(15 downto 0) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) or
+                       mmio_addr_write_lo = std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) then
+                        case mmio_addr_write_lo is
+                        when MMIO_TIMER_CTRL(15 downto 0) =>
+                            timer_ctrl(2 downto 0) <= DATA_OUT(2 downto 0);
+                            if DATA_OUT(3) = '1' then
+                                timer_pending <= '0';
+                                timer_count_latched <= timer_cmp;
+                                timer_latched_valid <= '1';
+                            end if;
+                        when MMIO_TIMER_CMP(15 downto 0) =>
+                            timer_cmp(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 1) =>
+                            timer_cmp(15 downto 8) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 2) =>
+                            timer_cmp(23 downto 16) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_TIMER_CMP(15 downto 0)) + 3) =>
+                            timer_cmp(31 downto 24) <= DATA_OUT;
+                        when MMIO_TIMER_COUNT(15 downto 0) =>
+                            timer_count(7 downto 0) <= DATA_OUT;
+                            timer_count_latched(7 downto 0) <= DATA_OUT;
+                            timer_latched_valid <= '0';
+                        when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 1) =>
+                            timer_count(15 downto 8) <= DATA_OUT;
+                            timer_count_latched(15 downto 8) <= DATA_OUT;
+                            timer_latched_valid <= '0';
+                        when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 2) =>
+                            timer_count(23 downto 16) <= DATA_OUT;
+                            timer_count_latched(23 downto 16) <= DATA_OUT;
+                            timer_latched_valid <= '0';
+                        when std_logic_vector(unsigned(MMIO_TIMER_COUNT(15 downto 0)) + 3) =>
+                            timer_count(31 downto 24) <= DATA_OUT;
+                            timer_count_latched(31 downto 24) <= DATA_OUT;
+                            timer_latched_valid <= '0';
+                        when others =>
+                            null;
+                        end case;
+                    elsif S_mode = '1' then
+                        case mmio_addr_write_lo is
+                        when MMIO_MMUCR(15 downto 0) =>
+                            mmu_mmucr(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 1) =>
+                            mmu_mmucr(15 downto 8) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 2) =>
+                            mmu_mmucr(23 downto 16) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_MMUCR(15 downto 0)) + 3) =>
+                            mmu_mmucr(31 downto 24) <= DATA_OUT;
+                        
+                        when MMIO_ASID(15 downto 0) =>
+                            mmu_asid(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_ASID(15 downto 0)) + 1) =>
+                            mmu_asid(15 downto 8) <= DATA_OUT;
+                        
+                        when MMIO_ASIDINVAL(15 downto 0) =>
+                            mmu_asid_inval(7 downto 0) <= DATA_OUT;
+                            mmu_tlb_flush_asid <= '1';
+                        when std_logic_vector(unsigned(MMIO_ASIDINVAL(15 downto 0)) + 1) =>
+                            mmu_asid_inval(15 downto 8) <= DATA_OUT;
+                            mmu_tlb_flush_asid <= '1';
+                        
+                        when MMIO_TLBINVAL(15 downto 0) =>
+                            mmu_tlbinval(7 downto 0) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 1) =>
+                            mmu_tlbinval(15 downto 8) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 2) =>
+                            mmu_tlbinval(23 downto 16) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        when std_logic_vector(unsigned(MMIO_TLBINVAL(15 downto 0)) + 3) =>
+                            mmu_tlbinval(31 downto 24) <= DATA_OUT;
+                            mmu_tlb_flush_va <= '1';
+                        
+                        when MMIO_PTBR_LO(15 downto 0) =>
+                            mmu_ptbr(7 downto 0) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 1) =>
+                            mmu_ptbr(15 downto 8) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 2) =>
+                            mmu_ptbr(23 downto 16) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_LO(15 downto 0)) + 3) =>
+                            mmu_ptbr(31 downto 24) <= DATA_OUT;
+                        
+                        when MMIO_PTBR_HI(15 downto 0) =>
+                            mmu_ptbr(39 downto 32) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 1) =>
+                            mmu_ptbr(47 downto 40) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 2) =>
+                            mmu_ptbr(55 downto 48) <= DATA_OUT;
+                        when std_logic_vector(unsigned(MMIO_PTBR_HI(15 downto 0)) + 3) =>
+                            mmu_ptbr(63 downto 56) <= DATA_OUT;
+
+                        when MMIO_TLBFLUSH(15 downto 0) =>
+                            mmu_tlb_flush <= '1';
+
+                        when others =>
+                            null;
+                    end case;
+                end if;
                 end if;
             end if;
         end if;
