@@ -1335,72 +1335,63 @@ trap_handler:
 
 ## 13. Linux ABI Considerations
 
-### 13.1 Register Usage Convention
+> **Full ABI Documentation:** See [M65832 C ABI](M65832_C_ABI.md) for complete calling conventions, register usage, and compiler details.
 
-| Register | Linux ABI Use |
-|----------|---------------|
-| R0-R7 | Arguments / return values |
-| R8-R15 | Caller-saved temporaries |
-| R16-R23 | Callee-saved |
-| R24-R27 | Reserved for kernel |
-| R28 | Global pointer (GP) |
-| R29 | Frame pointer (FP) |
-| R30 | Link register (LR) - optional |
-| R31 | Reserved |
-| A | Accumulator (caller-saved) |
-| X | Index/scratch (caller-saved) |
-| Y | Index/scratch (caller-saved) |
-| S | Stack pointer |
-| D | Direct page base (points to register window) |
-| B | Data segment base (usually 0) |
+### 13.1 Target Identification
 
-### 13.2 Function Calling Convention
+| Identifier | Value |
+|------------|-------|
+| ELF Machine Type | `EM_M65832 = 0x6583` |
+| ELF Class | 32-bit, Little Endian |
+| Target Triple | `m65832-unknown-elf`, `m65832-unknown-linux` |
+| LLVM Data Layout | `e-m:e-p:32:32-i8:8-i16:16-i32:32-n32-S32` |
+
+### 13.2 Register Usage Summary
+
+| Registers | Usage | Preservation |
+|-----------|-------|--------------|
+| R0-R7 | Arguments / return values | Caller-saved |
+| R8-R15 | Temporaries | Caller-saved |
+| R16-R23 | Saved registers | **Callee-saved** |
+| R24-R28 | Reserved (kernel) | — |
+| R29 | Frame pointer (FP) | **Callee-saved** |
+| R30 | Link register (optional) | Caller-saved |
+| R31 | Reserved | — |
+| R32-R47 | Extended temporaries | Caller-saved |
+| R48-R55 | Extended saved registers | **Callee-saved** |
+| R56-R63 | Reserved | — |
+| A, X, Y | Scratch | Caller-saved |
+| SP | Stack pointer | Special |
+| D | Direct page base | Preserved |
+| B | Absolute base | Preserved |
+
+### 13.3 Function Calling Convention
 
 ```asm
 ; Call: foo(arg0, arg1, arg2)
-    LDA arg0
-    STA $00             ; R0 = arg0
-    LDA arg1
-    STA $04             ; R1 = arg1
-    LDA arg2
-    STA $08             ; R2 = arg2
-    JSR foo
-    ; Return value in R0 ($00)
+    LD   R0, arg0       ; First argument
+    LD   R1, arg1       ; Second argument
+    LD   R2, arg2       ; Third argument
+    JSR  foo
+    ; Return value in R0
 
 foo:
-    ; Prologue
-    PHA                 ; Save A if needed
-    LDA $00             ; arg0 in R0
+    ; Prologue: save callee-saved regs if used
     ; ... function body ...
-    STA $00             ; Return value in R0
-    PLA
+    LD   R0, result     ; Return value
     RTS
 ```
 
-### 13.3 Stack Frame
-
-```
-High addresses
-    ┌─────────────────┐
-    │ Caller's frame  │
-    ├─────────────────┤ ◀── Previous SP
-    │ Return address  │
-    ├─────────────────┤
-    │ Saved FP (R29)  │
-    ├─────────────────┤ ◀── FP (R29)
-    │ Local variables │
-    │       ...       │
-    ├─────────────────┤
-    │ Saved registers │
-    ├─────────────────┤ ◀── SP
-Low addresses
-```
+**Key rules:**
+- First 8 arguments in R0-R7, rest on stack
+- Return value in R0 (or R0:R1 for 64-bit)
+- Stack grows downward, 4-byte aligned
 
 ### 13.4 System Call Convention
 
 - Syscall number in R0
 - Arguments in R1-R6
-- Use TRAP #0
+- Use `TRAP #0`
 - Return value in R0, error in R1
 
 ### 13.5 Required Linux Features Checklist
@@ -2018,6 +2009,7 @@ Available testbenches in `tb/` directory:
 
 ## See Also
 
+- [M65832 C ABI](M65832_C_ABI.md) - C compiler calling conventions and binary interface
 - [M65832 Instruction Set](M65832_Instruction_Set.md) - Complete instruction reference
 - [M65832 Quick Reference](M65832_Quick_Reference.md) - Concise reference card
 - [M65832 Assembler Reference](M65832_Assembler_Reference.md) - Assembler usage and syntax
