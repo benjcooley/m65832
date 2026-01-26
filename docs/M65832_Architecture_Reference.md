@@ -393,8 +393,8 @@ $FFFF_F000 - $FFFF_FFFF   Exception vectors, system registers
 | Absolute,Y | B + abs16 + Y | 3 bytes |
 | (Absolute) | [B + abs16] | 3 bytes |
 | (Absolute,X) | [B + abs16 + X] | 3 bytes |
-| Long (WID prefix) | abs32 | 5 bytes |
-| Long,X | abs32 + X | 5 bytes |
+| 32-bit Absolute (ADDR32) | abs32 | 5 bytes |
+| 32-bit Absolute,X | abs32 + X | 5 bytes |
 
 ### 5.3 Stack Operations
 
@@ -441,14 +441,19 @@ Emulation mode:
 
 Most instructions preserve 6502/65816 encodings. M65832 extensions use:
 
-1. **WID Prefix ($42)**: Signals 32-bit immediate or absolute follows
-2. **Extended Opcode Page ($02 prefix)**: Extended operations (in native mode only)
+1. **Extended Opcode Page ($02 prefix)**: Extended operations including sized ALU
+2. **WAI/STP encoding**: `$42 $CB` = WAI, `$42 $DB` = STP (32-bit mode only)
 
 ```
 Standard instruction:     [opcode] [operand...]
-Wide immediate/address:   [$42] [opcode] [32-bit operand]
-Extended operation:       [$02] [ext-opcode] [operand...]
+32-bit absolute address:  [opcode] [32-bit operand]
+Extended operation:       [$02] [ext-opcode] [mode] [operand...]
 ```
+
+In 32-bit mode:
+- Traditional instructions use 32-bit data by default
+- For 8-bit or 16-bit operations, use Extended ALU (`$02 $80-$97`) with size in mode byte
+- Address size is determined by operand format (B+16 vs 32-bit absolute)
 
 > **Note:** The $02 opcode is COP in emulation mode (E=1). In native mode (E=0), it serves as the extended opcode prefix.
 
@@ -523,32 +528,43 @@ LDA ($20),Y     ; ptr = [D + $20]; A = [ptr + Y]
 3-byte instruction, 16-bit offset from B register.
 
 ```asm
-LDA $1234       ; A = [B + $1234]
-STA $5678       ; [B + $5678] = A
+; 32-bit mode syntax:
+LDA B+$1234     ; A = [B + $1234]
+STA B+$5678     ; [B + $5678] = A
+
+; 65816 mode syntax:
+LDA $1234       ; A = [bank:$1234]
 ```
 
 ### 7.6 Absolute Indexed
 
 ```asm
-LDA $1234,X     ; A = [B + $1234 + X]
-LDA $1234,Y     ; A = [B + $1234 + Y]
+; 32-bit mode:
+LDA B+$1234,X   ; A = [B + $1234 + X]
+LDA B+$1234,Y   ; A = [B + $1234 + Y]
+
+; 65816 mode:
+LDA $1234,X     ; A = [bank:$1234 + X]
 ```
 
 ### 7.7 Absolute Indirect
 
 ```asm
-JMP ($1234)     ; ptr = [B + $1234]; PC = ptr
-JMP ($1234,X)   ; ptr = [B + $1234 + X]; PC = ptr
+; 32-bit mode:
+JMP (B+$1234)   ; ptr = [B + $1234]; PC = ptr
+JMP (B+$1234,X) ; ptr = [B + $1234 + X]; PC = ptr
+
+; 65816 mode:
+JMP ($1234)     ; ptr = [bank:$1234]; PC = ptr
 ```
 
-### 7.8 Long (WID Prefix)
+### 7.8 32-bit Absolute (ADDR32 Prefix)
 
 Full 32-bit address literal. Use sparingly.
 
 ```asm
-WID LDA $12345678     ; A = [$12345678] (absolute)
-WID LDA #$DEADBEEF    ; A = $DEADBEEF (immediate)
-WID JMP $C0001000     ; PC = $C0001000
+LDA $12345678         ; A = [$12345678] (8 hex digits = ADDR32)
+JMP $C0001000         ; PC = $C0001000
 ```
 
 ### 7.9 Relative (Branches)
@@ -566,144 +582,212 @@ BRL label       ; PC = PC + 3 + offset16
 
 ### 8.1 Load and Store
 
-#### LDA - Load Accumulator
+The M65832 supports both traditional accumulator-centric loads (LDA) and extended ALU loads (LD) with explicit size, target, and addressing mode.
+
+#### LDA - Load Accumulator (Traditional)
 ```
-LDA #imm        Load immediate
-LDA dp          Load from Direct Page
-LDA dp,X        Load from Direct Page indexed by X
-LDA abs         Load from Absolute
-LDA abs,X       Load from Absolute indexed by X
-LDA abs,Y       Load from Absolute indexed by Y
-LDA (dp)        Load indirect
-LDA (dp,X)      Load indexed indirect
-LDA (dp),Y      Load indirect indexed
+LDA #imm        Load immediate to A
+LDA Rn          Load from register to A
+LDA B+$XXXX     Load from B-relative address to A
+... (all 6502/65816 addressing modes)
 ```
 Flags affected: N, Z
 
-#### STA - Store Accumulator
+#### LD - Extended Load ($02 $80)
+
+Extended load with explicit size and target:
+
 ```
-STA dp          Store to Direct Page
-STA dp,X        Store to Direct Page indexed by X  
-STA abs         Store to Absolute
-STA abs,X       Store to Absolute indexed by X
-STA abs,Y       Store to Absolute indexed by Y
-STA (dp)        Store indirect
-STA (dp,X)      Store indexed indirect
-STA (dp),Y      Store indirect indexed
+LD.B A, Rn      A = Rn (8-bit, A-target)
+LD.W A, #imm    A = imm (16-bit, A-target)
+LD.B Rd, Rs     Rd = Rs (8-bit, Rn-target)
+LD Rd, #imm     Rd = imm (32-bit default)
+LD Rd, $ADDR32  Rd = [abs32] (32-bit absolute)
+```
+
+**Encoding:** `$02 $80 [mode] [dest_dp?] [src...]`
+
+Mode byte: `[size:2][target:1][addr_mode:5]`
+- Size: 00=BYTE, 01=WORD, 10=LONG
+- Target: 0=A (no dest byte), 1=Rn (dest byte follows)
+
+Flags affected: N, Z
+
+#### STA - Store Accumulator (Traditional)
+```
+STA Rn          Store A to register
+STA B+$XXXX     Store A to B-relative address
+... (all 6502/65816 addressing modes)
 ```
 Flags affected: None
 
+#### ST - Extended Store ($02 $81)
+```
+ST.B [addr], A   Store A to memory (8-bit)
+ST.B [addr], Rn  Store Rn to memory (8-bit)
+```
+**Encoding:** `$02 $81 [mode] [src_dp?] [addr...]`
+
 #### LDX, LDY, STX, STY
-Same patterns, for X and Y registers.
+Traditional index register loads/stores (always 32-bit in 32-bit mode).
 
 ### 8.2 Arithmetic
 
-> **RTL Reference:** `m65832_alu.vhd` - Note: BCD mode (D flag) is only supported for 8-bit and 16-bit operations. 32-bit arithmetic is always binary.
+> **RTL Reference:** `m65832_alu.vhd` - BCD mode only for 8/16-bit. 32-bit is always binary.
 
-#### ADC - Add with Carry
+#### ADC - Add with Carry (Traditional)
 ```
 ADC #imm        A = A + imm + C
-ADC dp          A = A + [dp] + C
-ADC abs         A = A + [abs] + C
+ADC Rn          A = A + Rn + C
 ... (all addressing modes)
 ```
 Flags affected: N, V, Z, C
 
-#### SBC - Subtract with Carry
+#### ADC - Extended Add ($02 $82)
+```
+ADC.B A, Rn     A = A + Rn + C (8-bit, A-target)
+ADC.W Rd, #imm  Rd = Rd + imm + C (16-bit, Rn-target)
+ADC Rd, Rs      Rd = Rd + Rs + C (32-bit default)
+```
+**Encoding:** `$02 $82 [mode] [dest_dp?] [src...]`
+
+Flags affected: N, V, Z, C
+
+#### SBC - Subtract with Borrow (Traditional)
 ```
 SBC #imm        A = A - imm - !C
-SBC dp          A = A - [dp] - !C
+SBC Rn          A = A - Rn - !C
 ... (all addressing modes)
 ```
 Flags affected: N, V, Z, C
 
-#### INC, DEC - Increment/Decrement
+#### SBC - Extended Subtract ($02 $83)
 ```
-INC             Increment A
-INC dp          Increment memory at dp
-INC dp,X        Increment memory at dp+X
-INC abs         Increment memory at abs
-INC abs,X       Increment memory at abs+X
+SBC.B Rd, Rs    Rd = Rd - Rs - !C (8-bit)
+SBC Rd, #imm    Rd = Rd - imm - !C (32-bit)
 ```
+**Encoding:** `$02 $83 [mode] [dest_dp?] [src...]`
+
+Flags affected: N, V, Z, C
+
+#### INC/DEC - Extended Increment/Decrement ($02 $8B/$8C)
+```
+INC.B A         A = A + 1 (8-bit)
+INC.W Rd        Rd = Rd + 1 (16-bit)
+DEC.B Rd        Rd = Rd - 1 (8-bit)
+```
+**Encoding:** `$02 $8B [mode] [dest_dp?]` (INC), `$02 $8C [mode] [dest_dp?]` (DEC)
+
 Flags affected: N, Z
 
 ### 8.3 Logic
 
-#### AND - Logical AND
+#### AND - Logical AND (Traditional)
 ```
 AND #imm        A = A & imm
-AND dp          A = A & [dp]
+AND Rn          A = A & Rn
 ... (all addressing modes)
 ```
 Flags affected: N, Z
 
-#### ORA - Logical OR
+#### AND - Extended AND ($02 $84)
 ```
-ORA #imm        A = A | imm
-... (all addressing modes)
+AND.B Rd, Rs    Rd = Rd & Rs (8-bit)
+AND Rd, #imm    Rd = Rd & imm (32-bit)
 ```
+**Encoding:** `$02 $84 [mode] [dest_dp?] [src...]`
+
 Flags affected: N, Z
 
-#### EOR - Exclusive OR
+#### ORA - Extended OR ($02 $85)
 ```
-EOR #imm        A = A ^ imm
-... (all addressing modes)
+ORA.B Rd, Rs    Rd = Rd | Rs (8-bit)
+ORA Rd, #imm    Rd = Rd | imm (32-bit)
 ```
+**Encoding:** `$02 $85 [mode] [dest_dp?] [src...]`
+
 Flags affected: N, Z
 
-#### BIT - Bit Test
+#### EOR - Extended XOR ($02 $86)
 ```
-BIT #imm        Z = !(A & imm), N=imm[msb], V=imm[msb-1]
-BIT dp          Z = !(A & [dp]), N=[dp][msb], V=[dp][msb-1]
-BIT abs         (same pattern)
+EOR.B Rd, Rs    Rd = Rd ^ Rs (8-bit)
+EOR Rd, #imm    Rd = Rd ^ imm (32-bit)
 ```
+**Encoding:** `$02 $86 [mode] [dest_dp?] [src...]`
+
+Flags affected: N, Z
+
+#### BIT - Extended Bit Test ($02 $88)
+```
+BIT.B A, Rn     Test A & Rn (8-bit, A-target)
+BIT Rd, #imm    Test Rd & imm (32-bit)
+```
+**Encoding:** `$02 $88 [mode] [dest_dp?] [src...]`
+
 Flags affected: N, V, Z
 
 ### 8.4 Shift and Rotate
 
-#### ASL - Arithmetic Shift Left
+#### ASL/LSR/ROL/ROR - Traditional (1-bit)
 ```
-ASL             A = A << 1, C = old MSB
-ASL dp          [dp] = [dp] << 1
-ASL dp,X
-ASL abs
-ASL abs,X
+ASL             A = A << 1
+ASL Rn          Rn = Rn << 1
+... (same for LSR, ROL, ROR)
 ```
 Flags affected: N, Z, C
 
-#### LSR - Logical Shift Right
+#### ASL/LSR/ROL/ROR - Extended ($02 $8D-$90)
 ```
-LSR             A = A >> 1, C = old LSB
-... (all addressing modes)
+ASL.B A         A = A << 1 (8-bit)
+ASL.W Rd        Rd = Rd << 1 (16-bit)
+LSR.B Rd        Rd = Rd >> 1 (8-bit, logical)
+ROL Rd          Rd = {Rd, C} <<< 1 (32-bit)
+ROR.W Rd        Rd = {C, Rd} >>> 1 (16-bit)
 ```
+**Encoding:** `$02 $8D [mode] [dest_dp?]` (ASL), etc.
+
 Flags affected: N, Z, C
 
-#### ROL - Rotate Left (through Carry)
-```
-ROL             {C,A} = {A,C} rotated left
-... (all addressing modes)
-```
-Flags affected: N, Z, C
+#### Barrel Shifter ($02 $98)
 
-#### ROR - Rotate Right (through Carry)
+Single-cycle multi-bit shifts between registers:
+
 ```
-ROR             {A,C} = {C,A} rotated right
-... (all addressing modes)
+SHL Rd, Rs, #n  Rd = Rs << n              ; shift left logical
+SHR Rd, Rs, #n  Rd = Rs >> n              ; shift right logical  
+SAR Rd, Rs, #n  Rd = Rs >>> n             ; shift right arithmetic
+ROL Rd, Rs, #n  Rd = Rs rotl n            ; rotate left through C
+ROR Rd, Rs, #n  Rd = Rs rotr n            ; rotate right through C
+SHL Rd, Rs, A   Rd = Rs << (A & $1F)      ; variable shift
 ```
+**Encoding:** `$02 $98 [op|cnt] [dest_dp] [src_dp]`
+- Bits 7-5: Operation (0=SHL, 1=SHR, 2=SAR, 3=ROL, 4=ROR)
+- Bits 4-0: Shift count (0-31), or $1F for shift by A
+
 Flags affected: N, Z, C
 
 ### 8.5 Compare
 
-#### CMP - Compare Accumulator
+#### CMP - Compare Accumulator (Traditional)
 ```
 CMP #imm        Flags from A - imm (result discarded)
-CMP dp          Flags from A - [dp]
+CMP Rn          Flags from A - Rn
 ... (all addressing modes)
 ```
 Flags affected: N, Z, C
 
+#### CMP - Extended Compare ($02 $87)
+```
+CMP.B A, Rn     Flags from A - Rn (8-bit)
+CMP.W Rd, #imm  Flags from Rd - imm (16-bit)
+CMP Rd, Rs      Flags from Rd - Rs (32-bit)
+```
+**Encoding:** `$02 $87 [mode] [dest_dp?] [src...]`
+
+Flags affected: N, Z, C
+
 #### CPX, CPY - Compare X, Y
-Same pattern as CMP.
+Traditional (always 32-bit in 32-bit mode).
 
 ### 8.6 Branch
 
@@ -724,16 +808,16 @@ Same pattern as CMP.
 
 #### JMP - Jump
 ```
-JMP abs         PC = B + abs16
-JMP (abs)       PC = [B + abs16]
-JMP (abs,X)     PC = [B + abs16 + X]
-WID JMP long    PC = abs32
+JMP B+$XXXX         PC = B + abs16
+JMP (B+$XXXX)       PC = [B + abs16]
+JMP (B+$XXXX,X)     PC = [B + abs16 + X]
+JMP $XXXXXXXX       PC = abs32 (8 hex digits = ADDR32)
 ```
 
 #### JSR - Jump to Subroutine
 ```
-JSR abs         Push PC+2; PC = B + abs16
-WID JSR long    Push PC+4; PC = abs32
+JSR B+$XXXX         Push PC+2; PC = B + abs16
+JSR $XXXXXXXX       Push PC+4; PC = abs32
 ```
 
 #### RTS - Return from Subroutine
@@ -1411,7 +1495,102 @@ task_switch:
 
 ## 15. Assembly Language Guide
 
-### 15.1 Assembler Directives
+### 15.1 Processor Modes Overview
+
+The M65832 supports three operating modes with different assembly conventions:
+
+| Mode | Width Flags | Data Sizes | Addressing | Use Case |
+|------|-------------|------------|------------|----------|
+| **6502 Emulation** | E=1 | 8-bit only | 16-bit (VBR-relative) | Classic 6502 code |
+| **65816 Native** | E=0, M/X=00 or 01 | 8/16-bit via M/X | 24-bit bank:offset | 65816 compatible |
+| **32-bit Native** | E=0, M/X=10 | 8/16/32-bit via prefixes | B+16 or 32-bit | Modern M65832 code |
+
+### 15.2 Data/Address Size by Mode
+
+#### 6502 Emulation Mode (E=1)
+- All operations are 8-bit
+- Stack limited to page $01
+- Addresses relative to VBR
+
+#### 65816 Native Mode (M/X = 00 or 01)
+- Use `REP`/`SEP` to toggle M and X flags
+- M flag: 0=8-bit accumulator, 1=16-bit accumulator
+- X flag: 0=8-bit indexes, 1=16-bit indexes
+- Standard 65816 bank:offset addressing
+
+#### 32-bit Native Mode (M/X = 10)
+
+In 32-bit mode, traditional instructions operate on 32-bit data by default.
+For 8-bit or 16-bit operations, use the Extended ALU instructions (`$02 $80-$97`).
+
+**Traditional instructions:**
+- Data size is always 32-bit
+- Address size determined by operand format
+
+**Extended ALU instructions:**
+- Data size encoded in mode byte (BYTE/WORD/LONG)
+- Full addressing mode flexibility
+- Use `.B`, `.W`, `.L` suffixes in assembly
+
+**Special opcodes:**
+- `$42 $CB` = WAI (Wait for Interrupt)
+- `$42 $DB` = STP (Stop Processor)
+
+### 15.3 Assembly Syntax by Mode
+
+#### 32-bit Mode Assembly Syntax
+
+```asm
+; Traditional instructions - always 32-bit data
+LDA #$12345678          ; $A9 $78 $56 $34 $12 - 32-bit immediate
+
+; Address forms
+LDA $12                 ; Direct Page (D + $12)
+LDA B+$1234             ; B + 16-bit offset - MUST be B+$XXXX
+LDA $A0001234           ; 32-bit absolute - MUST be 8 hex digits
+
+; For 8-bit/16-bit operations, use Extended ALU:
+LD.B R0, #$12           ; $02 $80 $38 $00 $12 - 8-bit immediate
+LD.W R0, #$1234         ; $02 $80 $78 $00 $34 $12 - 16-bit immediate
+ADC.B A, R0             ; $02 $82 $00 $00 - 8-bit add
+
+; WAI and STP
+WAI                     ; $42 $CB
+STP                     ; $42 $DB
+```
+
+**Important 32-bit mode rules:**
+- `$0000` or `$1234` alone is **not valid** - use `B+$0000` for B-relative
+- 32-bit addresses MUST be written with 8 hex digits: `$A0001234`
+- B+offset MUST be written as `B+$XXXX` with exactly 4 hex digits
+- For sized operations (8/16-bit), use Extended ALU not traditional instructions
+
+#### 65816 Mode Assembly Syntax
+
+```asm
+; Use REP/SEP to control width
+REP #$30                ; M=1, X=1 (16-bit A and X/Y)
+SEP #$20                ; M=0 (8-bit A)
+
+; Width determined by current M/X flags
+LDA #$1234              ; 16-bit if M=1
+LDA #$12                ; 8-bit if M=0
+
+; Standard 65816 addressing
+LDA $1234               ; Absolute (bank:$1234)
+LDA $123456             ; Long absolute (24-bit)
+```
+
+#### 6502 Mode Assembly Syntax
+
+```asm
+; All operations 8-bit, standard 6502 syntax
+LDA #$12                ; 8-bit immediate
+LDA $12                 ; Zero page
+LDA $1234               ; Absolute (VBR-relative)
+```
+
+### 15.4 Assembler Directives
 
 ```asm
 .ORG $1000          ; Set assembly origin
@@ -1423,56 +1602,88 @@ task_switch:
 .INCLUDE "file.asm" ; Include another file
 .SECTION .text      ; Switch to code section
 .SECTION .data      ; Switch to data section
+
+; Mode hints for assembler
+.M32                ; Assembling for 32-bit mode
+.M16                ; Assembling for 65816 mode
+.M8                 ; Assembling for 6502 mode
 ```
 
-### 15.2 Width Suffixes
+### 15.5 Register Window and Direct Page
 
-Explicit width override (optional, usually inferred from M/X flags):
+In 32-bit mode with register window enabled (R=1), **Direct Page addresses map directly to hardware registers R0-R63**. Each register is 32-bit, accessed on 4-byte boundaries:
 
+| DP Address | Register | DP Address | Register |
+|------------|----------|------------|----------|
+| $00-$03 | R0 | $80-$83 | R32 |
+| $04-$07 | R1 | $84-$87 | R33 |
+| $08-$0B | R2 | ... | ... |
+| $0C-$0F | R3 | $FC-$FF | R63 |
+| $10-$13 | R4 | | |
+| ... | ... | | |
+
+**Preferred syntax uses register names:**
 ```asm
-LDA.B #$12          ; Force 8-bit immediate
-LDA.W #$1234        ; Force 16-bit immediate
-LDA.L #$12345678    ; Force 32-bit immediate
+; These are equivalent when R=1:
+LDA R4              ; Load from register R4 (preferred)
+LDA $10             ; Load from DP $10 (same as R4)
+
+; Byte access within registers:
+LDA.B R4            ; Load low byte of R4
+LDA.B $12           ; Load byte at offset $12 (within R4, byte 2)
 ```
 
-### 15.3 Addressing Mode Syntax
+**Important:** Always use `Rn` notation in 32-bit mode code for clarity. The `$XX` DP syntax is for 6502/65816 compatibility.
+
+### 15.6 Addressing Mode Syntax
 
 ```asm
 ; Immediate
 LDA #$XX            ; # prefix
 
-; Direct Page
-LDA $XX             ; 1-byte address
+; Register Window (32-bit mode, R=1) - PREFERRED
+LDA R0              ; Register R0 ($00)
+LDA R4              ; Register R4 ($10)
+STA R15             ; Store to R15 ($3C)
 
-; Absolute
-LDA $XXXX           ; 2-byte address
+; Direct Page (legacy/compatibility)
+LDA $XX             ; D + offset (maps to Rn when R=1)
 
-; Long (requires WID or explicit)
-LDA $XXXXXXXX       ; 4-byte address (or use WID prefix)
+; Absolute (mode-dependent)
+LDA B+$XXXX         ; 32-bit mode: B + 16-bit offset
+LDA $XXXX           ; 65816 mode: bank:offset
+
+; 32-bit Absolute (32-bit mode only)
+LDA $XXXXXXXX       ; 8-digit hex = 32-bit address
 
 ; Indexed
+LDA R0,X            ; Register indexed (32-bit mode)
 LDA $XX,X           ; DP indexed
-LDA $XXXX,X         ; Absolute indexed
-LDA $XXXX,Y
+LDA B+$XXXX,X       ; Absolute indexed (32-bit mode)
+LDA $XXXX,X         ; Absolute indexed (65816 mode)
 
 ; Indirect
+LDA (R0)            ; Register indirect (32-bit mode)
 LDA ($XX)           ; DP indirect
 LDA ($XX,X)         ; Indexed indirect
 LDA ($XX),Y         ; Indirect indexed
 
 ; Long indirect
+LDA [R0]            ; Register long indirect (32-bit pointer)
 LDA [$XX]           ; DP long indirect (32-bit pointer)
 LDA [$XX],Y         ; Long indirect indexed
 ```
 
-### 15.4 Example: Hello World (Native Mode)
+### 15.7 Example: Hello World (32-bit Native Mode)
 
 ```asm
-; M65832 Hello World
+; M65832 Hello World (32-bit mode)
 ; Assumes UART at $B0000000
 
-.EQU UART_DATA, $0000   ; B + $0000
-.EQU UART_STATUS, $0004 ; B + $0004
+.M32                        ; Assembling for 32-bit mode
+
+.EQU UART_DATA, B+$0000     ; B-relative addressing
+.EQU UART_STATUS, B+$0004
 
 .SECTION .text
 .ORG $00001000
@@ -1480,41 +1691,41 @@ LDA [$XX],Y         ; Long indirect indexed
 start:
     ; Enter native-32 mode
     CLC
-    XCE                 ; E=0
-    REP #$30            ; M=01, X=01 (16-bit first)
-    REPE #$A0           ; M=10, X=10 (32-bit)
+    XCE                     ; E=0
+    REP #$30                ; M=01, X=01 (16-bit first)
+    REPE #$A0               ; M=10, X=10 (32-bit)
     
     ; Set up base registers
-    SB #$B0000000       ; UART base
-    SD #$00010000       ; Direct page for locals
+    SB #$B0000000           ; B = UART base
+    SD #$00010000           ; D = direct page for locals
     
     ; Print message
     LDX #0
 print_loop:
-    LDA message,X
+    LDA.B message,X         ; Load byte from message
     BEQ done
     
 wait_tx:
-    LDA UART_STATUS
-    AND #$01            ; TX ready bit
+    LDA.B UART_STATUS       ; Check TX ready (8-bit read)
+    AND.B #$01              ; TX ready bit
     BEQ wait_tx
     
-    LDA message,X
-    STA UART_DATA
+    LDA.B message,X         ; Load character
+    STA.B UART_DATA         ; Send to UART (8-bit write)
     INX
     BRA print_loop
 
 done:
-    STP
+    STP                     ; Stop processor ($42 $DB)
 
 message:
     .BYTE "Hello, M65832!", 13, 10, 0
 ```
 
-### 15.5 Example: Spinlock (Atomic)
+### 15.8 Example: Spinlock (Atomic)
 
 ```asm
-; Spinlock using CAS
+; Spinlock using CAS (32-bit mode)
 .EQU lock, $00          ; Lock variable at DP
 
 acquire_lock:
@@ -1532,7 +1743,7 @@ release_lock:
     RTS
 ```
 
-### 15.6 Example: Context Switch
+### 15.9 Example: Context Switch
 
 ```asm
 ; Save current task, load new task
@@ -1582,12 +1793,28 @@ The base opcode map follows 65816 conventions. Key opcodes:
 | $A9 | LDA # | $A5 | LDA dp |
 | $AD | LDA abs | $8D | STA abs |
 
-### A.2 Extension Prefix ($42 = WID)
+### A.2 Data Sizing (32-bit Mode)
 
+In 32-bit mode, traditional instructions operate on 32-bit data. For 8-bit or 16-bit operations, use the Extended ALU instructions.
+
+**Traditional Instructions:**
 ```
-$42 $A9 imm32    WID LDA #imm32    ; 32-bit immediate
-$42 $AD abs32    WID LDA abs32     ; 32-bit absolute address
-$42 $4C abs32    WID JMP abs32     ; Jump to 32-bit address
+$A9 imm32        LDA #imm32        ; Always 32-bit in 32-bit mode
+$AD abs16        LDA B+$XXXX       ; B-relative addressing
+$AD abs32        LDA $XXXXXXXX     ; 32-bit absolute (8 hex digits)
+```
+
+**Extended ALU for sized operations:**
+```
+$02 $80 $38 $00 imm8      LD.B R0, #imm8    ; 8-bit immediate
+$02 $80 $78 $00 imm16     LD.W R0, #imm16   ; 16-bit immediate
+$02 $80 $B8 $00 imm32     LD R0, #imm32     ; 32-bit immediate
+```
+
+**WAI/STP (32-bit mode only):**
+```
+$42 $CB          WAI               ; Wait for Interrupt
+$42 $DB          STP               ; Stop Processor
 ```
 
 ### A.3 Extended Opcode Page ($02 Prefix)
@@ -1658,22 +1885,22 @@ $02 $75          PLVBR             ; Pull VBR (32-bit)
 
 #### Temp Register Operations
 ```
-$02 $86          TTA               ; A = T (temp to accumulator)
-$02 $87          TAT               ; T = A (accumulator to temp)
+$02 $9A          TTA               ; A = T (temp to accumulator)
+$02 $9B          TAT               ; T = A (accumulator to temp)
 ```
 
 #### 64-bit Load/Store
 ```
-$02 $88          LDQ dp            ; Load 64-bit (T:A = [dp])
-$02 $89          LDQ abs           ; Load 64-bit (T:A = [abs])
-$02 $8A          STQ dp            ; Store 64-bit ([dp] = T:A)
-$02 $8B          STQ abs           ; Store 64-bit ([abs] = T:A)
+$02 $9C          LDQ dp            ; Load 64-bit (T:A = [dp])
+$02 $9D          LDQ abs           ; Load 64-bit (T:A = [abs])
+$02 $9E          STQ dp            ; Store 64-bit ([dp] = T:A)
+$02 $9F          STQ abs           ; Store 64-bit ([abs] = T:A)
 ```
 
-#### WAI/STP (Extended)
+#### WAI/STP (32-bit Mode)
 ```
-$02 $91          WAI               ; Wait for interrupt
-$02 $92          STP               ; Stop processor
+$42 $CB          WAI               ; Wait for interrupt
+$42 $DB          STP               ; Stop processor
 ```
 
 #### LEA (Load Effective Address)

@@ -9,8 +9,8 @@ The M65832 disassembler (`m65832dis`) is a portable disassembler that can decode
 ### Features
 
 - Full 6502/65816 instruction set support
-- M65832 extended instructions ($02 prefix)
-- WID prefix ($42) for 32-bit operations
+- M65832 extended instructions ($02 prefix) with mode byte decoding
+- WAI/STP decoding ($42 $CB, $42 $DB) in 32-bit mode
 - Configurable accumulator and index register widths
 - Hex byte display option
 - File offset and length control
@@ -355,21 +355,46 @@ The disassembler uses a 256-entry lookup table for standard 6502/65816 opcodes, 
 ### Extended Opcodes ($02 Prefix)
 
 When opcode $02 is encountered, the next byte is looked up in a separate extended opcode table for M65832 instructions:
-- MUL, DIV operations
-- Atomic instructions (CAS, LLI, SCI)
-- Memory fences
-- FPU operations
-- System instructions
-- Shifter/rotate instructions ($E9): SHL, SHR, SAR, ROL, ROR
-- Extend instructions ($EA): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT
+- MUL, DIV operations ($00-$07)
+- Atomic instructions ($10-$15): CAS, LLI, SCI
+- Memory fences ($50-$52)
+- FPU operations ($B0-$D8)
+- System instructions ($40, $60-$61)
+- **Extended ALU ($80-$97)**: LD, ST, ADC, SBC, AND, ORA, EOR, CMP, BIT, TSB, TRB, INC, DEC, ASL, LSR, ROL, ROR, STZ
+- Barrel shifter ($98): SHL, SHR, SAR, ROL, ROR
+- Extend instructions ($99): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT
+- Temp register ($9A-$9B): TTA, TAT
+- 64-bit load/store ($9C-$9F): LDQ, STQ
+
+### Extended ALU Decoding ($80-$97)
+
+Extended ALU instructions have a mode byte following the opcode:
+
+**Format:** `$02 [op] [mode] [dest_dp?] [src...]`
+
+**Mode byte:** `[size:2][target:1][addr_mode:5]`
+
+| Field | Bits | Values |
+|-------|------|--------|
+| size | 7-6 | 00=.B, 01=.W, 10=(none) |
+| target | 5 | 0=A, 1=Rn |
+| addr_mode | 4-0 | 32 modes |
+
+**Disassembly output:**
+
+```
+00000000  LD.B A,R1           ; $02 $80 $00 $04 - A-target, dp mode
+00000004  LD.B R0,R1          ; $02 $80 $20 $00 $04 - Rn-target
+00000009  ADC.W R0,#$1234     ; $02 $82 $78 $00 $34 $12 - imm16
+```
 
 ### Register Aliases (R0-R63)
 
 For Direct Page addresses that are 4-byte aligned (multiples of 4), the disassembler outputs register alias notation:
 
 ```
-00000000  SHL R4,R1,#4        ; $02 $E9 $04 $10 $04 - dest=$10=R4, src=$04=R1
-00000005  CLZ R8,R5           ; $02 $EA $04 $20 $14 - dest=$20=R8, src=$14=R5
+00000000  SHL R4,R1,#4        ; $02 $98 $04 $10 $04 - dest=$10=R4, src=$04=R1
+00000005  CLZ R8,R5           ; $02 $99 $04 $20 $14 - dest=$20=R8, src=$14=R5
 0000000A  SHL $01,$02,#4      ; Non-aligned addresses shown as hex
 ```
 
@@ -380,13 +405,24 @@ For Direct Page addresses that are 4-byte aligned (multiples of 4), the disassem
 | R2 | $08 | ... | ... |
 | ... | ... | R63 | $FC |
 
-### WID Prefix ($42)
+### WAI/STP Detection (32-bit Mode)
 
-When opcode $42 is encountered, it's treated as the WID prefix:
-- Next instruction is decoded normally
-- Immediate operands become 32-bit
-- Absolute addresses become 32-bit
-- Output shows "WID" before the instruction
+In 32-bit mode, the disassembler recognizes WAI and STP by their unique encodings:
+
+| Encoding | Disassembly |
+|----------|-------------|
+| `$42 $CB` | `WAI` |
+| `$42 $DB` | `STP` |
+
+### Extended ALU Size Suffixes
+
+Extended ALU instructions ($02 $80-$97) encode size in the mode byte:
+
+| Size bits | Suffix | Example |
+|-----------|--------|---------|
+| 00 | `.B` | `LD.B R0, R1` |
+| 01 | `.W` | `LD.W R0, #$1234` |
+| 10 | (none) | `LD R0, #$12345678` |
 
 ### Undefined Opcodes
 
@@ -399,6 +435,8 @@ Undefined opcodes are output as `.BYTE $XX` directives:
 ## Output Syntax
 
 ### Addressing Mode Format
+
+**65816 Mode Output:**
 
 | Mode | Format | Example |
 |------|--------|---------|
@@ -427,6 +465,16 @@ Undefined opcodes are output as `.BYTE $XX` directives:
 | Relative Long | `$xxxx` | `BRL $8100` |
 | Block Move | `$xx,$xx` | `MVP $01,$02` |
 
+**32-bit Mode Output (with `-m32` flag):**
+
+| Mode | Format | Example |
+|------|--------|---------|
+| Register (R=1) | `Rn` | `LDA R4` |
+| Direct Page | `$xx` or `Rn` | `LDA R0` |
+| Absolute | `B+$xxxx` | `LDA B+$1234` |
+| Absolute X | `B+$xxxx,X` | `LDA B+$1234,X` |
+| 32-bit Absolute | `$xxxxxxxx` | `LDA $A0001234` |
+
 ### Branch Targets
 
 Branch instructions show the computed target address:
@@ -436,13 +484,18 @@ Branch instructions show the computed target address:
 00008002  BRL $8100       ; Long branch to $8100
 ```
 
-### WID Instructions
+### 32-bit Mode Instructions
 
-WID-prefixed instructions show the prefix:
+Instructions with data/address prefixes show the size suffix and full addresses:
 
 ```
-0000800C  WID LDA #$12345678
-00008012  WID JMP $C0001000
+0000800C  LDA #$12345678       ; 32-bit data (always in 32-bit mode)
+00008011  LDA B+$1234          ; B-relative addressing
+00008014  LDA $C0001000        ; 32-bit absolute (8 hex digits)
+00008019  LD.B R0,#$12         ; Extended ALU 8-bit
+0000801E  LD.W R0,#$1234       ; Extended ALU 16-bit
+00008024  WAI                  ; $42 $CB
+00008026  STP                  ; $42 $DB
 ```
 
 ## Limitations

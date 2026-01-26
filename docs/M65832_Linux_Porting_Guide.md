@@ -822,7 +822,7 @@ boot_to_kernel:
     STA $FFFFF000           ; MMUCR
     
     ; Jump to kernel (now at virtual address)
-    WID JMP $80001000       ; kernel_entry
+    JMP $80001000           ; kernel_entry (32-bit address)
 ```
 
 ### 8.2 Kernel Early Init

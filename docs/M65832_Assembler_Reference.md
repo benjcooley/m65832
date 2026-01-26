@@ -10,8 +10,8 @@ The M65832 assembler (`m65832as`) is a portable, single-file assembler written i
 
 - Two-pass assembly for forward references
 - Full 6502/65816 instruction set compatibility
-- M65832 extended instructions (MUL, DIV, atomics, FPU, etc.)
-- WID prefix for 32-bit operations
+- M65832 extended instructions (MUL, DIV, atomics, FPU, Extended ALU)
+- Extended ALU with mode byte for 8/16/32-bit operations
 - Include file support with search paths
 - Multiple section support
 - Expression evaluation with operators
@@ -453,7 +453,7 @@ Operates on accumulator (A can be omitted):
 .M16
     LDA #$1234          ; 16-bit: A9 34 12
 .M32
-    LDA #$12345678      ; 32-bit (with WID): 42 A9 78 56 34 12
+    LDA #$12345678      ; 32-bit: A9 78 56 34 12 (default in 32-bit mode)
 ```
 
 ### Direct Page
@@ -474,20 +474,28 @@ Operates on accumulator (A can be omitted):
 
 ### Absolute
 
-16-bit address:
+16-bit address (B-relative in 32-bit mode):
 
 ```asm
+; 65816 mode:
     LDA $1234           ; $AD $34 $12
     JMP $8000           ; $4C $00 $80
-    JSR subroutine      ; $20 ...
+
+; 32-bit mode (same encoding, different syntax):
+    LDA B+$1234         ; $AD $34 $12
+    JMP B+$8000         ; $4C $00 $80
 ```
 
 ### Absolute Indexed
 
 ```asm
+; 65816 mode:
     LDA $1234,X         ; $BD $34 $12
     LDA $1234,Y         ; $B9 $34 $12
-    STA $1234,X         ; $9D $34 $12
+
+; 32-bit mode:
+    LDA B+$1234,X       ; $BD $34 $12
+    STA B+$1234,X       ; $9D $34 $12
 ```
 
 ### Absolute Long (24-bit)
@@ -724,7 +732,62 @@ All extended instructions are prefixed with opcode $02.
     D2S                 ; Convert double to single
 ```
 
-### Shifter/Rotate Instructions ($E9)
+### Extended ALU Instructions ($80-$97)
+
+Extended ALU operations with explicit size, target, and addressing mode.
+
+**Encoding:** `$02 [op] [mode] [dest_dp?] [src...]`
+
+**Mode byte:** `[size:2][target:1][addr_mode:5]`
+- Size: 00=BYTE (.B), 01=WORD (.W), 10=LONG (default)
+- Target: 0=A (no dest byte), 1=Rn (dest byte follows)
+- addr_mode: 32 addressing options
+
+**Assembly syntax:**
+
+```asm
+    ; A-target (traditional style with explicit size)
+    LD.B A, R1            ; Load 8-bit from R1 to A
+    LD.W A, #$1234        ; Load 16-bit immediate to A
+    ADC.B A, R0           ; A = A + R0 + C (8-bit)
+    INC.W A               ; A = A + 1 (16-bit)
+
+    ; Rn-target (register-targeted)
+    LD.B R0, R1           ; R0 = R1 (8-bit)
+    LD.W R0, #$1234       ; R0 = $1234 (16-bit)
+    LD R0, $A0001234      ; R0 = [$A0001234] (32-bit, abs32)
+    ADC.B R0, R1          ; R0 = R0 + R1 + C (8-bit)
+    ADC R0, #$12345678    ; R0 = R0 + $12345678 + C (32-bit)
+    INC.B R5              ; R5 = R5 + 1 (8-bit)
+    
+    ; Compare and logical
+    CMP.W R0, R1          ; Flags from R0 - R1 (16-bit)
+    AND R2, #$FF          ; R2 = R2 & $FF (32-bit)
+    ORA.B R3, R4          ; R3 = R3 | R4 (8-bit)
+```
+
+| Opcode | Mnemonic | Operation |
+|--------|----------|-----------|
+| $80 | LD | dest = src |
+| $81 | ST | [addr] = src |
+| $82 | ADC | dest = dest + src + C |
+| $83 | SBC | dest = dest - src - !C |
+| $84 | AND | dest = dest & src |
+| $85 | ORA | dest = dest \| src |
+| $86 | EOR | dest = dest ^ src |
+| $87 | CMP | flags from dest - src |
+| $88 | BIT | flags from dest & src |
+| $89 | TSB | [addr] \|= src |
+| $8A | TRB | [addr] &= ~src |
+| $8B | INC | dest = dest + 1 |
+| $8C | DEC | dest = dest - 1 |
+| $8D | ASL | dest = dest << 1 |
+| $8E | LSR | dest = dest >> 1 |
+| $8F | ROL | rotate left through C |
+| $90 | ROR | rotate right through C |
+| $97 | STZ | [addr] = 0 |
+
+### Barrel Shifter Instructions ($98)
 
 One-cycle barrel shifter for register window registers.
 
@@ -751,7 +814,7 @@ One-cycle barrel shifter for register window registers.
 
 **Note:** Standard ROL/ROR with accumulator mode (no operand or just `A`) use the original 6502 opcodes.
 
-### Sign/Zero Extend Instructions ($EA)
+### Sign/Zero Extend Instructions ($99)
 
 Single-cycle sign and zero extension, plus bit counting operations.
 
@@ -778,9 +841,11 @@ Single-cycle sign and zero extension, plus bit counting operations.
 | `CTZ` | Count trailing zeros | N, Z |
 | `POPCNT` | Population count (bit count) | N, Z |
 
-### Register Aliases (R0-R63)
+### Register Aliases (R0-R63) - PREFERRED in 32-bit Mode
 
-When the Register Window is enabled (R=1), Direct Page addresses `$00`, `$04`, `$08`, ... `$FC` map to 32-bit registers R0-R63. The assembler provides register aliases for convenience:
+In 32-bit mode with Register Window enabled (R=1), Direct Page addresses map to **64 hardware registers**, not memory. These are true CPU registers accessed on 4-byte boundaries.
+
+**Always use `Rn` notation in 32-bit mode code** - the `$XX` DP syntax is for 6502/65816 compatibility only.
 
 | Alias | DP Address | Alias | DP Address |
 |-------|------------|-------|------------|
@@ -793,35 +858,80 @@ When the Register Window is enabled (R=1), Direct Page addresses `$00`, `$04`, `
 | ... | ... | ... | ... |
 | `R31` | `$7C` | `R63` | `$FC` |
 
-**Usage Examples:**
+**Usage Examples (32-bit mode):**
 
 ```asm
     RSET                ; Enable register window
     
-    ; These are equivalent:
-    LDA $04             ; Load from DP $04
+    ; PREFERRED - use register names:
     LDA R1              ; Load from register R1
+    STA R15             ; Store to register R15
     
-    ; Extended instructions use register aliases:
+    ; Equivalent but NOT recommended in new code:
+    LDA $04             ; Same as LDA R1
+    STA $3C             ; Same as STA R15
+    
+    ; All addressing modes work with Rn:
+    LDA (R0),Y          ; Register indirect indexed
+    STA [R4]            ; Register long indirect
+    LDA R8,X            ; Register indexed
+    
+    ; Extended instructions:
     SHL R4, R1, #4      ; Shift R1 left by 4, store in R4
     CLZ R8, R5          ; Count leading zeros in R5, store in R8
-    
-    ; Expressions work:
-    LDA R0+1            ; Same as LDA $04 (R1)
-    STA R15+1           ; Same as STA $40 (R16)
 ```
 
 **Note:** Register aliases are converted to DP addresses at assembly time. R0 = `$00`, R1 = `$04`, R2 = `$08`, etc. (register number × 4).
 
-## WID Prefix
+## Data Sizing (32-bit Mode)
 
-The WID prefix ($42) enables 32-bit operands:
+In 32-bit mode:
+- **Traditional instructions** always operate on 32-bit data
+- **Extended ALU** ($02 $80-$97) supports 8/16/32-bit via mode byte
+- Address size is determined by operand format (B+16 vs 32-bit absolute)
+
+### Data Sizing
+
+| Operation | How to Encode |
+|-----------|---------------|
+| 32-bit data | Traditional instructions (default) |
+| 8-bit data | Extended ALU with `.B` suffix |
+| 16-bit data | Extended ALU with `.W` suffix |
+
+### Address Syntax
+
+In 32-bit mode, distinguish between B-relative and absolute addressing:
 
 ```asm
-    WID LDA #$12345678      ; 32-bit immediate load
-    WID LDA $12345678       ; 32-bit absolute address
-    WID STA $12345678       ; 32-bit absolute store
-    WID JMP $C0001000       ; Jump to 32-bit address
+    ; B + 16-bit offset (default absolute mode)
+    LDA B+$1234             ; B register + $1234
+
+    ; 32-bit absolute (requires 8 hex digits)
+    LDA $A0001234           ; Full 32-bit address
+
+    ; INVALID in 32-bit mode:
+    ; LDA $1234             ; Ambiguous - use B+$1234 instead
+```
+
+### WAI and STP
+
+```asm
+    WAI                     ; $42 $CB - Wait for Interrupt
+    STP                     ; $42 $DB - Stop Processor
+```
+
+### Assembly Examples
+
+```asm
+    ; Traditional instructions - always 32-bit data
+    LDA #$12345678          ; $A9 $78 $56 $34 $12
+    LDA B+$2000             ; $AD $00 $20
+    JMP $C0001000           ; $4C $00 $10 $00 $C0
+
+    ; For 8-bit/16-bit operations, use Extended ALU:
+    LD.B R0, #$12           ; $02 $80 $38 $00 $12
+    LD.W R0, #$1234         ; $02 $80 $78 $00 $34 $12
+    ADC.B A, R1             ; $02 $82 $00 $04
 ```
 
 ## Output Formats

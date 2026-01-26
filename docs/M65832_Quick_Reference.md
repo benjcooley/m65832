@@ -88,25 +88,28 @@ Width encoding: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved
 | Mode | Syntax | Effective Address | Bytes |
 |------|--------|-------------------|-------|
 | Immediate | `#$XX` | operand | 2-5 |
-| Direct Page | `$XX` | D + XX | 2 |
+| Register (R=1) | `Rn` | Register Rn | 2 |
+| Direct Page | `$XX` | D + XX (or Rn if R=1) | 2 |
 | DP Indexed X | `$XX,X` | D + XX + X | 2 |
 | DP Indexed Y | `$XX,Y` | D + XX + Y | 2 |
-| DP Indirect | `($XX)` | [D + XX] | 2 |
+| DP Indirect | `($XX)` or `(Rn)` | [D + XX] | 2 |
 | DP Indexed Indirect | `($XX,X)` | [D + XX + X] | 2 |
-| DP Indirect Indexed | `($XX),Y` | [D + XX] + Y | 2 |
-| DP Indirect Long | `[$XX]` | 32-bit [D + XX] | 2 |
+| DP Indirect Indexed | `($XX),Y` or `(Rn),Y` | [D + XX] + Y | 2 |
+| DP Indirect Long | `[$XX]` or `[Rn]` | 32-bit [D + XX] | 2 |
 | DP Ind Long Indexed | `[$XX],Y` | 32-bit [D + XX] + Y | 2 |
-| Absolute | `$XXXX` | B + XXXX | 3 |
-| Abs Indexed X | `$XXXX,X` | B + XXXX + X | 3 |
-| Abs Indexed Y | `$XXXX,Y` | B + XXXX + Y | 3 |
+| Absolute | `B+$XXXX` | B + XXXX | 3 |
+| Abs Indexed X | `B+$XXXX,X` | B + XXXX + X | 3 |
+| Abs Indexed Y | `B+$XXXX,Y` | B + XXXX + Y | 3 |
 | Abs Indirect | `($XXXX)` | [B + XXXX] | 3 |
 | Abs Indexed Indirect | `($XXXX,X)` | [B + XXXX + X] | 3 |
 | Absolute Long | `$XXXXXX` | addr24 | 4 |
-| Long (WID) | `$XXXXXXXX` | addr32 | 5-6 |
+| 32-bit Absolute | `$XXXXXXXX` | addr32 | 5-6 |
 | Stack Relative | `$XX,S` | S + XX | 2 |
 | SR Indirect Indexed | `($XX,S),Y` | [S + XX] + Y | 2 |
 | Relative | `label` | PC + 2 + offset8 | 2 |
 | Relative Long | `label` | PC + 3 + offset16 | 3 |
+
+**32-bit mode:** Use `Rn` for registers, `B+$XXXX` for B-relative, `$XXXXXXXX` (8 digits) for 32-bit absolute.
 
 ---
 
@@ -233,9 +236,9 @@ Setup: X=src, Y=dst, A=count-1
 |-------------|-----------|--------|
 | NOP | No operation | $EA |
 | BRK | Software break | $00 |
-| COP #sig | Coprocessor | $02 |
-| WAI | Wait for IRQ | $CB |
-| STP | Stop until reset | $DB |
+| COP #sig | Coprocessor | $02 (6502/65816) |
+| WAI | Wait for IRQ | $42 $CB (32-bit mode) |
+| STP | Stop until reset | $42 $DB (32-bit mode) |
 
 ---
 
@@ -292,22 +295,102 @@ All extended instructions use the `$02` prefix.
 | TRAP #n | $02 $40 | System call #n |
 | REPE #imm | $02 $60 | ExtP &= ~imm |
 | SEPE #imm | $02 $61 | ExtP \|= imm |
-| WAI | $02 $91 | Wait for interrupt |
-| STP | $02 $92 | Stop processor |
+| WAI | $42 $CB | Wait for interrupt |
+| STP | $42 $DB | Stop processor |
 
 ### Temp Register
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
-| TTA | $02 $86 | A = T |
-| TAT | $02 $87 | T = A |
+| TTA | $02 $9A | A = T |
+| TAT | $02 $9B | T = A |
 
 ### 64-bit Load/Store
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
-| LDQ dp | $02 $88 | A:T = [dp] (64-bit) |
-| LDQ abs | $02 $89 | A:T = [abs] |
-| STQ dp | $02 $8A | [dp] = A:T |
-| STQ abs | $02 $8B | [abs] = A:T |
+| LDQ dp | $02 $9C | A:T = [dp] (64-bit) |
+| LDQ abs | $02 $9D | A:T = [abs] |
+| STQ dp | $02 $9E | [dp] = A:T |
+| STQ abs | $02 $9F | [abs] = A:T |
+
+### Extended ALU ($80-$97)
+
+Extended ALU with explicit size/target/mode in a single mode byte.
+
+**Encoding:** `$02 [op] [mode] [dest_dp?] [src...]`
+
+**Mode byte:** `[size:2][target:1][addr_mode:5]`
+- Size: 00=BYTE, 01=WORD, 10=LONG
+- Target: 0=A, 1=Rn
+- addr_mode: 32 addressing options
+
+| Op | Mnemonic | Operation |
+|----|----------|-----------|
+| $80 | LD | dest = src |
+| $81 | ST | [addr] = src |
+| $82 | ADC | dest += src + C |
+| $83 | SBC | dest -= src + !C |
+| $84 | AND | dest &= src |
+| $85 | ORA | dest \|= src |
+| $86 | EOR | dest ^= src |
+| $87 | CMP | flags = dest - src |
+| $88 | BIT | flags = dest & src |
+| $89 | TSB | [addr] \|= src |
+| $8A | TRB | [addr] &= ~src |
+| $8B | INC | dest++ |
+| $8C | DEC | dest-- |
+| $8D | ASL | dest <<= 1 |
+| $8E | LSR | dest >>= 1 |
+| $8F | ROL | rotate left |
+| $90 | ROR | rotate right |
+| $97 | STZ | [addr] = 0 |
+
+**Addressing modes (5 bits):**
+```
+$00 dp          $10 abs32
+$01 dp,X        $11 abs32,X
+$02 dp,Y        $12 abs32,Y
+$08 abs         $18 #imm
+$09 abs,X       $19 A
+$0A abs,Y       $1A X
+                $1B Y
+$0E long24      $1C sr,S
+$0F long24,X    $1D (sr,S),Y
+```
+
+**Examples:**
+```asm
+LD.B R0, R1      ; 02 80 20 00 04  (5 bytes)
+ADC.W R0, #$1234 ; 02 82 78 00 34 12  (6 bytes)
+INC.B A          ; 02 8B 00  (3 bytes)
+```
+
+### Barrel Shifter ($98)
+
+**Encoding:** `$02 $98 [op|cnt] [dest] [src]` (5 bytes)
+
+| Op (bits 7-5) | Operation |
+|---------------|-----------|
+| 0 | SHL (logical left) |
+| 1 | SHR (logical right) |
+| 2 | SAR (arithmetic right) |
+| 3 | ROL (rotate left) |
+| 4 | ROR (rotate right) |
+
+Bits 4-0: count (0-31), or $1F for shift by A.
+
+### Sign/Zero Extend ($99)
+
+**Encoding:** `$02 $99 [subop] [dest] [src]` (5 bytes)
+
+| Subop | Operation |
+|-------|-----------|
+| $00 | SEXT8 (sign extend 8→32) |
+| $01 | SEXT16 (sign extend 16→32) |
+| $02 | ZEXT8 (zero extend 8→32) |
+| $03 | ZEXT16 (zero extend 16→32) |
+| $04 | CLZ (count leading zeros) |
+| $05 | CTZ (count trailing zeros) |
+| $06 | POPCNT (population count) |
 
 ### Load Effective Address
 | Instruction | Encoding | Operation |
@@ -355,24 +438,33 @@ All extended instructions use the `$02` prefix.
 
 ---
 
-## WID Prefix ($42)
+## Data Sizing (32-bit Mode)
 
-Extends the following operand to 32 bits.
+In 32-bit mode:
+- **Traditional instructions** operate on 32-bit data
+- **Extended ALU** ($02 $80-$97) supports 8/16/32-bit via mode byte
 
 ```asm
-WID LDA #$12345678      ; 32-bit immediate
-WID LDA $12345678       ; 32-bit address
-WID STA $12345678       ; 32-bit address
-WID JMP $C0001000       ; Jump to 32-bit address
-WID JSR $C0001000       ; Call to 32-bit address
-WID JMP ($12345678)     ; Indirect through 32-bit address
+; Traditional instructions - always 32-bit data
+LDA #$12345678          ; 32-bit immediate
+LDA B+$1234             ; B-relative addressing
+LDA $A0001234           ; 32-bit absolute (8 hex digits)
+
+; For 8-bit/16-bit ops, use Extended ALU:
+LD.B R0, #$12           ; 8-bit immediate to R0
+LD.W R0, #$1234         ; 16-bit immediate to R0
+ADC.B A, R1             ; 8-bit add
+
+; WAI/STP
+WAI                     ; $42 $CB
+STP                     ; $42 $DB
 ```
 
 ---
 
 ## Register Window (R=1)
 
-When R=1, Direct Page accesses map to hardware registers:
+When R=1, Direct Page accesses map to 64 hardware registers (not memory):
 
 ```
 Offset    Register        Offset    Register
@@ -383,7 +475,16 @@ $08-$0B   R2              ...
 $7C-$7F   R31
 ```
 
-Each register is 32-bit. Byte-aligned access supported.
+Each register is 32-bit. **Use `Rn` notation in 32-bit mode:**
+
+```asm
+LDA R0              ; Preferred (same as LDA $00)
+STA R15             ; Preferred (same as STA $3C)
+LDA R4,X            ; Register indexed
+LDA (R0),Y          ; Register indirect indexed
+```
+
+Byte access within registers: `LDA.B R4` or `LDA.B $10`
 
 ---
 
@@ -457,11 +558,11 @@ loop:   ; ... body ...
 ```asm
     ; Call: result = func(a, b)
     LDA arg_a
-    STA $00                 ; R0 = first arg
+    STA R0                  ; R0 = first arg
     LDA arg_b
-    STA $04                 ; R1 = second arg
+    STA R1                  ; R1 = second arg
     JSR function
-    LDA $00                 ; Return value in R0
+    LDA R0                  ; Return value in R0
     STA result
 ```
 
@@ -500,13 +601,13 @@ atomic_inc:
 ### System Call
 ```asm
     LDA #SYS_WRITE
-    STA $00                 ; R0 = syscall number
+    STA R0                  ; R0 = syscall number
     LDA #fd
-    STA $04                 ; R1 = fd
+    STA R1                  ; R1 = fd
     LDA #buffer
-    STA $08                 ; R2 = buffer
+    STA R2                  ; R2 = buffer
     LDA #count
-    STA $0C                 ; R3 = count
+    STA R3                  ; R3 = count
     TRAP #0
     ; Return in R0
 ```
@@ -533,11 +634,12 @@ atomic_inc:
 
 ## Quick Opcode Reference
 
-### Prefixes
-| Byte | Meaning |
-|------|---------|
-| $02 | Extended opcode follows |
-| $42 | WID: 32-bit operand follows |
+### Special Bytes (32-bit Mode)
+| Byte(s) | Meaning | Notes |
+|---------|---------|-------|
+| $02 | Extended opcode follows | M65832 new instructions |
+| $42 $CB | WAI | Wait for Interrupt |
+| $42 $DB | STP | Stop Processor |
 
 ### Common Opcodes
 | Op | Instruction | Op | Instruction |

@@ -107,6 +107,11 @@ architecture rtl of M65832_Core is
     signal is_extended  : std_logic;
     signal wid_prefix   : std_logic;
     signal wid_active   : std_logic;
+    signal data_prefix_valid   : std_logic;
+    signal data_prefix_pending : std_logic;
+    signal data_prefix_value   : std_logic_vector(1 downto 0);
+    signal data_prefix_value_pending : std_logic_vector(1 downto 0);
+    signal M_width_eff, X_width_eff  : std_logic_vector(1 downto 0);
     
     ---------------------------------------------------------------------------
     -- Register File Signals
@@ -131,7 +136,6 @@ architecture rtl of M65832_Core is
     
     signal E_mode, S_mode, R_mode : std_logic;
     signal M_width, X_width       : std_logic_vector(1 downto 0);
-    signal M_width_eff            : std_logic_vector(1 downto 0);
     
     ---------------------------------------------------------------------------
     -- ALU Signals
@@ -664,6 +668,10 @@ begin
     
     W_mode <= '1' when M_width = WIDTH_32 else '0';
     compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
+    M_width_eff <= WIDTH_32 when ext_ldq = '1' else
+                   data_prefix_value when data_prefix_valid = '1' else
+                   M_width;
+    X_width_eff <= data_prefix_value when data_prefix_valid = '1' else X_width;
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
     -- DP alignment check for R_mode: DP address must be multiple of 4
@@ -908,6 +916,10 @@ begin
             regalu_src_data <= (others => '0');
             wid_prefix <= '0';
             wid_active <= '0';
+            data_prefix_valid <= '0';
+            data_prefix_pending <= '0';
+            data_prefix_value <= (others => '0');
+            data_prefix_value_pending <= (others => '0');
             data_buffer <= (others => '0');
             data_byte_count <= (others => '0');
             DR <= (others => '0');
@@ -1023,16 +1035,38 @@ begin
                             state <= ST_DECODE;
                         end if;
                         
-                        -- WID prefix ($42) extends next operand to 32-bit
+                        -- Prefix handling (32-bit mode only):
+                        -- $CB = BYTE data prefix, $DB = WORD data prefix, $42 = ADDR32 prefix
+                        if (M_width = WIDTH_32 and wid_prefix = '1' and (IR = x"CB" or IR = x"DB")) then
+                            -- $42 $CB/$DB escape to WAI/STP
+                            wid_prefix <= '0';
+                            wid_active <= '0';
+                            data_prefix_pending <= '0';
+                            data_prefix_valid <= '0';
+                        end if;
+
                         if IR = x"02" and is_extended = '0' then
                             null;
                         elsif is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0' then
                             null;  -- Still fetching extended instruction bytes
+                        elsif (M_width = WIDTH_32 and wid_prefix = '0' and (IR = x"CB" or IR = x"DB")) then
+                            data_prefix_pending <= '1';
+                            if IR = x"CB" then
+                                data_prefix_value_pending <= WIDTH_8;
+                            else
+                                data_prefix_value_pending <= WIDTH_16;
+                            end if;
+                            data_prefix_valid <= '0';
+                            state <= ST_FETCH;
                         elsif IS_WID = '1' then
                             wid_prefix <= '1';
                             wid_active <= '0';
+                            data_prefix_valid <= '0';
                             state <= ST_FETCH;
                         else
+                            data_prefix_valid <= data_prefix_pending;
+                            data_prefix_value <= data_prefix_value_pending;
+                            data_prefix_pending <= '0';
                             wid_active <= wid_prefix;
                             wid_prefix <= '0';
                             data_byte_count <= (others => '0');
@@ -2563,9 +2597,9 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
              Y_reg when (IS_RMW_OP = '1' and ADDR_MODE = "0000" and REG_DST = "010") else
              data_buffer;
     
-    alu_width_eff <= X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
+    alu_width_eff <= X_width_eff when (IS_ALU_OP = '1' and ALU_OP = "110" and
                                    (REG_SRC = "001" or REG_SRC = "010"))
-                     else M_width;
+                     else M_width_eff;
     
     ALU_WIDTH <= alu_width_eff;
     ALU_BCD <= P_reg(P_D);
@@ -2575,7 +2609,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     exec_result <= ext_result when ext_result_valid = '1' else ALU_RES;
     
-    process(ext_mul, ext_mulu, ext_div, ext_divu, ext_lea, M_width, A_reg, data_buffer, eff_addr)
+    process(ext_mul, ext_mulu, ext_div, ext_divu, ext_lea, M_width_eff, A_reg, data_buffer, eff_addr)
         variable a_s32 : signed(31 downto 0);
         variable b_s32 : signed(31 downto 0);
         variable a_u32 : unsigned(31 downto 0);
@@ -2595,11 +2629,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             ext_result_valid <= '1';
         elsif ext_mul = '1' then
             ext_result_valid <= '1';
-            if M_width = WIDTH_8 then
+            if M_width_eff = WIDTH_8 then
                 a_s32 := resize(signed(A_reg(7 downto 0)), 32);
                 b_s32 := resize(signed(data_buffer(7 downto 0)), 32);
                 ext_result <= std_logic_vector(resize(a_s32 * b_s32, 32));
-            elsif M_width = WIDTH_16 then
+            elsif M_width_eff = WIDTH_16 then
                 a_s32 := resize(signed(A_reg(15 downto 0)), 32);
                 b_s32 := resize(signed(data_buffer(15 downto 0)), 32);
                 ext_result <= std_logic_vector(resize(a_s32 * b_s32, 32));
@@ -2610,11 +2644,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             end if;
         elsif ext_mulu = '1' then
             ext_result_valid <= '1';
-            if M_width = WIDTH_8 then
+            if M_width_eff = WIDTH_8 then
                 a_u32 := resize(unsigned(A_reg(7 downto 0)), 32);
                 b_u32 := resize(unsigned(data_buffer(7 downto 0)), 32);
                 ext_result <= std_logic_vector(resize(a_u32 * b_u32, 32));
-            elsif M_width = WIDTH_16 then
+            elsif M_width_eff = WIDTH_16 then
                 a_u32 := resize(unsigned(A_reg(15 downto 0)), 32);
                 b_u32 := resize(unsigned(data_buffer(15 downto 0)), 32);
                 ext_result <= std_logic_vector(resize(a_u32 * b_u32, 32));
@@ -2626,10 +2660,10 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         elsif ext_div = '1' then
             ext_result_valid <= '1';
             ext_rem_valid <= '1';
-            if M_width = WIDTH_8 then
+            if M_width_eff = WIDTH_8 then
                 a_s32 := resize(signed(A_reg(7 downto 0)), 32);
                 b_s32 := resize(signed(data_buffer(7 downto 0)), 32);
-            elsif M_width = WIDTH_16 then
+            elsif M_width_eff = WIDTH_16 then
                 a_s32 := resize(signed(A_reg(15 downto 0)), 32);
                 b_s32 := resize(signed(data_buffer(15 downto 0)), 32);
             else
@@ -2648,10 +2682,10 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         elsif ext_divu = '1' then
             ext_result_valid <= '1';
             ext_rem_valid <= '1';
-            if M_width = WIDTH_8 then
+            if M_width_eff = WIDTH_8 then
                 a_u32 := resize(unsigned(A_reg(7 downto 0)), 32);
                 b_u32 := resize(unsigned(data_buffer(7 downto 0)), 32);
-            elsif M_width = WIDTH_16 then
+            elsif M_width_eff = WIDTH_16 then
                 a_u32 := resize(unsigned(A_reg(15 downto 0)), 32);
                 b_u32 := resize(unsigned(data_buffer(15 downto 0)), 32);
             else
@@ -2674,7 +2708,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     -- Register-Targeted ALU Result Computation
     ---------------------------------------------------------------------------
     
-    process(IS_REGALU, REGALU_OP, regalu_dest_data, regalu_src_data, P_reg, M_width)
+    process(IS_REGALU, REGALU_OP, regalu_dest_data, regalu_src_data, P_reg, M_width_eff)
         variable dest_v, src_v, result_v : unsigned(31 downto 0);
         variable carry_in : unsigned(0 downto 0);
         variable sum_v    : unsigned(32 downto 0);
@@ -3161,7 +3195,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
     
     process(ext_result, ext_result_valid, ext_lea, ext_mul, ext_mulu, ext_div, ext_divu, ext_lli, ext_tta, T_reg,
-            stack_is_pull, IR, data_buffer, M_width, X_width, IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
+            stack_is_pull, IR, data_buffer, M_width_eff, X_width_eff, IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable value32 : std_logic_vector(31 downto 0);
         variable width_sel : std_logic_vector(1 downto 0);
     begin
@@ -3181,22 +3215,22 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         elsif ext_tta = '1' then
             ext_flag_load <= '1';
             value32 := T_reg;
-            width_sel := M_width;
+            width_sel := M_width_eff;
         elsif ext_result_valid = '1' and ext_lea = '0' then
             ext_flag_load <= '1';
             value32 := ext_result;
-            width_sel := M_width;
+            width_sel := M_width_eff;
         elsif ext_lli = '1' then
             ext_flag_load <= '1';
             value32 := data_buffer;
-            width_sel := M_width;
+            width_sel := M_width_eff;
         elsif stack_is_pull = '1' and (IR = x"68" or IR = x"FA" or IR = x"7A") then
             ext_flag_load <= '1';
             value32 := data_buffer;
             if IR = x"68" then
-                width_sel := M_width;
+                width_sel := M_width_eff;
             else
-                width_sel := X_width;
+                width_sel := X_width_eff;
             end if;
         end if;
         
@@ -3238,20 +3272,18 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                   WIDTH_8 when (ext_repe = '1' or ext_sepe = '1' or ext_trap = '1') else
                   WIDTH_32 when (is_extended = '1' and (IR_EXT = x"20" or IR_EXT = x"22" or IR_EXT = x"24")) else
                   WIDTH_32 when (is_extended = '1' and (IR_EXT = x"21" or IR_EXT = x"23" or IR_EXT = x"25")) else
-                  WIDTH_32 when (wid_active = '1' and ADDR_MODE = "0001") else
-                  X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
-                                (REG_DST = "001" or REG_DST = "010")) else
-                  X_width when (IS_ALU_OP = '1' and ALU_OP = "110" and
-                                (REG_SRC = "001" or REG_SRC = "010")) else
-                  M_width;
+                  X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "101" and
+                                    (REG_DST = "001" or REG_DST = "010")) else
+                  X_width_eff when (IS_ALU_OP = '1' and ALU_OP = "110" and
+                                    (REG_SRC = "001" or REG_SRC = "010")) else
+                  M_width_eff;
     
-    write_width <= X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
-                                 (REG_SRC = "001" or REG_SRC = "010")) else
-                   M_width;
+    write_width <= X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "100" and
+                                     (REG_SRC = "001" or REG_SRC = "010")) else
+                   M_width_eff;
     
-    M_width_eff <= WIDTH_32 when ext_ldq = '1' else M_width;
 
-    process(IR, M_width, X_width, A_reg, X_reg, Y_reg, D_reg, B_reg, VBR_reg, P_reg, PC_reg, data_buffer,
+    process(IR, M_width_eff, X_width_eff, A_reg, X_reg, Y_reg, D_reg, B_reg, VBR_reg, P_reg, PC_reg, data_buffer,
             ext_stack32_push, ext_stack32_pull)
     begin
         stack_width <= WIDTH_8;
@@ -3260,9 +3292,9 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         if ext_stack32_push = '1' or ext_stack32_pull = '1' then
             stack_width <= WIDTH_32;
         elsif IR = x"48" or IR = x"68" then
-            stack_width <= M_width;
+            stack_width <= M_width_eff;
         elsif IR = x"DA" or IR = x"FA" or IR = x"5A" or IR = x"7A" then
-            stack_width <= X_width;
+            stack_width <= X_width_eff;
         elsif IR = x"0B" or IR = x"2B" then
             stack_width <= WIDTH_16;
         elsif IR = x"F4" or IR = x"D4" or IR = x"62" then
@@ -3323,13 +3355,13 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     block_y_next <= std_logic_vector(unsigned(Y_reg) - 1) when block_dir = '1'
                     else std_logic_vector(unsigned(Y_reg) + 1);
     
-    process(IS_RMW_OP, RMW_OP, ALU_OP, M_width, is_bit_op)
+    process(IS_RMW_OP, RMW_OP, ALU_OP, M_width_eff, is_bit_op)
     begin
         -- Defaults for ALU ops
         ALU_CTRL.fstOp <= ALU_FST_PASS;
         ALU_CTRL.fc <= '0';
-        ALU_CTRL.w16 <= '1' when M_width = WIDTH_16 else '0';
-        ALU_CTRL.w32 <= '1' when M_width = WIDTH_32 else '0';
+        ALU_CTRL.w16 <= '1' when M_width_eff = WIDTH_16 else '0';
+        ALU_CTRL.w32 <= '1' when M_width_eff = WIDTH_32 else '0';
         
         -- Map ALU_OP to secOp (note: LDA/STA map to PASS, not TRB!)
         -- ALU_OP: 000=ORA, 001=AND, 010=EOR, 011=ADC, 100=STA, 101=LDA, 110=CMP, 111=SBC
@@ -3474,11 +3506,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                 else dp_reg_index_next when (state = ST_ADDR1 and
                                              (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                 else dp_reg_index;
-    rw_width <= X_width when (IS_RMW_OP = '1' and RMW_OP = "101" and
+    rw_width <= X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "101" and
                               (REG_DST = "001" or REG_DST = "010")) else
-                X_width when (IS_RMW_OP = '1' and RMW_OP = "100" and
+                X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "100" and
                               (REG_SRC = "001" or REG_SRC = "010")) else
-                M_width;
+                M_width_eff;
     rw_byte_sel <= dp_byte_sel_next when (R_mode = '1' and state = ST_ADDR1 and
                                          (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
                    else dp_byte_sel_reg when (R_mode = '1' and
@@ -3777,15 +3809,15 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     sci_success <= '1' when (ext_sci = '1' and link_valid = '1' and link_addr = eff_addr) else '0';
     
-    process(ext_cas, M_width, data_buffer, X_reg)
+    process(ext_cas, M_width_eff, data_buffer, X_reg)
     begin
         cas_match <= '0';
         if ext_cas = '1' then
-            if M_width = WIDTH_8 then
+            if M_width_eff = WIDTH_8 then
                 if data_buffer(7 downto 0) = X_reg(7 downto 0) then
                     cas_match <= '1';
                 end if;
-            elsif M_width = WIDTH_16 then
+            elsif M_width_eff = WIDTH_16 then
                 if data_buffer(15 downto 0) = X_reg(15 downto 0) then
                     cas_match <= '1';
                 end if;

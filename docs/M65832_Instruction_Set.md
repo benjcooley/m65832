@@ -8,8 +8,8 @@ A complete, verified reference for all M65832 instructions.
 
 The M65832 extends the WDC 65C816 instruction set with:
 - **32-bit operations** via extended M/X width flags
+- **Extended ALU** ($02 $80-$97) with mode byte for 8/16/32-bit sized operations
 - **New instructions** for multiply, divide, atomics, and system control
-- **WID prefix ($42)** for 32-bit immediates and addresses
 - **Extended opcode page ($02)** for new operations
 
 ### Compatibility Note
@@ -26,9 +26,8 @@ All standard 6502 and 65816 opcodes are preserved. The M65832 adds capabilities 
 |--------|-----------|------|
 | Standard | `[opcode]` | 1 byte |
 | Standard + imm | `[opcode] [imm8/16/32]` | 2-5 bytes |
-| Standard + addr | `[opcode] [addr8/16]` | 2-3 bytes |
-| WID prefix | `[$42] [opcode] [imm32 or addr32]` | 5-6 bytes |
-| Extended | `[$02] [ext-op] [operands...]` | 3+ bytes |
+| Standard + addr | `[opcode] [addr8/16/32]` | 2-5 bytes |
+| Extended | `[$02] [ext-op] [mode] [operands...]` | 3+ bytes |
 
 ### Operand Width Rules
 
@@ -63,7 +62,7 @@ In **emulation mode** (E=1), all operations are 8-bit.
 3x   BMI      AND      AND      ---      BIT      AND      ROL      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,X     ---
 
-4x   RTI      EOR      WID      ---      MVP      EOR      LSR      ---
+4x   RTI      EOR      (3)      ---      MVP      EOR      LSR      ---
      impl     (dp,X)   prefix   ---      src,dst  dp       dp       ---
 
 5x   BVC      EOR      EOR      ---      MVN      EOR      LSR      ---
@@ -138,11 +137,11 @@ Ax   TAY      LDA      TAX      PLB      LDY      LDA      LDX      LDA
 Bx   CLV      LDA      TSX      TYX      LDY      LDA      LDX      LDA
      impl     abs,Y    impl     impl     abs,X    abs,X    abs,Y    long,X
 
-Cx   INY      CMP      DEX      WAI      CPY      CMP      DEC      CMP
-     impl     #        impl     impl     abs      abs      abs      long
+Cx   INY      CMP      DEX      (1)      CPY      CMP      DEC      CMP
+     impl     #        impl     prefix   abs      abs      abs      long
 
-Dx   CLD      CMP      PHX      STP      ---      CMP      DEC      CMP
-     impl     abs,Y    impl     impl     ---      abs,X    abs,X    long,X
+Dx   CLD      CMP      PHX      (2)      ---      CMP      DEC      CMP
+     impl     abs,Y    impl     prefix   ---      abs,X    abs,X    long,X
 
 Ex   INX      SBC      NOP      ---      CPX      SBC      INC      SBC
      impl     #        impl     ---      abs      abs      abs      long
@@ -150,6 +149,12 @@ Ex   INX      SBC      NOP      ---      CPX      SBC      INC      SBC
 Fx   SED      SBC      PLX      XCE      ---      SBC      INC      SBC
      impl     abs,Y    impl     impl     ---      abs,X    abs,X    long,X
 ```
+
+**Notes on repurposed opcodes (32-bit mode):**
+- (1) `$CB`: In 65816 mode = WAI. In 32-bit mode, standalone `$CB` is undefined.
+- (2) `$DB`: In 65816 mode = STP. In 32-bit mode, standalone `$DB` is undefined.
+- (3) `$42`: In 65816 mode = WDC reserved. In 32-bit mode, `$42` followed by `$CB` or `$DB` encodes WAI/STP.
+- **WAI** = `$42 $CB`, **STP** = `$42 $DB` (32-bit mode only).
 
 ### Extended Opcodes ($02 Prefix)
 
@@ -198,17 +203,18 @@ After the `$02` prefix byte:
 | $73 | PLB | Pull B (32-bit) |
 | $74 | PHVBR | Push VBR (32-bit) |
 | $75 | PLVBR | Pull VBR (32-bit) |
+| **Barrel Shifter** | | |
+| $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
+| **Extend Operations** | | |
+| $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
 | **Temp Register** | | |
-| $86 | TTA | Transfer T to A |
-| $87 | TAT | Transfer A to T |
+| $9A | TTA | Transfer T to A |
+| $9B | TAT | Transfer A to T |
 | **64-bit Load/Store** | | |
-| $88 [dp] | LDQ dp | Load quad (A:T = [dp]) |
-| $89 [abs16] | LDQ abs | Load quad |
-| $8A [dp] | STQ dp | Store quad ([dp] = A:T) |
-| $8B [abs16] | STQ abs | Store quad |
-| **Control (Extended)** | | |
-| $91 | WAI | Wait for interrupt |
-| $92 | STP | Stop processor |
+| $9C [dp] | LDQ dp | Load quad (A:T = [dp]) |
+| $9D [abs16] | LDQ abs | Load quad |
+| $9E [dp] | STQ dp | Store quad ([dp] = A:T) |
+| $9F [abs16] | STQ abs | Store quad |
 | **Load Effective Address** | | |
 | $A0 [dp] | LEA dp | A = D + dp |
 | $A1 [dp] | LEA dp,X | A = D + dp + X |
@@ -236,116 +242,188 @@ After the `$02` prefix byte:
 | **Reserved FPU** | | |
 | $D9-$DF | (reserved) | Trap to software emulation |
 | $E0-$E6 | (reserved) | Trap to software emulation |
-| **Register-Targeted ALU** | | |
-| $E8 [op] [dest] [src...] | LD/ADC/SBC/AND/ORA/EOR/CMP | Register-targeted ALU (see below) |
-| $E9 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Barrel shifter (see below) |
-| $EA [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
+| **Extended ALU ($80-$9F)** | | |
+| $80 [mode] [dest?] [src...] | LD | Load with size/target/mode (see below) |
+| $81 [mode] [dest?] [src...] | ST | Store with size/target/mode |
+| $82 [mode] [dest?] [src...] | ADC | Add with carry |
+| $83 [mode] [dest?] [src...] | SBC | Subtract with borrow |
+| $84 [mode] [dest?] [src...] | AND | Logical AND |
+| $85 [mode] [dest?] [src...] | ORA | Logical OR |
+| $86 [mode] [dest?] [src...] | EOR | Exclusive OR |
+| $87 [mode] [dest?] [src...] | CMP | Compare |
+| $88 [mode] [dest?] [src...] | BIT | Bit test |
+| $89 [mode] [dest?] [src...] | TSB | Test and set bits |
+| $8A [mode] [dest?] [src...] | TRB | Test and reset bits |
+| $8B [mode] [dest?] [src...] | INC | Increment |
+| $8C [mode] [dest?] [src...] | DEC | Decrement |
+| $8D [mode] [dest?] [src...] | ASL | Arithmetic shift left |
+| $8E [mode] [dest?] [src...] | LSR | Logical shift right |
+| $8F [mode] [dest?] [src...] | ROL | Rotate left |
+| $90 [mode] [dest?] [src...] | ROR | Rotate right |
+| $97 [mode] [dest?] [src...] | STZ | Store zero |
+| **Barrel Shifter ($98)** | | |
+| $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
+| **Extend Operations ($99)** | | |
+| $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
 
-### Register-Targeted ALU Instructions ($02 $E8)
+### Extended ALU Instructions ($02 $80-$97)
 
-These instructions allow ALU operations with any DP location as the destination, instead of always using the accumulator. This enables efficient compiler code generation with register allocation across the 64-register window.
+These instructions provide sized ALU operations with explicit data size, target selection, and full addressing modes. The mode byte encodes size, target, and addressing mode in a single byte.
 
-**Encoding:** `$02 $E8 [op|mode] [dest_dp] [source_operand...]`
+**Encoding:** `$02 [op] [mode] [dest_dp if target=1] [source_operand...]`
 
-The `[op|mode]` byte encodes:
-- **Bits 7-4:** Operation (0=LD, 1=ADC, 2=SBC, 3=AND, 4=ORA, 5=EOR, 6=CMP, 7=Shifts)
-- **Bits 3-0:** Source addressing mode
+**Mode Byte:** `[size:2][target:1][addr_mode:5]`
 
-| Op | Operation | Flags Affected |
-|----|-----------|----------------|
-| 0 | LD dest, src | N, Z |
-| 1 | ADC dest, src | N, V, Z, C |
-| 2 | SBC dest, src | N, V, Z, C |
-| 3 | AND dest, src | N, Z |
-| 4 | ORA dest, src | N, Z |
-| 5 | EOR dest, src | N, Z |
-| 6 | CMP dest, src | N, Z, C |
-| 7 | (shifts - reserved) | |
+```
+Bit:   7   6   5   4   3   2   1   0
+      └───┬───┘   │   └───────┬───────┘
+        SIZE    TARGET    ADDR_MODE
+```
 
-| Mode | Source Addressing | Operand Bytes |
-|------|-------------------|---------------|
-| $0 | (dp,X) | 1 |
-| $1 | dp | 1 |
-| $2 | #imm | 1-4 (width dependent) |
-| $3 | A | 0 |
-| $4 | (dp),Y | 1 |
-| $5 | dp,X | 1 |
-| $6 | abs | 2 |
-| $7 | abs,X | 2 |
-| $8 | abs,Y | 2 |
-| $9 | (dp) | 1 |
-| $A | [dp] | 1 |
-| $B | [dp],Y | 1 |
-| $C | sr,S | 1 |
-| $D | (sr,S),Y | 1 |
-| $E-$F | (reserved) | |
+**Size (bits 7-6):**
+
+| Value | Size | Immediate Bytes |
+|-------|------|-----------------|
+| 00 | BYTE (8-bit) | 1 |
+| 01 | WORD (16-bit) | 2 |
+| 10 | LONG (32-bit) | 4 |
+| 11 | (reserved) | — |
+
+**Target (bit 5):**
+
+| Value | Target | Extra Byte |
+|-------|--------|------------|
+| 0 | Accumulator (A) | No dest_dp byte |
+| 1 | Register (Rn) | dest_dp byte follows |
+
+**Addressing Modes (bits 4-0):**
+
+| Mode | Syntax | Description | Operand Bytes |
+|------|--------|-------------|---------------|
+| $00 | dp | Direct Page / Register | 1 |
+| $01 | dp,X | DP Indexed X | 1 |
+| $02 | dp,Y | DP Indexed Y | 1 |
+| $03 | (dp,X) | Indexed Indirect | 1 |
+| $04 | (dp),Y | Indirect Indexed | 1 |
+| $05 | (dp) | DP Indirect | 1 |
+| $06 | [dp] | DP Indirect Long | 1 |
+| $07 | [dp],Y | DP Indirect Long Indexed | 1 |
+| $08 | abs | Absolute (B+16) | 2 |
+| $09 | abs,X | Absolute Indexed X | 2 |
+| $0A | abs,Y | Absolute Indexed Y | 2 |
+| $0B | (abs) | Absolute Indirect | 2 |
+| $0C | (abs,X) | Absolute Indexed Indirect | 2 |
+| $0D | [abs] | Absolute Indirect Long | 2 |
+| $0E | long24 | 24-bit Long (65816) | 3 |
+| $0F | long24,X | 24-bit Long Indexed | 3 |
+| $10 | abs32 | 32-bit Absolute | 4 |
+| $11 | abs32,X | 32-bit Absolute Indexed X | 4 |
+| $12 | abs32,Y | 32-bit Absolute Indexed Y | 4 |
+| $13 | (abs32) | 32-bit Absolute Indirect | 4 |
+| $14 | (abs32,X) | 32-bit Abs Indexed Indirect | 4 |
+| $15 | [abs32] | 32-bit Absolute Indirect Long | 4 |
+| $16-$17 | (reserved) | | |
+| $18 | #imm | Immediate | 1-4 (per size) |
+| $19 | A | Accumulator source | 0 |
+| $1A | X | X register source | 0 |
+| $1B | Y | Y register source | 0 |
+| $1C | sr,S | Stack Relative | 1 |
+| $1D | (sr,S),Y | Stack Relative Indirect Idx | 1 |
+| $1E-$1F | (reserved) | | |
+
+**Extended ALU Opcodes:**
+
+| Opcode | Mnemonic | Operation | Flags |
+|--------|----------|-----------|-------|
+| $02 $80 | LD | dest = src | N, Z |
+| $02 $81 | ST | [addr] = src | — |
+| $02 $82 | ADC | dest = dest + src + C | N, V, Z, C |
+| $02 $83 | SBC | dest = dest - src - !C | N, V, Z, C |
+| $02 $84 | AND | dest = dest & src | N, Z |
+| $02 $85 | ORA | dest = dest \| src | N, Z |
+| $02 $86 | EOR | dest = dest ^ src | N, Z |
+| $02 $87 | CMP | flags from dest - src | N, Z, C |
+| $02 $88 | BIT | flags from dest & src | N, V, Z |
+| $02 $89 | TSB | [addr] \|= src; Z from old | Z |
+| $02 $8A | TRB | [addr] &= ~src; Z from old | Z |
+| $02 $8B | INC | dest = dest + 1 | N, Z |
+| $02 $8C | DEC | dest = dest - 1 | N, Z |
+| $02 $8D | ASL | dest = dest << 1 | N, Z, C |
+| $02 $8E | LSR | dest = dest >> 1 | N, Z, C |
+| $02 $8F | ROL | dest = {dest, C} <<< 1 | N, Z, C |
+| $02 $90 | ROR | dest = {C, dest} >>> 1 | N, Z, C |
+| $02 $97 | STZ | [addr] = 0 | — |
+
+**Instruction Length:**
+
+| Target | Base Length | + Source Operand |
+|--------|-------------|------------------|
+| A (target=0) | 3 bytes | + 0-4 bytes |
+| Rn (target=1) | 4 bytes | + 0-4 bytes |
 
 **Assembly Syntax:**
 
 ```asm
-; LD dest, source - Load into DP location
-    LD $04, $00         ; [$04] = [$00]  (R1 = R0)
-    LD $04, A           ; [$04] = A
-    LD $04, #$1234      ; [$04] = $1234
-    LD $04, ($08)       ; [$04] = [[$08]]
+; A-target operations (traditional style with explicit size)
+    LD.B A, R1            ; A = R1 (8-bit)
+    LD.W A, #$1234        ; A = $1234 (16-bit)
+    ADC.B A, R0           ; A = A + R0 + C (8-bit)
+    INC.W A               ; A = A + 1 (16-bit)
 
-; ADC dest, source - Add with carry
-    ADC $08, $04        ; [$08] = [$08] + [$04] + C
-    ADC $08, A          ; [$08] = [$08] + A + C
-    ADC $08, #$10       ; [$08] = [$08] + $10 + C
-
-; SBC dest, source - Subtract with borrow
-    SBC $0C, $08        ; [$0C] = [$0C] - [$08] - !C
-
-; AND/ORA/EOR dest, source - Logical operations
-    AND $10, $04        ; [$10] = [$10] & [$04]
-    ORA $10, #$FF       ; [$10] = [$10] | $FF
-    EOR $14, A          ; [$14] = [$14] ^ A
-
-; CMP dest, source - Compare (flags only)
-    CMP $04, $08        ; flags = [$04] - [$08]
-    CMP $04, #$100      ; flags = [$04] - $100
+; Rn-target operations (register-targeted)
+    LD.B R0, R1           ; R0 = R1 (8-bit)
+    LD.W R0, #$1234       ; R0 = $1234 (16-bit)
+    LD R0, $A0001234      ; R0 = [$A0001234] (32-bit, abs32)
+    ADC.B R0, R1          ; R0 = R0 + R1 + C (8-bit)
+    ADC R0, #$12345678    ; R0 = R0 + $12345678 + C (32-bit)
+    INC.B R5              ; R5 = R5 + 1 (8-bit)
+    
+; Compare and logical
+    CMP.W R0, R1          ; flags from R0 - R1 (16-bit)
+    AND R2, #$FF          ; R2 = R2 & $FF (32-bit)
+    ORA.B R3, R4          ; R3 = R3 | R4 (8-bit)
 ```
 
-**Instruction Length:**
+**Encoding Examples:**
 
-| Mode | Length (bytes) |
-|------|----------------|
-| Source = A | 4 ($02 $E8 op dest) |
-| Source = dp | 5 ($02 $E8 op dest src) |
-| Source = #imm8 | 5 |
-| Source = #imm16 | 6 |
-| Source = #imm32 | 8 |
-| Source = abs | 6 |
+```
+; LD.B A, R1 (8-bit, A-target, dp mode)
+  02 80 00 04             ; 4 bytes
+        └─ size=00, target=0, mode=$00; dest implicit; src=$04
 
-**Example - Compiler Code Generation:**
+; LD.B R0, R1 (8-bit, Rn-target, dp mode)  
+  02 80 20 00 04          ; 5 bytes
+        │  │  └─ src=$04 (R1)
+        │  └─ dest=$00 (R0)
+        └─ size=00, target=1, mode=$00
 
-```asm
-; C: int result = a + b - c;
-; Traditional (accumulator-centric):
-    LDA a               ; 3 cycles
-    CLC                 ; 2 cycles
-    ADC b               ; 3 cycles
-    SEC                 ; 2 cycles
-    SBC c               ; 3 cycles
-    STA result          ; 3 cycles
-; Total: 16 cycles, 12 bytes
+; ADC.W R0, #$1234 (16-bit, Rn-target, immediate)
+  02 82 78 00 34 12       ; 6 bytes
+        │  │  └────── imm16 (little-endian)
+        │  └─ dest=$00 (R0)
+        └─ size=01, target=1, mode=$18
 
-; Register-targeted:
-    LD $00, a           ; R0 = a
-    CLC
-    ADC $00, b          ; R0 += b
-    SEC
-    SBC $00, c          ; R0 -= c
-    LD result, $00      ; result = R0
-; Total: Similar cycles but R0 stays "hot" for reuse
+; LD R0, $A0001234 (32-bit, Rn-target, abs32)
+  02 80 B0 00 34 12 00 A0 ; 8 bytes
+        │  │  └────────── abs32 (little-endian)
+        │  └─ dest=$00 (R0)
+        └─ size=10, target=1, mode=$10
+
+; INC.B A (8-bit, A-target, implied)
+  02 8B 00                ; 3 bytes
+        └─ size=00, target=0, mode=$00 (implied for INC)
+
+; INC.B R5 (8-bit, Rn-target, implied)
+  02 8B 20 14             ; 4 bytes
+        │  └─ dest=$14 (R5)
+        └─ size=00, target=1, mode=$00
 ```
 
-### Shifter/Rotate Instructions ($02 $E9)
+### Barrel Shifter Instructions ($02 $98)
 
-Single-cycle barrel shifter and rotate operations between register window locations.
+Single-cycle multi-bit shift and rotate operations between registers.
 
-**Encoding:** `$02 $E9 [op|cnt] [dest_dp] [src_dp]`
+**Encoding:** `$02 $98 [op|cnt] [dest_dp] [src_dp]`
 
 The `[op|cnt]` byte encodes:
 - **Bits 7-5:** Operation (0=SHL, 1=SHR, 2=SAR, 3=ROL, 4=ROR)
@@ -364,17 +442,10 @@ The `[op|cnt]` byte encodes:
 **Assembly Syntax:**
 
 ```asm
-; Using DP address syntax:
-    SHL $08, $04, #4      ; [$08] = [$04] << 4
-    SHR $0C, $04, #8      ; [$0C] = [$04] >> 8
-    SAR $10, $08, #4      ; [$10] = [$08] >>> 4
-    ROL $14, $10, #1      ; [$14] = [$10] rotate left 1
-    ROR $18, $14, #1      ; [$18] = [$14] rotate right 1
-
-; Using register alias syntax (R0-R63 = $00, $04, $08, ...):
-    SHL R2, R1, #4        ; R2 = R1 << 4 (same as $08, $04)
+; Fixed shift count:
+    SHL R2, R1, #4        ; R2 = R1 << 4
     SHR R3, R1, #8        ; R3 = R1 >> 8
-    SAR R4, R2, #4        ; R4 = R2 >>> 4
+    SAR R4, R2, #4        ; R4 = R2 >>> 4 (arithmetic)
     ROL R5, R4, #1        ; R5 = R4 rotate left 1
     ROR R6, R5, #1        ; R6 = R5 rotate right 1
 
@@ -383,13 +454,13 @@ The `[op|cnt]` byte encodes:
     SHR R3, R1, A         ; R3 = R1 >> (A & $1F)
 ```
 
-**Instruction Length:** 5 bytes ($02 $E9 op|cnt dest src)
+**Instruction Length:** 5 bytes ($02 $98 op|cnt dest src)
 
-### Sign/Zero Extend Instructions ($02 $EA)
+### Sign/Zero Extend Instructions ($02 $99)
 
 Extend operations for converting between data sizes.
 
-**Encoding:** `$02 $EA [subop] [dest_dp] [src_dp]`
+**Encoding:** `$02 $99 [subop] [dest_dp] [src_dp]`
 
 | Subop | Operation | Description |
 |-------|-----------|-------------|
@@ -406,39 +477,16 @@ Extend operations for converting between data sizes.
 **Assembly Syntax:**
 
 ```asm
-; Using DP address syntax:
-    SEXT8 $10, $0C        ; [$10] = sign_extend_8([$0C])
-    SEXT16 $14, $0C       ; [$14] = sign_extend_16([$0C])
-    ZEXT8 $18, $0C        ; [$18] = zero_extend_8([$0C])
-    ZEXT16 $1C, $0C       ; [$1C] = zero_extend_16([$0C])
-    CLZ $20, $04          ; [$20] = count_leading_zeros([$04])
-    CTZ $24, $04          ; [$24] = count_trailing_zeros([$04])
-    POPCNT $28, $04       ; [$28] = popcount([$04])
-
-; Using register alias syntax (R0-R63):
-    SEXT8 R4, R3          ; R4 = sign_extend_8(R3)  ; $FF -> $FFFFFFFF
+    SEXT8 R4, R3          ; R4 = sign_extend_8(R3)
     SEXT16 R5, R3         ; R5 = sign_extend_16(R3)
-    ZEXT8 R6, R3          ; R6 = zero_extend_8(R3)  ; $FF -> $000000FF
+    ZEXT8 R6, R3          ; R6 = zero_extend_8(R3)
     ZEXT16 R7, R3         ; R7 = zero_extend_16(R3)
     CLZ R8, R1            ; R8 = count_leading_zeros(R1)
     CTZ R9, R1            ; R9 = count_trailing_zeros(R1)
     POPCNT R10, R1        ; R10 = popcount(R1)
 ```
 
-**Instruction Length:** 5 bytes ($02 $EA subop dest src)
-
-**Example - Compiler Code Generation:**
-
-```asm
-; C: int32_t y = (int32_t)(int8_t)x;  // sign extend char to int
-    SEXT8 R2, R1          ; R2 = sign_extend(R1)
-
-; C: uint32_t mask = (1u << n) - 1;
-    LDA #1
-    LD R1, A              ; R1 = 1
-    SHL R2, R1, n         ; R2 = 1 << n
-    DEC R2                ; R2 = (1 << n) - 1
-```
+**Instruction Length:** 5 bytes ($02 $99 subop dest src)
 
 ---
 
@@ -1039,9 +1087,9 @@ Halts processor until interrupt received.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Implied | WAI | $CB | 1 | 3+ |
+| Implied | WAI | $42 $CB | 2 | 3+ |
 
-Also available as extended opcode: `$02 $91`
+Note: 32-bit mode encoding. In 65816 mode, WAI is `$CB`.
 
 #### STP - Stop Processor
 
@@ -1049,9 +1097,9 @@ Halts processor until hardware reset.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Implied | STP | $DB | 1 | 2 |
+| Implied | STP | $42 $DB | 2 | 2 |
 
-Also available as extended opcode: `$02 $92`
+Note: 32-bit mode encoding. In 65816 mode, STP is `$DB`.
 
 ---
 
@@ -1264,7 +1312,7 @@ Sets the B register (absolute addressing base).
 ```asm
 ; Set absolute base to I/O region
     SB #$B0000000
-    LDA $1000           ; Actually accesses $B0001000
+    LDA B+$1000         ; Accesses $B0001000 (B + $1000)
 ```
 
 #### SD - Set Direct Base Register
@@ -1370,13 +1418,13 @@ Triggers a software interrupt for system calls.
 ```asm
 ; System call example
     LDA #SYS_WRITE
-    STA $00             ; R0 = syscall number
+    STA R0              ; R0 = syscall number
     LDA #fd
-    STA $04             ; R1 = file descriptor
+    STA R1              ; R1 = file descriptor
     LDA #buffer
-    STA $08             ; R2 = buffer address
+    STA R2              ; R2 = buffer address
     LDA #count
-    STA $0C             ; R3 = byte count
+    STA R3              ; R3 = byte count
     TRAP #0             ; Invoke kernel
 ```
 
@@ -1413,13 +1461,13 @@ The T register holds the high word from 64-bit multiply results and the remainde
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
-| Implied | TTA | $02 $86 | 2 |
+| Implied | TTA | $02 $9A | 2 |
 
 #### TAT - Transfer A to T
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
-| Implied | TAT | $02 $87 | 2 |
+| Implied | TAT | $02 $9B | 2 |
 
 ---
 
@@ -1431,8 +1479,8 @@ Loads 64 bits into A (low) and T (high).
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
-| Direct Page | LDQ dp | $02 $88 | 3 |
-| Absolute | LDQ abs | $02 $89 | 4 |
+| Direct Page | LDQ dp | $02 $9C | 3 |
+| Absolute | LDQ abs | $02 $9D | 4 |
 
 #### STQ - Store Quad
 
@@ -1440,32 +1488,41 @@ Stores A (low) and T (high) as 64 bits.
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
-| Direct Page | STQ dp | $02 $8A | 3 |
-| Absolute | STQ abs | $02 $8B | 4 |
+| Direct Page | STQ dp | $02 $9E | 3 |
+| Absolute | STQ abs | $02 $9F | 4 |
 
 ---
 
-### WID Prefix ($42)
+### Data and Address Sizing (32-bit Mode)
 
-The WID prefix signals that the following instruction uses a 32-bit operand.
+In 32-bit mode, data and address sizing is handled differently for traditional vs. extended instructions:
 
+**Traditional 6502/65816 Instructions:**
+- Data size is **always 32-bit** in 32-bit mode
+- Address size is determined by operand format:
+  - `B+$XXXX` = B-relative 16-bit (default)
+  - `$XXXXXXXX` = 32-bit absolute (8 hex digits)
+
+**Extended ALU Instructions ($02 $80-$97):**
+- Data size is encoded in the mode byte (bits 7-6): BYTE, WORD, or LONG
+- Address mode is encoded in the mode byte (bits 4-0)
+- Use `.B`, `.W`, `.L` suffixes in assembly
+
+**For sized operations, use Extended ALU:**
 ```asm
-; 32-bit immediate
-    WID LDA #$12345678  ; $42 $A9 [4 bytes]
+; 8-bit operations - use Extended ALU
+    LD.B R0, #$12           ; $02 $80 $38 $00 $12
 
-; 32-bit absolute address
-    WID LDA $12345678   ; $42 $AD [4 bytes]
-    WID STA $12345678   ; $42 $8D [4 bytes]
+; 16-bit operations - use Extended ALU  
+    LD.W R0, #$1234         ; $02 $80 $78 $00 $34 $12
 
-; 32-bit jump
-    WID JMP $C0001000   ; $42 $4C [4 bytes]
-    WID JSR $C0001000   ; $42 $20 [4 bytes]
-
-; 32-bit indirect
-    WID JMP ($12345678) ; $42 $6C [4 bytes]
+; 32-bit operations - Extended ALU (default size)
+    LD R0, #$12345678       ; $02 $80 $B8 $00 $78 $56 $34 $12
 ```
 
-**Caution:** Only use WID when necessary. Using WID with instructions that don't need 32-bit operands can misalign the instruction stream.
+**WAI and STP (32-bit mode only):**
+- `WAI` = `$42 $CB`
+- `STP` = `$42 $DB`
 
 ---
 
@@ -1566,12 +1623,13 @@ Timer registers are memory-mapped in the MMIO region (addresses shown are full 3
 | Implied | `INX` | — | 1 |
 | Accumulator | `ASL` | — | 1 |
 | Immediate | `LDA #$XX` | operand | 2-5 |
-| Direct Page | `LDA $XX` | D + offset | 2 |
+| Register (R=1) | `LDA Rn` | Register Rn | 2 |
+| Direct Page | `LDA $XX` | D + offset (or Rn if R=1) | 2 |
 | DP Indexed X | `LDA $XX,X` | D + offset + X | 2 |
 | DP Indexed Y | `LDA $XX,Y` | D + offset + Y | 2 |
-| Absolute | `LDA $XXXX` | B + addr16 | 3 |
-| Abs Indexed X | `LDA $XXXX,X` | B + addr16 + X | 3 |
-| Abs Indexed Y | `LDA $XXXX,Y` | B + addr16 + Y | 3 |
+| Absolute | `LDA B+$XXXX` | B + addr16 | 3 |
+| Abs Indexed X | `LDA B+$XXXX,X` | B + addr16 + X | 3 |
+| Abs Indexed Y | `LDA B+$XXXX,Y` | B + addr16 + Y | 3 |
 | DP Indirect | `LDA ($XX)` | [D + offset] | 2 |
 | DP Indexed Indirect | `LDA ($XX,X)` | [D + offset + X] | 2 |
 | DP Indirect Indexed | `LDA ($XX),Y` | [D + offset] + Y | 2 |
@@ -1585,7 +1643,9 @@ Timer registers are memory-mapped in the MMIO region (addresses shown are full 3
 | SR Indirect Indexed | `LDA ($XX,S),Y` | [S + offset] + Y | 2 |
 | Relative | `BEQ label` | PC + 2 + offset8 | 2 |
 | Relative Long | `BRL label` | PC + 3 + offset16 | 3 |
-| Long (WID) | `WID LDA $XXXXXXXX` | addr32 | 5-6 |
+| 32-bit Absolute | `LDA $XXXXXXXX` | addr32 | 5-6 |
+
+**Note:** In 32-bit mode with R=1, Direct Page addresses $00-$FF map to hardware registers R0-R63. Use `Rn` notation (e.g., `LDA R4`) for clarity.
 
 ---
 
@@ -1619,17 +1679,17 @@ reset:
 ```asm
 ; Call: result = add(a, b)
     LDA value_a
-    STA $00             ; R0 = first argument
+    STA R0              ; R0 = first argument
     LDA value_b
-    STA $04             ; R1 = second argument
+    STA R1              ; R1 = second argument
     JSR add_function
-    LDA $00             ; Return value in R0
+    LDA R0              ; Return value in R0
     STA result
 
 add_function:
-    LDA $00             ; A = R0
-    ADC $04             ; A = A + R1
-    STA $00             ; R0 = result
+    LDA R0              ; A = R0
+    ADC R1              ; A = A + R1
+    STA R0              ; R0 = result
     RTS
 ```
 
@@ -1684,7 +1744,7 @@ sum_array:
 ; Returns bytes written in R0, -1 on error
 sys_write:
     LDA #1              ; SYS_WRITE
-    STA $10             ; R4 = syscall number (depends on ABI)
+    STA R4              ; R4 = syscall number (depends on ABI)
     TRAP #0
     ; Kernel returns result in R0
     RTS

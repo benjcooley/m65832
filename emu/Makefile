@@ -11,8 +11,10 @@ PREFIX ?= /usr/local
 
 # Source files
 LIB_SRCS = m65832emu.c m65832_6502.c
+SYS_SRCS = uart.c system.c
 EMU_SRCS = main.c
 LIB_OBJS = $(LIB_SRCS:.c=.o)
+SYS_OBJS = $(SYS_SRCS:.c=.o)
 EMU_OBJS = $(EMU_SRCS:.c=.o)
 
 # Targets
@@ -28,12 +30,17 @@ $(LIBRARY): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
 # Standalone emulator
-$(EMULATOR): $(EMU_OBJS) $(LIBRARY)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(EMU_OBJS) -L. -lm65832emu -lm
+$(EMULATOR): $(EMU_OBJS) $(SYS_OBJS) $(LIBRARY)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(EMU_OBJS) $(SYS_OBJS) -L. -lm65832emu -lm
 
 # Object files
 %.o: %.c m65832emu.h
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# System objects depend on their headers
+uart.o: uart.c uart.h m65832emu.h
+system.o: system.c system.h uart.h m65832emu.h
+main.o: main.c m65832emu.h system.h uart.h
 
 clean:
 	rm -f $(LIBRARY) $(EMULATOR) *.o

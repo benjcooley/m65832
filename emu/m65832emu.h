@@ -32,19 +32,19 @@ extern "C" {
 #define M65832_TLB_ENTRIES      16              /* TLB entries */
 #define M65832_REG_WINDOW_SIZE  64              /* R0-R63 */
 
-/* System register addresses (MMIO at $FFFFF0xx) */
-#define SYSREG_BASE       0xFFFFF000
-#define SYSREG_MMUCR      0xFFFFF000  /* MMU Control Register */
-#define SYSREG_TLBINVAL   0xFFFFF004  /* TLB Invalidate (by VA) */
-#define SYSREG_ASID       0xFFFFF008  /* Address Space ID */
-#define SYSREG_ASIDINVAL  0xFFFFF00C  /* TLB Invalidate (by ASID) */
-#define SYSREG_FAULTVA    0xFFFFF010  /* Faulting Virtual Address */
-#define SYSREG_PTBR_LO    0xFFFFF014  /* Page Table Base Register (low 32) */
-#define SYSREG_PTBR_HI    0xFFFFF018  /* Page Table Base Register (high 32) */
-#define SYSREG_TLBFLUSH   0xFFFFF01C  /* Full TLB Flush */
-#define SYSREG_TIMER_CTRL 0xFFFFF040  /* Timer Control */
-#define SYSREG_TIMER_CMP  0xFFFFF044  /* Timer Compare Value */
-#define SYSREG_TIMER_CNT  0xFFFFF048  /* Timer Counter */
+/* System register addresses (MMIO at $00FFF0xx - 24-bit addressable) */
+#define SYSREG_BASE       0x00FFF000
+#define SYSREG_MMUCR      0x00FFF000  /* MMU Control Register */
+#define SYSREG_TLBINVAL   0x00FFF004  /* TLB Invalidate (by VA) */
+#define SYSREG_ASID       0x00FFF008  /* Address Space ID */
+#define SYSREG_ASIDINVAL  0x00FFF00C  /* TLB Invalidate (by ASID) */
+#define SYSREG_FAULTVA    0x00FFF010  /* Faulting Virtual Address */
+#define SYSREG_PTBR_LO    0x00FFF014  /* Page Table Base Register (low 32) */
+#define SYSREG_PTBR_HI    0x00FFF018  /* Page Table Base Register (high 32) */
+#define SYSREG_TLBFLUSH   0x00FFF01C  /* Full TLB Flush */
+#define SYSREG_TIMER_CTRL 0x00FFF040  /* Timer Control */
+#define SYSREG_TIMER_CMP  0x00FFF044  /* Timer Compare Value */
+#define SYSREG_TIMER_CNT  0x00FFF048  /* Timer Counter */
 
 /* MMUCR bits */
 #define MMUCR_PG          0x01        /* Paging enable */
@@ -446,6 +446,9 @@ struct m65832_cpu {
         bool     on_write;
     } watchpoints[16];
     int      num_watchpoints;
+
+    /* One-shot size prefix state (32-bit mode only) */
+    uint8_t  prefix_addr32;
     
     /* 6502 coprocessor */
     m6502_cpu_t *coproc;    /* NULL if not configured */

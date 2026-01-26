@@ -6,6 +6,8 @@
  */
 
 #include "m65832emu.h"
+#include "system.h"
+#include "uart.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,11 +88,13 @@ typedef struct {
  * ========================================================================= */
 
 static m65832_cpu_t *g_cpu = NULL;
+static system_state_t *g_system = NULL;
 static volatile int g_running = 0;
 static int g_trace_enabled = 0;
 static int g_verbose = 0;
 static uint64_t g_max_cycles = 0;
 static uint64_t g_max_instructions = 0;
+static int g_system_mode = 0;  /* Use system layer instead of raw CPU */
 
 /* ============================================================================
  * Signal Handler
@@ -99,7 +103,9 @@ static uint64_t g_max_instructions = 0;
 static void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
-    if (g_cpu) {
+    if (g_system) {
+        system_stop(g_system);
+    } else if (g_cpu) {
         m65832_stop(g_cpu);
     }
 }
@@ -155,6 +161,13 @@ static void print_usage(const char *prog) {
     printf("  -x, --hex            Load Intel HEX file instead of binary\n");
     printf("  --emulation          Start in 6502 emulation mode (default: 32-bit native)\n");
     printf("  --coproc FREQ        Enable 6502 coprocessor at frequency (Hz)\n");
+    printf("\nSystem Mode (Linux boot support):\n");
+    printf("  --system             Enable system mode with UART and boot support\n");
+    printf("  --ram SIZE           RAM size (e.g., 256M, 1G) (default: 256M)\n");
+    printf("  --kernel FILE        Load kernel at 0x00100000\n");
+    printf("  --initrd FILE        Load initrd at 0x01000000\n");
+    printf("  --cmdline \"STRING\"   Kernel command line\n");
+    printf("  --raw                Put terminal in raw mode (for UART I/O)\n");
     printf("\n");
     printf("Examples:\n");
     printf("  %s program.elf                  Load and run ELF executable\n", prog);
@@ -162,6 +175,8 @@ static void print_usage(const char *prog) {
     printf("  %s -t -c 1000 program.bin       Trace first 1000 cycles\n", prog);
     printf("  %s -m 1024 -x program.hex       Load HEX file with 1MB RAM\n", prog);
     printf("  %s -i program.bin               Interactive debugger\n", prog);
+    printf("  %s --system --kernel vmlinux    Boot Linux kernel\n", prog);
+    printf("  %s --system --raw test.bin      Run with UART in raw mode\n", prog);
 }
 
 /* ============================================================================
@@ -647,6 +662,22 @@ static void interactive_mode(m65832_cpu_t *cpu) {
  * Main Entry Point
  * ========================================================================= */
 
+/* Parse RAM size with suffixes (e.g., "256M", "1G") */
+static size_t parse_ram_size(const char *str) {
+    char *endptr;
+    size_t size = strtoul(str, &endptr, 0);
+    
+    if (*endptr == 'K' || *endptr == 'k') {
+        size *= 1024;
+    } else if (*endptr == 'M' || *endptr == 'm') {
+        size *= 1024 * 1024;
+    } else if (*endptr == 'G' || *endptr == 'g') {
+        size *= 1024 * 1024 * 1024;
+    }
+    
+    return size;
+}
+
 int main(int argc, char *argv[]) {
     const char *filename = NULL;
     uint32_t load_addr = 0x1000;
@@ -658,6 +689,13 @@ int main(int argc, char *argv[]) {
     int load_hex = 0;
     int emulation_mode = 0;
     uint32_t coproc_freq = 0;
+    
+    /* System mode options */
+    const char *kernel_file = NULL;
+    const char *initrd_file = NULL;
+    const char *cmdline = NULL;
+    size_t sys_ram_size = 256 * 1024 * 1024;  /* Default 256 MB */
+    int raw_mode = 0;
     
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -708,6 +746,34 @@ int main(int argc, char *argv[]) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             coproc_freq = (uint32_t)strtoul(argv[i], NULL, 0);
         }
+        /* System mode options */
+        else if (strcmp(argv[i], "--system") == 0) {
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--ram") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            sys_ram_size = parse_ram_size(argv[i]);
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--kernel") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            kernel_file = argv[i];
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--initrd") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            initrd_file = argv[i];
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--cmdline") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            cmdline = argv[i];
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--raw") == 0) {
+            raw_mode = 1;
+            g_system_mode = 1;
+        }
         else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;
@@ -717,10 +783,96 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if (!filename && !interactive) {
+    if (!filename && !interactive && !g_system_mode) {
         print_usage(argv[0]);
         return 1;
     }
+    
+    /* Set up signal handler */
+    signal(SIGINT, signal_handler);
+    
+    /* ========================================================================
+     * SYSTEM MODE - Use system layer with UART and boot support
+     * ====================================================================== */
+    if (g_system_mode) {
+        system_config_t config;
+        system_config_init(&config);
+        
+        config.ram_size = sys_ram_size;
+        config.kernel_file = kernel_file;
+        config.initrd_file = initrd_file;
+        config.cmdline = cmdline;
+        config.entry_point = entry_specified ? entry_addr : 0;
+        config.enable_uart = true;
+        config.uart_raw_mode = raw_mode;
+        config.supervisor_mode = true;
+        config.native32_mode = !emulation_mode;
+        config.verbose = g_verbose;
+        
+        /* If filename provided without --kernel, treat it as kernel */
+        if (filename && !kernel_file) {
+            config.kernel_file = filename;
+        }
+        
+        if (g_verbose) {
+            printf("Initializing M65832 system v%s\n", m65832_version());
+        }
+        
+        g_system = system_init(&config);
+        if (!g_system) {
+            fprintf(stderr, "Failed to initialize system\n");
+            return 1;
+        }
+        
+        g_cpu = system_get_cpu(g_system);
+        
+        if (g_verbose) {
+            system_print_info(g_system);
+        }
+        
+        /* Enable tracing if requested */
+        if (g_trace_enabled) {
+            m65832_set_trace(g_cpu, true, trace_callback, NULL);
+        }
+        
+        /* Run system */
+        g_running = 1;
+        clock_t start = clock();
+        uint64_t start_cycles = g_cpu->cycles;
+        uint64_t start_inst = g_cpu->inst_count;
+        
+        if (g_max_cycles > 0) {
+            system_run(g_system, g_max_cycles);
+        } else {
+            system_run_until_halt(g_system);
+        }
+        
+        clock_t end = clock();
+        double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
+        uint64_t cycles_run = g_cpu->cycles - start_cycles;
+        uint64_t inst_run = g_cpu->inst_count - start_inst;
+        
+        if (g_verbose || show_state) {
+            printf("\nExecution complete:\n");
+            printf("  Cycles: %llu\n", (unsigned long long)cycles_run);
+            printf("  Instructions: %llu\n", (unsigned long long)inst_run);
+            printf("  Time: %.3f seconds\n", elapsed);
+            if (elapsed > 0) {
+                printf("  Performance: %.2f MHz (%.2f MIPS)\n",
+                       cycles_run / elapsed / 1000000.0,
+                       inst_run / elapsed / 1000000.0);
+            }
+            printf("\nFinal CPU state:\n");
+            m65832_print_state(g_cpu);
+        }
+        
+        system_destroy(g_system);
+        return 0;
+    }
+    
+    /* ========================================================================
+     * LEGACY MODE - Direct CPU emulator without system layer
+     * ====================================================================== */
     
     /* Initialize emulator */
     if (g_verbose) {
@@ -733,9 +885,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to initialize emulator\n");
         return 1;
     }
-    
-    /* Set up signal handler */
-    signal(SIGINT, signal_handler);
     
     /* Load program */
     int is_elf = 0;

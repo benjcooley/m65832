@@ -666,18 +666,27 @@ static inline uint32_t addr_dpy(m65832_cpu_t *cpu) {
 
 /* Absolute */
 static inline uint32_t addr_abs(m65832_cpu_t *cpu) {
+    if (cpu->prefix_addr32) {
+        return fetch32(cpu);
+    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset) & 0xFFFFFFFF;
 }
 
 /* Absolute, X */
 static inline uint32_t addr_absx(m65832_cpu_t *cpu) {
+    if (cpu->prefix_addr32) {
+        return fetch32(cpu) + cpu->x;
+    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset + cpu->x) & 0xFFFFFFFF;
 }
 
 /* Absolute, Y */
 static inline uint32_t addr_absy(m65832_cpu_t *cpu) {
+    if (cpu->prefix_addr32) {
+        return fetch32(cpu) + cpu->y;
+    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset + cpu->y) & 0xFFFFFFFF;
 }
@@ -1112,10 +1121,55 @@ static int execute_instruction(m65832_cpu_t *cpu) {
     /* M65832: Width is controlled by M1:M0 and X1:X0 bits regardless of E mode */
     int width_m = SIZE_M(cpu);
     int width_x = SIZE_X(cpu);
+    int data_prefix = 0;  /* 0=none, 1=byte, 2=word */
+    int escaped_wai_stp = 0;
     uint32_t addr, val;
     int8_t rel8;
     int16_t rel16;
     uint8_t ext_op;
+
+    /* One-shot prefixes (32-bit mode only) */
+    cpu->prefix_addr32 = 0;
+    if (width_m == 4 && width_x == 4) {
+        if (opcode == 0x42) {
+            uint8_t next = fetch8(cpu);
+            if (next == 0xCB || next == 0xDB) {
+                opcode = next;  /* Escape WAI/STP */
+                escaped_wai_stp = 1;
+            } else {
+                cpu->prefix_addr32 = 1;
+                opcode = next;
+            }
+        }
+        if (!escaped_wai_stp && (opcode == 0xCB || opcode == 0xDB)) {
+            if (cpu->prefix_addr32) {
+                illegal_instruction(cpu);
+                cpu->prefix_addr32 = 0;
+                return 7;
+            }
+            data_prefix = (opcode == 0xCB) ? 1 : 2;
+            opcode = fetch8(cpu);
+            if (opcode == 0xCB || opcode == 0xDB) {
+                illegal_instruction(cpu);
+                cpu->prefix_addr32 = 0;
+                return 7;
+            }
+            if (opcode == 0x42) {
+                cpu->prefix_addr32 = 1;
+                opcode = fetch8(cpu);
+            }
+        } else if (opcode == 0x42) {
+            cpu->prefix_addr32 = 1;
+            opcode = fetch8(cpu);
+        }
+        if (data_prefix == 1) {
+            width_m = 1;
+            width_x = 1;
+        } else if (data_prefix == 2) {
+            width_m = 2;
+            width_x = 2;
+        }
+    }
 
     switch (opcode) {
         /* ============ LDA ============ */
@@ -2356,8 +2410,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Jumps ============ */
         case 0x4C: /* JMP abs */
-            cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
-            cycles = 3;
+            if (cpu->prefix_addr32) {
+                cpu->pc = fetch32(cpu);
+                cycles = 4;
+            } else {
+                cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
+                cycles = 3;
+            }
             break;
         case 0x5C: /* JMP long (24-bit, keeping for 65816 compat) */
             addr = fetch16(cpu);
@@ -2367,13 +2426,23 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0x6C: /* JMP (abs) */
             addr = addr_abs(cpu);
-            cpu->pc = mem_read16(cpu, addr);
-            cycles = 5;
+            if (cpu->prefix_addr32) {
+                cpu->pc = mem_read32(cpu, addr);
+                cycles = 6;
+            } else {
+                cpu->pc = mem_read16(cpu, addr);
+                cycles = 5;
+            }
             break;
         case 0x7C: /* JMP (abs,X) */
             addr = addr_absx(cpu);
-            cpu->pc = mem_read16(cpu, addr);
-            cycles = 6;
+            if (cpu->prefix_addr32) {
+                cpu->pc = mem_read32(cpu, addr);
+                cycles = 7;
+            } else {
+                cpu->pc = mem_read16(cpu, addr);
+                cycles = 6;
+            }
             break;
         case 0xDC: /* JML [abs] */
             addr = addr_abs(cpu);
@@ -2383,10 +2452,17 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Subroutines ============ */
         case 0x20: /* JSR abs */
-            addr = fetch16(cpu);
-            push16(cpu, (uint16_t)(cpu->pc - 1));
-            cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
-            cycles = 6;
+            if (cpu->prefix_addr32) {
+                addr = fetch32(cpu);
+                push32(cpu, cpu->pc);
+                cpu->pc = addr;
+                cycles = 8;
+            } else {
+                addr = fetch16(cpu);
+                push16(cpu, (uint16_t)(cpu->pc - 1));
+                cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
+                cycles = 6;
+            }
             break;
         case 0x22: /* JSL long */
             addr = fetch16(cpu);
@@ -2398,9 +2474,15 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0xFC: /* JSR (abs,X) */
             addr = addr_absx(cpu);
-            push16(cpu, (uint16_t)(cpu->pc - 1));
-            cpu->pc = mem_read16(cpu, addr);
-            cycles = 8;
+            if (cpu->prefix_addr32) {
+                push32(cpu, cpu->pc);
+                cpu->pc = mem_read32(cpu, addr);
+                cycles = 9;
+            } else {
+                push16(cpu, (uint16_t)(cpu->pc - 1));
+                cpu->pc = mem_read16(cpu, addr);
+                cycles = 8;
+            }
             break;
         case 0x60: /* RTS */
             cpu->pc = (pull16(cpu) + 1) & 0xFFFF;
@@ -3027,81 +3109,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cycles = 6;
             break;
 
-        /* ============ WID prefix (0x42) ============ */
-        case 0x42: /* WID - 32-bit operand prefix */
-            opcode = fetch8(cpu);
-            /* Execute instruction with 32-bit operand */
-            switch (opcode) {
-                case 0xA9: /* LDA #imm32 */
-                    cpu->a = fetch32(cpu);
-                    update_nz32(cpu, cpu->a);
-                    cycles = 3;
-                    break;
-                case 0xA2: /* LDX #imm32 */
-                    cpu->x = fetch32(cpu);
-                    update_nz32(cpu, cpu->x);
-                    cycles = 3;
-                    break;
-                case 0xA0: /* LDY #imm32 */
-                    cpu->y = fetch32(cpu);
-                    update_nz32(cpu, cpu->y);
-                    cycles = 3;
-                    break;
-                case 0xAD: /* LDA long */
-                    addr = fetch32(cpu);
-                    cpu->a = read_val(cpu, addr, width_m);
-                    update_nz(cpu, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0xBD: /* LDA long,X */
-                    addr = fetch32(cpu) + cpu->x;
-                    cpu->a = read_val(cpu, addr, width_m);
-                    update_nz(cpu, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0xB9: /* LDA long,Y */
-                    addr = fetch32(cpu) + cpu->y;
-                    cpu->a = read_val(cpu, addr, width_m);
-                    update_nz(cpu, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0x8D: /* STA long */
-                    addr = fetch32(cpu);
-                    write_val(cpu, addr, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0x9D: /* STA long,X */
-                    addr = fetch32(cpu) + cpu->x;
-                    write_val(cpu, addr, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0x99: /* STA long,Y */
-                    addr = fetch32(cpu) + cpu->y;
-                    write_val(cpu, addr, cpu->a, width_m);
-                    cycles = 5;
-                    break;
-                case 0x4C: /* JMP long */
-                    cpu->pc = fetch32(cpu);
-                    cycles = 4;
-                    break;
-                case 0x20: /* JSR long */
-                    addr = fetch32(cpu);
-                    push32(cpu, cpu->pc);
-                    cpu->pc = addr;
-                    cycles = 8;
-                    break;
-                default:
-                    /* Unknown WID instruction - check compatibility mode.
-                     * compat_mode = 1 when M_width=32 OR K=1, per VHDL. */
-                    if (SIZE_M(cpu) == 4 || FLAG_TST(cpu, P_K)) {
-                        cycles = 2;
-                    } else {
-                        /* Strict mode - trap to illegal instruction handler */
-                        illegal_instruction(cpu);
-                        cycles = 7;
-                    }
-                    break;
-            }
+        case 0x42: /* WDM (reserved) */
+            cycles = 2;
             break;
 
         /* ============ Flag instructions ============ */
@@ -3270,6 +3279,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
     }
 
+    cpu->prefix_addr32 = 0;
     return cycles;
 }
 

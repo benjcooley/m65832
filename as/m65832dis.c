@@ -468,17 +468,41 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     const char *mnemonic;
     AddrMode mode;
     int prefix_len = 0;
-    int is_wid = 0;
     int is_ext = 0;
+    int data_prefix = 0;   /* 0=none, 1=byte, 2=word */
+    int addr32_prefix = 0;
+    char prefix_str[64];
+    prefix_str[0] = '\0';
     
-    /* Check for WID prefix ($42) */
-    if (opcode == 0x42 && buflen > 1) {
-        is_wid = 1;
-        prefix_len = 1;
-        opcode = buf[1];
+    /* Check for size prefixes (32-bit mode only) */
+    if (ctx->m_flag == 2) {
+        if (buflen >= 2 && buf[0] == 0x42 && (buf[1] == 0xCB || buf[1] == 0xDB)) {
+            snprintf(out, out_size, "%s", buf[1] == 0xCB ? "WAI" : "STP");
+            return 2;
+        }
+        size_t idx = 0;
+        if (buflen > 0 && (buf[0] == 0xCB || buf[0] == 0xDB)) {
+            data_prefix = (buf[0] == 0xCB) ? 1 : 2;
+            strncat(prefix_str, data_prefix == 1 ? "BYTE " : "WORD ",
+                    sizeof(prefix_str) - strlen(prefix_str) - 1);
+            idx++;
+        }
+        if (idx < buflen && buf[idx] == 0x42) {
+            addr32_prefix = 1;
+            strncat(prefix_str, "ADDR32 ", sizeof(prefix_str) - strlen(prefix_str) - 1);
+            idx++;
+        }
+        prefix_len = (int)idx;
+        if (prefix_len > 0) {
+            if (buflen <= (size_t)prefix_len) {
+                snprintf(out, out_size, ".BYTE $%02X", buf[0]);
+                return 1;
+            }
+            opcode = buf[prefix_len];
+        }
     }
     /* Check for extended prefix ($02) */
-    else if (opcode == 0x02 && buflen > 1) {
+    if (prefix_len == 0 && opcode == 0x02 && buflen > 1) {
         is_ext = 1;
         prefix_len = 1;
         opcode = buf[1];
@@ -676,16 +700,24 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     
     /* Get operand size */
     int opsize;
-    if (is_wid) {
-        /* WID prefix forces 32-bit operands */
+    if (data_prefix == 1) {
         if (mode == AM_IMM || mode == AM_IMM_M || mode == AM_IMM_X)
-            opsize = 4;
-        else if (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY)
-            opsize = 4;  /* 32-bit address */
+            opsize = 1;
+        else
+            opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
+    } else if (data_prefix == 2) {
+        if (mode == AM_IMM || mode == AM_IMM_M || mode == AM_IMM_X)
+            opsize = 2;
         else
             opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
     } else {
         opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
+    }
+    
+    if (addr32_prefix &&
+        (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
+         mode == AM_ABSIND || mode == AM_ABSINDX)) {
+        opsize = 4;
     }
     
     int total_len = 1 + prefix_len + opsize;
@@ -699,26 +731,32 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     char operand_str[64];
     const uint8_t *operand_bytes = buf + 1 + prefix_len;
     
-    if (is_wid && (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY)) {
-        /* WID with absolute addressing - show 32-bit address */
+    if (addr32_prefix &&
+        (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
+         mode == AM_ABSIND || mode == AM_ABSINDX)) {
+        /* ADDR32 prefix: show 32-bit address */
         uint32_t addr = operand_bytes[0] | (operand_bytes[1] << 8) |
                        (operand_bytes[2] << 16) | (operand_bytes[3] << 24);
         if (mode == AM_ABS)
             snprintf(operand_str, sizeof(operand_str), "$%08X", addr);
         else if (mode == AM_ABSX)
             snprintf(operand_str, sizeof(operand_str), "$%08X,X", addr);
-        else
+        else if (mode == AM_ABSY)
             snprintf(operand_str, sizeof(operand_str), "$%08X,Y", addr);
+        else if (mode == AM_ABSIND)
+            snprintf(operand_str, sizeof(operand_str), "($%08X)", addr);
+        else
+            snprintf(operand_str, sizeof(operand_str), "($%08X,X)", addr);
     } else {
         format_operand(operand_str, sizeof(operand_str), mode, operand_bytes, opsize, pc);
     }
     
     /* Build output string */
-    if (is_wid) {
+    if (prefix_len > 0) {
         if (operand_str[0])
-            snprintf(out, out_size, "WID %s %s", mnemonic, operand_str);
+            snprintf(out, out_size, "%s%s %s", prefix_str, mnemonic, operand_str);
         else
-            snprintf(out, out_size, "WID %s", mnemonic);
+            snprintf(out, out_size, "%s%s", prefix_str, mnemonic);
     } else {
         if (operand_str[0])
             snprintf(out, out_size, "%s %s", mnemonic, operand_str);

@@ -59,7 +59,7 @@ typedef enum {
     AM_ABSLIND,     /* Abs Long Indirect: JML [$xxxx] */
     /* WID-prefixed modes */
     AM_IMM32,       /* 32-bit Immediate: WID LDA #$xxxxxxxx */
-    AM_ABS32,       /* 32-bit Absolute: WID LDA $xxxxxxxx */
+    AM_ABS32,       /* 32-bit Absolute (legacy WID, now via ADDR32 prefix) */
     AM_COUNT
 } AddrMode;
 
@@ -1089,7 +1089,9 @@ static const ExtInstruction *find_ext_instruction(const char *mnemonic, AddrMode
     return NULL;
 }
 
-static int get_imm_size(Assembler *as, const char *mnemonic) {
+static int get_imm_size(Assembler *as, const char *mnemonic, int data_override) {
+    if (data_override == 1) return 1;
+    if (data_override == 2) return 2;
     /* Instructions that use M flag for width */
     if (strcmp(mnemonic, "LDA") == 0 || strcmp(mnemonic, "STA") == 0 ||
         strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
@@ -1116,37 +1118,81 @@ static int get_imm_size(Assembler *as, const char *mnemonic) {
     return 1;  /* Default to 8-bit */
 }
 
+static int parse_next_mnemonic(char *mnemonic, char **operand) {
+    char *next = skip_whitespace(*operand);
+    char *end = skip_to_whitespace(next);
+    if (end <= next) {
+        return 0;
+    }
+    char saved = *end;
+    *end = '\0';
+    strcpy(mnemonic, next);
+    *end = saved;
+    str_upper(mnemonic);
+    *operand = end;
+    return 1;
+}
+
+static int is_prefix_mnemonic(const char *mnemonic) {
+    return strcmp(mnemonic, "BYTE") == 0 ||
+           strcmp(mnemonic, "WORD") == 0 ||
+           strcmp(mnemonic, "ADDR32") == 0 ||
+           strcmp(mnemonic, "WID.B") == 0 ||
+           strcmp(mnemonic, "WID.W") == 0 ||
+           strcmp(mnemonic, "WID.A32") == 0;
+}
+
 static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     Operand op;
+    uint8_t prefix_bytes[8];
+    int prefix_count = 0;
+    int data_override = 0; /* 0=default, 1=byte, 2=word */
+    int addr32_prefix = 0;
+    int saw_data_prefix = 0;
+    int saw_addr_prefix = 0;
     
     str_upper(mnemonic);
+    
+    /* Parse one-shot prefixes (32-bit mode only) */
+    while (is_prefix_mnemonic(mnemonic)) {
+        if (as->m_flag != 2) {
+            error(as, "prefixes only valid in 32-bit mode");
+            return 0;
+        }
+        if (strcmp(mnemonic, "BYTE") == 0 || strcmp(mnemonic, "WID.B") == 0) {
+            if (saw_data_prefix || saw_addr_prefix) {
+                error(as, "DATA prefix must appear once, before ADDR32");
+                return 0;
+            }
+            data_override = 1;
+            prefix_bytes[prefix_count++] = 0xCB;
+            saw_data_prefix = 1;
+        } else if (strcmp(mnemonic, "WORD") == 0 || strcmp(mnemonic, "WID.W") == 0) {
+            if (saw_data_prefix || saw_addr_prefix) {
+                error(as, "DATA prefix must appear once, before ADDR32");
+                return 0;
+            }
+            data_override = 2;
+            prefix_bytes[prefix_count++] = 0xDB;
+            saw_data_prefix = 1;
+        } else if (strcmp(mnemonic, "ADDR32") == 0 || strcmp(mnemonic, "WID.A32") == 0) {
+            if (saw_addr_prefix) {
+                error(as, "ADDR32 prefix appears multiple times");
+                return 0;
+            }
+            addr32_prefix = 1;
+            prefix_bytes[prefix_count++] = 0x42;
+            saw_addr_prefix = 1;
+        }
+        if (!parse_next_mnemonic(mnemonic, &operand)) {
+            error(as, "prefix requires instruction");
+            return 0;
+        }
+    }
     
     /* Parse operand */
     if (!parse_operand(as, operand, &op)) {
         return 0;
-    }
-    
-    /* Check for WID prefix (explicit or automatic for large values) */
-    int use_wid = 0;
-    if (strcmp(mnemonic, "WID") == 0) {
-        /* WID prefix - next instruction */
-        use_wid = 1;
-        char *next = skip_whitespace(operand);
-        char *end = skip_to_whitespace(next);
-        if (end > next) {
-            char saved = *end;
-            *end = '\0';
-            strcpy(mnemonic, next);
-            *end = saved;
-            str_upper(mnemonic);
-            operand = end;
-            if (!parse_operand(as, operand, &op)) {
-                return 0;
-            }
-        } else {
-            error(as, "WID prefix requires instruction");
-            return 0;
-        }
     }
     
     /* Check for shifter instructions ($02 $E9): SHL, SHR, SAR, ROL, ROR
@@ -1292,6 +1338,24 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         error(as, "unknown instruction '%s'", mnemonic);
         return 0;
     }
+
+    /* WAI/STP escape in 32-bit mode */
+    if (as->m_flag == 2 && (strcmp(mnemonic, "WAI") == 0 || strcmp(mnemonic, "STP") == 0)) {
+        if (prefix_count != 0) {
+            error(as, "WAI/STP cannot be prefixed in 32-bit mode");
+            return 0;
+        }
+        if (strcmp(mnemonic, "WAI") == 0) {
+            emit_byte(as, 0x42);
+            emit_byte(as, 0xCB);
+            return 1;
+        }
+        if (strcmp(mnemonic, "STP") == 0) {
+            emit_byte(as, 0x42);
+            emit_byte(as, 0xDB);
+            return 1;
+        }
+    }
     
     /* Handle branches specially */
     if (op.mode == AM_DP || op.mode == AM_ABS) {
@@ -1353,24 +1417,21 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         return 1;
     }
     
-    /* WID prefix handling */
-    if (use_wid) {
-        emit_byte(as, 0x42);  /* WID prefix */
-        
-        /* Force 32-bit operand */
-        if (mode == AM_IMM) {
-            if (inst->opcodes[AM_IMM] != 0xFF) {
-                emit_byte(as, inst->opcodes[AM_IMM]);
-                emit_quad(as, op.value);
-                return 1;
-            }
-        } else {
-            /* 32-bit absolute */
-            if (inst->opcodes[AM_ABS] != 0xFF) {
-                emit_byte(as, inst->opcodes[AM_ABS]);
-                emit_quad(as, op.value);
-                return 1;
-            }
+    /* Enforce ADDR32 prefix usage for 32-bit absolute addresses */
+    if (as->m_flag == 2 && !addr32_prefix && op.value > 0xFFFF) {
+        error(as, "ADDR32 prefix required for 32-bit address");
+        return 0;
+    }
+    
+    /* Map 32-bit absolute variants when ADDR32 prefix is present */
+    if (addr32_prefix) {
+        if (mode == AM_ABSL) mode = AM_ABS;
+        else if (mode == AM_ABSLX) mode = AM_ABSX;
+        else if (mode == AM_ABSLIND) mode = AM_ABSIND;
+        else if (mode != AM_ABS && mode != AM_ABSX && mode != AM_ABSY &&
+                 mode != AM_ABSIND && mode != AM_ABSINDX) {
+            error(as, "ADDR32 prefix only valid with absolute addressing");
+            return 0;
         }
     }
     
@@ -1391,7 +1452,10 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
-    /* Emit opcode */
+    /* Emit prefixes, then opcode */
+    for (int i = 0; i < prefix_count; i++) {
+        emit_byte(as, prefix_bytes[i]);
+    }
     emit_byte(as, inst->opcodes[mode]);
     
     /* Emit operand */
@@ -1401,7 +1465,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             break;
         case AM_IMM:
             {
-                int size = get_imm_size(as, mnemonic);
+                int size = get_imm_size(as, mnemonic, data_override);
                 if (size == 1) emit_byte(as, op.value & 0xFF);
                 else if (size == 2) emit_word(as, op.value & 0xFFFF);
                 else emit_quad(as, op.value);
@@ -1424,7 +1488,8 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         case AM_ABSY:
         case AM_ABSIND:
         case AM_ABSINDX:
-            emit_word(as, op.value & 0xFFFF);
+            if (addr32_prefix) emit_quad(as, op.value);
+            else emit_word(as, op.value & 0xFFFF);
             break;
         case AM_ABSL:
         case AM_ABSLX:
