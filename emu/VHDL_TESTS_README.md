@@ -6,23 +6,25 @@ This directory contains tools to extract tests from the VHDL testbench and run t
 
 ```bash
 # List all tests
-./extract_vhdl_tests.py --list
+python3 extract_vhdl_tests.py --list
 
 # Run all tests
-./extract_vhdl_tests.py
+python3 extract_vhdl_tests.py
 
 # Run specific test
-./extract_vhdl_tests.py --test 31
+python3 extract_vhdl_tests.py --test 31
 
 # Run with verbose output
-./extract_vhdl_tests.py --test 31 --verbose
+python3 extract_vhdl_tests.py --test 31 -v
 ```
 
 ## Current Test Results
 
-**Overall: 295 passed, 63 failed (82.4% pass rate)**
+**Overall: 366 passed, 0 failed (100% pass rate)**
 
-### Fully Passing Categories
+All 126 VHDL tests (containing 366 individual checks) now pass.
+
+### Test Categories
 
 | Category | Tests | Status |
 |----------|-------|--------|
@@ -47,26 +49,20 @@ This directory contains tools to extract tests from the VHDL testbench and run t
 | JML/JSL/RTL | 115-116 | PASS |
 | PER | 117 | PASS |
 | JMP (abs,X) / JML [abs] | 118-119 | PASS |
-| MMU MMIO registers | 120 | PASS |
+| MMU MMIO registers | 120-121 | PASS |
 | MVN/MVP block move | 102-103 | PASS |
 | SD/SB/LEA instructions | 88-89 | PASS |
 | MULU/DIVU | 90 | PASS |
 | CAS atomic | 91-92 | PASS |
 | LLI/SCI atomic | 93-94 | PASS |
+| RSET register window | 95-97 | PASS |
 | LDQ/STQ 64-bit | 98 | PASS |
-
-### Remaining Failures
-
-| Category | Tests | Issue |
-|----------|-------|-------|
-| Test framework: overlapping pokes | 79, 84, 87 | Multiple sub-tests write to same memory addresses |
-| RSET register window | 95-97, 99 | Register window feature not fully implemented |
-| Interrupt handling | 100-101, 111-114 | Tests require hardware IRQ/NMI signal generation |
-| MMU translation | 121 | Page table walking needs implementation |
-| Privilege traps | 122-123 | User mode MMIO access |
-| Illegal opcode | 124-126 | Trap vs NOP behavior |
-| Page fault | 127 | MMU fault handling |
-| Timer | 128 | Timer interrupt generation |
+| FPU operations | 99 | PASS |
+| Interrupt handling (NMI/IRQ/WAI) | 100-101, 111-114 | PASS |
+| Privilege traps | 122-123 | PASS |
+| Illegal opcode handling | 124-126 | PASS |
+| Page fault handling | 127 | PASS |
+| Timer IRQ | 128 | PASS |
 
 ## Key Fixes Applied
 
@@ -107,20 +103,22 @@ This directory contains tools to extract tests from the VHDL testbench and run t
 ## Files
 
 - `extract_vhdl_tests.py` - Test extraction and execution tool
-- `README.md` - This file
+- `VHDL_TESTS_README.md` - This file
 
-## To Reach 100% Pass Rate
+## Implementation Notes
 
-The remaining failures require:
+### Features Implemented
 
-1. **Test Framework Enhancement**: Support for tests with overlapping memory regions (multiple sub-tests at $8000)
+1. **RSET Register Window**: DP addresses in R=1 mode map to internal register file with 4-byte alignment requirement
 
-2. **RSET Register Window**: Implement register file array and route dp accesses when P_R is set
+2. **FPU Operations**: Full single and double precision floating point (LDF/STF, FADD/FSUB/FMUL/FDIV, F2I/I2F, FCMP)
 
-3. **Interrupt Signal Generation**: Add ability to trigger IRQ/NMI/ABORT signals during test execution
+3. **Reserved FPU Trap**: Opcodes $D9-$DF trap to software emulation via SYSCALL vector
 
-4. **MMU Features**: Page table walking, page fault handling
+4. **Interrupt Handling**: Proper IRQ/NMI/ABORT signal timing, WAI instruction wake-on-interrupt
 
-5. **Privilege Enforcement**: User mode MMIO access trapping
+5. **MMU Features**: Page table walking, page fault exception vectoring with FAULTVA/fault type latching
 
-6. **Timer**: Timer interrupt generation and counter readback
+6. **Timer**: Timer IRQ with count latching when interrupt fires
+
+7. **Privilege Enforcement**: User mode MMIO access trapping

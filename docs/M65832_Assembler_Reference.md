@@ -889,6 +889,7 @@ In 32-bit mode:
 - **Traditional instructions** always operate on 32-bit data
 - **Extended ALU** ($02 $80-$97) supports 8/16/32-bit via mode byte
 - Address size is determined by operand format (B+16 vs 32-bit absolute)
+- M/X width flags are ignored for sizing in 32-bit mode
 
 ### Data Sizing
 
@@ -912,6 +913,7 @@ In 32-bit mode, distinguish between B-relative and absolute addressing:
     ; INVALID in 32-bit mode:
     ; LDA $1234             ; Ambiguous - use B+$1234 instead
     ; LDA $A0001234         ; Uses Extended ALU: LD Rn, $A0001234
+    ; $42 is reserved/unused in 32-bit mode
 ```
 
 ### WAI and STP

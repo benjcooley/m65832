@@ -390,8 +390,8 @@ begin
         poke(16#8006#, x"8D");  -- STA abs
         poke(16#8007#, x"04");  -- $04
         poke(16#8008#, x"02");  -- $02  -> $0204
-        poke(16#8009#, x"02");  -- EXT prefix
-        poke(16#800A#, x"92");  -- STP
+        poke(16#8009#, x"DB");  -- STP
+        poke(16#800A#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -673,8 +673,8 @@ begin
         poke(16#8006#, x"8D");  -- STA abs
         poke(16#8007#, x"12");  -- $12
         poke(16#8008#, x"02");  -- $02  -> $0212
-        poke(16#8009#, x"02");  -- EXT prefix
-        poke(16#800A#, x"92");  -- STP
+        poke(16#8009#, x"DB");  -- STP
+        poke(16#800A#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1072,8 +1072,8 @@ begin
         poke(16#800A#, x"8D");  -- STA abs
         poke(16#800B#, x"20");  -- $20
         poke(16#800C#, x"02");  -- $02  -> $0220
-        poke(16#800D#, x"02");  -- EXT prefix
-        poke(16#800E#, x"92");  -- STP
+        poke(16#800D#, x"DB");  -- STP
+        poke(16#800E#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2207,9 +2207,11 @@ begin
         report "";
         report "TEST 60: 32-bit LDA (dp),Y";
         
-        -- Setup pointer at $0060/$0061 -> $04A0, Y=$03, data at $04A3-$04A6
+        -- Setup pointer at $0060-$0063 -> $000004A0, Y=$03, data at $04A3-$04A6
         poke(16#0060#, x"A0");  -- low
-        poke(16#0061#, x"04");  -- high -> $04A0
+        poke(16#0061#, x"04");  -- high
+        poke(16#0062#, x"00");  -- bank
+        poke(16#0063#, x"00");  -- high
         poke(16#04A3#, x"78");  -- byte 0
         poke(16#04A4#, x"56");  -- byte 1
         poke(16#04A5#, x"34");  -- byte 2
@@ -2222,12 +2224,15 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A0");  -- LDY #
         poke(16#8005#, x"03");  -- $03
-        poke(16#8006#, x"B1");  -- LDA (dp),Y
-        poke(16#8007#, x"60");  -- dp
-        poke(16#8008#, x"8D");  -- STA abs
-        poke(16#8009#, x"C8");  -- $C8
-        poke(16#800A#, x"02");  -- $02  -> $02C8-$02CB
-        poke(16#800B#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"B1");  -- LDA (dp),Y
+        poke(16#800A#, x"60");  -- dp
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"C8");  -- $C8
+        poke(16#800D#, x"02");  -- $02  -> $02C8-$02CB
+        poke(16#800E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2245,9 +2250,11 @@ begin
         report "";
         report "TEST 61: 32-bit STA (dp),Y";
         
-        -- Setup pointer at $0070/$0071 -> $04B0, Y=$02
+        -- Setup pointer at $0070-$0073 -> $000004B0, Y=$02
         poke(16#0070#, x"B0");  -- low
-        poke(16#0071#, x"04");  -- high -> $04B0
+        poke(16#0071#, x"04");  -- high
+        poke(16#0072#, x"00");  -- bank
+        poke(16#0073#, x"00");  -- high
         
         -- Program: set M=32-bit, LDY #$02, LDA #$CAFEBABE, STA ($70),Y
         poke(16#8000#, x"C2");  -- REP
@@ -2256,14 +2263,17 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A0");  -- LDY #
         poke(16#8005#, x"02");  -- $02
-        poke(16#8006#, x"A9");  -- LDA #
-        poke(16#8007#, x"BE");  -- byte 0
-        poke(16#8008#, x"BA");  -- byte 1
-        poke(16#8009#, x"FE");  -- byte 2
-        poke(16#800A#, x"CA");  -- byte 3
-        poke(16#800B#, x"91");  -- STA (dp),Y
-        poke(16#800C#, x"70");  -- dp
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"A9");  -- LDA #
+        poke(16#800A#, x"BE");  -- byte 0
+        poke(16#800B#, x"BA");  -- byte 1
+        poke(16#800C#, x"FE");  -- byte 2
+        poke(16#800D#, x"CA");  -- byte 3
+        poke(16#800E#, x"91");  -- STA (dp),Y
+        poke(16#800F#, x"70");  -- dp
+        poke(16#8010#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2347,9 +2357,11 @@ begin
         report "";
         report "TEST 64: 32-bit LDA (dp,X)";
         
-        -- Setup pointer at $0022/$0023 -> $04E0, X=$02, dp operand=$20
+        -- Setup pointer at $0022-$0025 -> $000004E0, X=$02, dp operand=$20
         poke(16#0022#, x"E0");  -- low
-        poke(16#0023#, x"04");  -- high -> $04E0
+        poke(16#0023#, x"04");  -- high
+        poke(16#0024#, x"00");  -- bank
+        poke(16#0025#, x"00");  -- high
         poke(16#04E0#, x"EF");  -- byte 0
         poke(16#04E1#, x"CD");  -- byte 1
         poke(16#04E2#, x"AB");  -- byte 2
@@ -2362,12 +2374,15 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A2");  -- LDX #
         poke(16#8005#, x"02");  -- $02
-        poke(16#8006#, x"A1");  -- LDA (dp,X)
-        poke(16#8007#, x"20");  -- dp
-        poke(16#8008#, x"8D");  -- STA abs
-        poke(16#8009#, x"D4");  -- $D4
-        poke(16#800A#, x"02");  -- $02 -> $02D4-$02D7
-        poke(16#800B#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"A1");  -- LDA (dp,X)
+        poke(16#800A#, x"20");  -- dp
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"D4");  -- $D4
+        poke(16#800D#, x"02");  -- $02 -> $02D4-$02D7
+        poke(16#800E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2385,9 +2400,11 @@ begin
         report "";
         report "TEST 65: 32-bit STA (dp,X)";
         
-        -- Setup pointer at $0026/$0027 -> $04F0, X=$06, dp operand=$20
+        -- Setup pointer at $0026-$0029 -> $000004F0, X=$06, dp operand=$20
         poke(16#0026#, x"F0");  -- low
-        poke(16#0027#, x"04");  -- high -> $04F0
+        poke(16#0027#, x"04");  -- high
+        poke(16#0028#, x"00");  -- bank
+        poke(16#0029#, x"00");  -- high
         
         -- Program: set M=32-bit, LDX #$06, LDA #$10203040, STA ($20,X)
         poke(16#8000#, x"C2");  -- REP
@@ -2396,14 +2413,17 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A2");  -- LDX #
         poke(16#8005#, x"06");  -- $06
-        poke(16#8006#, x"A9");  -- LDA #
-        poke(16#8007#, x"40");  -- byte 0
-        poke(16#8008#, x"30");  -- byte 1
-        poke(16#8009#, x"20");  -- byte 2
-        poke(16#800A#, x"10");  -- byte 3
-        poke(16#800B#, x"81");  -- STA (dp,X)
-        poke(16#800C#, x"20");  -- dp
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"A9");  -- LDA #
+        poke(16#800A#, x"40");  -- byte 0
+        poke(16#800B#, x"30");  -- byte 1
+        poke(16#800C#, x"20");  -- byte 2
+        poke(16#800D#, x"10");  -- byte 3
+        poke(16#800E#, x"81");  -- STA (dp,X)
+        poke(16#800F#, x"20");  -- dp
+        poke(16#8010#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2649,10 +2669,11 @@ begin
         report "";
         report "TEST 74: 32-bit LDA/STA [dp],Y";
         
-        -- Setup long pointer at $008C/$008D/$008E -> $000560, Y=$03
+        -- Setup long pointer at $008C-$008F -> $00000560, Y=$03
         poke(16#008C#, x"60");  -- low
         poke(16#008D#, x"05");  -- high
         poke(16#008E#, x"00");  -- bank
+        poke(16#008F#, x"00");  -- high
         poke(16#0563#, x"78");  -- byte 0
         poke(16#0564#, x"56");  -- byte 1
         poke(16#0565#, x"34");  -- byte 2
@@ -2665,12 +2686,15 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A0");  -- LDY #
         poke(16#8005#, x"03");  -- $03
-        poke(16#8006#, x"B3");  -- LDA [dp],Y
-        poke(16#8007#, x"8C");  -- dp
-        poke(16#8008#, x"8D");  -- STA abs
-        poke(16#8009#, x"E8");  -- $E8
-        poke(16#800A#, x"02");  -- $02 -> $02E8-$02EB
-        poke(16#800B#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"B3");  -- LDA [dp],Y
+        poke(16#800A#, x"8C");  -- dp
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"E8");  -- $E8
+        poke(16#800D#, x"02");  -- $02 -> $02E8-$02EB
+        poke(16#800E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2718,9 +2742,11 @@ begin
         report "";
         report "TEST 76: 32-bit LDA/STA (sr,S),Y";
         
-        -- Pointer at $0208/$0209 -> $0580, Y=$02, data at $0582-$0585
+        -- Pointer at $0208-$020B -> $00000580, Y=$02, data at $0582-$0585
         poke(16#0208#, x"80");  -- low
-        poke(16#0209#, x"05");  -- high -> $0580
+        poke(16#0209#, x"05");  -- high
+        poke(16#020A#, x"00");  -- bank
+        poke(16#020B#, x"00");  -- high
         poke(16#0582#, x"DE");  -- byte 0
         poke(16#0583#, x"AD");  -- byte 1
         poke(16#0584#, x"BE");  -- byte 2
@@ -2733,12 +2759,15 @@ begin
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A0");  -- LDY #
         poke(16#8005#, x"02");  -- $02
-        poke(16#8006#, x"AF");  -- LDA (sr,S),Y
-        poke(16#8007#, x"09");  -- offset -> SP+9 = $0208
-        poke(16#8008#, x"8D");  -- STA abs
-        poke(16#8009#, x"EC");  -- $EC
-        poke(16#800A#, x"02");  -- $02 -> $02EC-$02EF
-        poke(16#800B#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"AF");  -- LDA (sr,S),Y
+        poke(16#800A#, x"09");  -- offset -> SP+9 = $0208
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"EC");  -- $EC
+        poke(16#800D#, x"02");  -- $02 -> $02EC-$02EF
+        poke(16#800E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2794,21 +2823,27 @@ begin
         poke(16#05B4#, x"45");  -- byte 2
         poke(16#05B5#, x"67");  -- byte 3
         
-        -- Program: set M=32-bit, LDX #$02, LDA long,X, STA abs
+        -- Program: set M=32-bit, LDX #$02, LD A abs32,X, STA abs
         poke(16#8000#, x"C2");  -- REP
         poke(16#8001#, x"40");  -- clear M0
         poke(16#8002#, x"E2");  -- SEP
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"A2");  -- LDX #
         poke(16#8005#, x"02");  -- $02
-        poke(16#8006#, x"BF");  -- LDA long,X
-        poke(16#8007#, x"B0");  -- low
-        poke(16#8008#, x"05");  -- high
-        poke(16#8009#, x"00");  -- bank
-        poke(16#800A#, x"8D");  -- STA abs
-        poke(16#800B#, x"F2");  -- $F2
-        poke(16#800C#, x"02");  -- $02 -> $02F2-$02F5
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"02");  -- EXT prefix
+        poke(16#800A#, x"80");  -- LD
+        poke(16#800B#, x"91");  -- size=LONG, target=A, abs32,X
+        poke(16#800C#, x"B0");  -- addr0
+        poke(16#800D#, x"05");  -- addr1
+        poke(16#800E#, x"00");  -- addr2
+        poke(16#800F#, x"00");  -- addr3
+        poke(16#8010#, x"8D");  -- STA abs
+        poke(16#8011#, x"F2");  -- $F2
+        poke(16#8012#, x"02");  -- $02 -> $02F2-$02F5
+        poke(16#8013#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -2872,9 +2907,11 @@ begin
         check_mem(16#0302#, x"78", "16-bit LDA (dp) low");
         check_mem(16#0303#, x"56", "16-bit LDA (dp) high");
         
-        -- 32-bit pointer at $0098/$0099 -> $0620
+        -- 32-bit pointer at $0098-$009B -> $00000620
         poke(16#0098#, x"20");  -- low
-        poke(16#0099#, x"06");  -- high -> $0620
+        poke(16#0099#, x"06");  -- high
+        poke(16#009A#, x"00");  -- bank
+        poke(16#009B#, x"00");  -- high
         poke(16#0620#, x"EF");  -- byte 0
         poke(16#0621#, x"CD");  -- byte 1
         poke(16#0622#, x"AB");  -- byte 2
@@ -2921,23 +2958,29 @@ begin
         poke(16#8009#, x"06");  -- high
         poke(16#800A#, x"00");  -- bank
         
-        -- 32-bit STA long,X to $000640 + X($02) = $000642
+        -- 32-bit ST abs32,X to $00000640 + X($02) = $00000642
         poke(16#800B#, x"C2");  -- REP
         poke(16#800C#, x"40");  -- clear M0
         poke(16#800D#, x"E2");  -- SEP
         poke(16#800E#, x"80");  -- set M1 -> 32-bit
         poke(16#800F#, x"A2");  -- LDX #
         poke(16#8010#, x"02");  -- $02
-        poke(16#8011#, x"A9");  -- LDA #
-        poke(16#8012#, x"EF");  -- byte 0
-        poke(16#8013#, x"CD");  -- byte 1
-        poke(16#8014#, x"AB");  -- byte 2
-        poke(16#8015#, x"89");  -- byte 3
-        poke(16#8016#, x"9F");  -- STA long,X
-        poke(16#8017#, x"40");  -- low
-        poke(16#8018#, x"06");  -- high
-        poke(16#8019#, x"00");  -- bank
-        poke(16#801A#, x"00");  -- BRK
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"00");
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"A9");  -- LDA #
+        poke(16#8015#, x"EF");  -- byte 0
+        poke(16#8016#, x"CD");  -- byte 1
+        poke(16#8017#, x"AB");  -- byte 2
+        poke(16#8018#, x"89");  -- byte 3
+        poke(16#8019#, x"02");  -- EXT prefix
+        poke(16#801A#, x"81");  -- ST
+        poke(16#801B#, x"91");  -- size=LONG, target=A, abs32,X
+        poke(16#801C#, x"40");  -- addr0
+        poke(16#801D#, x"06");  -- addr1
+        poke(16#801E#, x"00");  -- addr2
+        poke(16#801F#, x"00");  -- addr3
+        poke(16#8020#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -3034,8 +3077,8 @@ begin
         poke(16#800A#, x"8E");  -- STX abs
         poke(16#800B#, x"12");  -- $12
         poke(16#800C#, x"03");  -- $03 -> $0312/$0313
-        poke(16#800D#, x"02");  -- EXT prefix
-        poke(16#800E#, x"92");  -- STP
+        poke(16#800D#, x"DB");  -- STP
+        poke(16#800E#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -3285,7 +3328,7 @@ begin
         poke(16#8013#, x"28");  -- $28
         poke(16#8014#, x"03");  -- $03 -> $0328/$0329
         poke(16#8015#, x"02");  -- EXT prefix
-        poke(16#8016#, x"86");  -- TTA (A = T remainder)
+        poke(16#8016#, x"9A");  -- TTA (A = T remainder)
         poke(16#8017#, x"8D");  -- STA abs
         poke(16#8018#, x"2A");  -- $2A
         poke(16#8019#, x"03");  -- $03 -> $032A/$032B
@@ -3655,14 +3698,14 @@ begin
         poke(16#8002#, x"E2");  -- SEP
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"02");  -- EXT prefix
-        poke(16#8005#, x"89");  -- LDQ abs
+        poke(16#8005#, x"9D");  -- LDQ abs
         poke(16#8006#, x"00");  -- low
         poke(16#8007#, x"05");  -- high
         poke(16#8008#, x"8D");  -- STA abs
         poke(16#8009#, x"20");  -- $0520
         poke(16#800A#, x"05");
         poke(16#800B#, x"02");  -- EXT prefix
-        poke(16#800C#, x"8B");  -- STQ abs
+        poke(16#800C#, x"9F");  -- STQ abs
         poke(16#800D#, x"10");  -- low
         poke(16#800E#, x"05");  -- high
         poke(16#800F#, x"8D");  -- STA abs
@@ -3706,20 +3749,20 @@ begin
         poke(16#8002#, x"A9");  -- LDA #
         poke(16#8003#, x"11");
         poke(16#8004#, x"02");  -- EXT prefix
-        poke(16#8005#, x"87");  -- TAT
+        poke(16#8005#, x"9B");  -- TAT
         poke(16#8006#, x"A9");  -- LDA #
         poke(16#8007#, x"22");
         poke(16#8008#, x"02");  -- EXT prefix
-        poke(16#8009#, x"8A");  -- STQ dp
+        poke(16#8009#, x"9E");  -- STQ dp
         poke(16#800A#, x"30");
         poke(16#800B#, x"02");  -- EXT prefix
-        poke(16#800C#, x"88");  -- LDQ dp
+        poke(16#800C#, x"9C");  -- LDQ dp
         poke(16#800D#, x"30");
         poke(16#800E#, x"8D");  -- STA abs
         poke(16#800F#, x"46");  -- $0346
         poke(16#8010#, x"03");
         poke(16#8011#, x"02");  -- EXT prefix
-        poke(16#8012#, x"86");  -- TTA
+        poke(16#8012#, x"9A");  -- TTA
         poke(16#8013#, x"8D");  -- STA abs
         poke(16#8014#, x"47");  -- $0347
         poke(16#8015#, x"03");
@@ -4534,8 +4577,8 @@ begin
         poke(16#8005#, x"8D");  -- STA abs
         poke(16#8006#, x"61");  -- $0461
         poke(16#8007#, x"04");
-        poke(16#8008#, x"02");  -- extended STP
-        poke(16#8009#, x"92");
+        poke(16#8008#, x"DB");  -- STP
+        poke(16#8009#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4578,8 +4621,8 @@ begin
         poke(16#8004#, x"8D");  -- STA abs
         poke(16#8005#, x"65");  -- $0465
         poke(16#8006#, x"04");
-        poke(16#8007#, x"02");  -- extended STP
-        poke(16#8008#, x"92");
+        poke(16#8007#, x"DB");  -- STP
+        poke(16#8008#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4621,8 +4664,8 @@ begin
         poke(16#8003#, x"8D");  -- STA abs
         poke(16#8004#, x"69");  -- $0469
         poke(16#8005#, x"04");
-        poke(16#8006#, x"02");  -- extended STP
-        poke(16#8007#, x"92");
+        poke(16#8006#, x"DB");  -- STP
+        poke(16#8007#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4665,8 +4708,8 @@ begin
         poke(16#8004#, x"8D");  -- STA abs
         poke(16#8005#, x"71");  -- $0471
         poke(16#8006#, x"04");
-        poke(16#8007#, x"02");  -- extended STP
-        poke(16#8008#, x"92");
+        poke(16#8007#, x"DB");  -- STP
+        poke(16#8008#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4742,8 +4785,8 @@ begin
         poke(16#8004#, x"8D");  -- STA abs
         poke(16#8005#, x"96");  -- $0496
         poke(16#8006#, x"04");
-        poke(16#8007#, x"02");  -- extended STP
-        poke(16#8008#, x"92");
+        poke(16#8007#, x"DB");  -- STP
+        poke(16#8008#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4776,8 +4819,8 @@ begin
         poke(16#8402#, x"8D");  -- STA abs
         poke(16#8403#, x"80");  -- $0480
         poke(16#8404#, x"04");
-        poke(16#8405#, x"02");  -- extended STP
-        poke(16#8406#, x"92");
+        poke(16#8405#, x"DB");  -- STP
+        poke(16#8406#, x"EA");  -- NOP (padding)
         
         -- Program: JML $008400
         poke(16#8000#, x"5C");  -- JML long
@@ -4816,8 +4859,8 @@ begin
         poke(16#8006#, x"8D");  -- STA abs
         poke(16#8007#, x"81");  -- $0481
         poke(16#8008#, x"04");
-        poke(16#8009#, x"02");  -- extended STP
-        poke(16#800A#, x"92");
+        poke(16#8009#, x"DB");  -- STP
+        poke(16#800A#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4845,8 +4888,8 @@ begin
         poke(16#8008#, x"8D");  -- STA abs
         poke(16#8009#, x"84");  -- $0484
         poke(16#800A#, x"04");
-        poke(16#800B#, x"02");  -- extended STP
-        poke(16#800C#, x"92");
+        poke(16#800B#, x"DB");  -- STP
+        poke(16#800C#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -4872,8 +4915,8 @@ begin
         poke(16#8502#, x"8D");  -- STA abs
         poke(16#8503#, x"90");  -- $0490
         poke(16#8504#, x"04");
-        poke(16#8505#, x"02");  -- extended STP
-        poke(16#8506#, x"92");
+        poke(16#8505#, x"DB");  -- STP
+        poke(16#8506#, x"EA");  -- NOP (padding)
         
         -- Program: LDX #$01, JMP ($04FF,X)
         poke(16#8000#, x"A2");  -- LDX #
@@ -4895,10 +4938,11 @@ begin
         report "";
         report "TEST 119: JML [abs]";
         
-        -- Pointer at $0600 -> $008600
+        -- Pointer at $0600 -> $00008600
         poke(16#0600#, x"00");
         poke(16#0601#, x"86");
         poke(16#0602#, x"00");
+        poke(16#0603#, x"00");
         
         -- Target at $8600: LDA #$7D, STA $0492, STP
         poke(16#8600#, x"A9");  -- LDA #
@@ -4906,8 +4950,8 @@ begin
         poke(16#8602#, x"8D");  -- STA abs
         poke(16#8603#, x"92");  -- $0492
         poke(16#8604#, x"04");
-        poke(16#8605#, x"02");  -- extended STP
-        poke(16#8606#, x"92");
+        poke(16#8605#, x"DB");  -- STP
+        poke(16#8606#, x"EA");  -- NOP (padding)
         
         -- Program: JML [$0600]
         poke(16#8000#, x"DC");  -- JML [abs]
@@ -4967,8 +5011,8 @@ begin
         
         -- PTBR read/write tests deferred (MMU integration)
         
-        poke(16#8022#, x"02");  -- extended STP
-        poke(16#8023#, x"92");
+        poke(16#8022#, x"DB");  -- STP
+        poke(16#8023#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -5102,8 +5146,8 @@ begin
         poke(16#8036#, x"8D");  -- STA $0500
         poke(16#8037#, x"00");
         poke(16#8038#, x"05");
-        poke(16#8039#, x"02");  -- extended STP
-        poke(16#803A#, x"92");
+        poke(16#8039#, x"DB");  -- STP
+        poke(16#803A#, x"EA");  -- NOP (padding)
         
         rst_n <= '0';
         wait_cycles(10);
@@ -5357,7 +5401,7 @@ begin
         
         -- Program at $9000: illegal ext op, then LDA #$005A, STA $0622, BRK
         poke(16#9000#, x"02");
-        poke(16#9001#, x"99");  -- illegal extended opcode
+        poke(16#9001#, x"E7");  -- illegal extended opcode
         poke(16#9002#, x"A9");
         poke(16#9003#, x"5A");
         poke(16#9004#, x"00");
@@ -5438,7 +5482,7 @@ begin
         
         -- Program at $9100: illegal ext op, then LDA #$005B, STA $0632, BRK
         poke(16#9100#, x"02");
-        poke(16#9101#, x"99");  -- illegal extended opcode
+        poke(16#9101#, x"E7");  -- illegal extended opcode
         poke(16#9102#, x"A9");
         poke(16#9103#, x"5B");
         poke(16#9104#, x"00");
@@ -5524,7 +5568,7 @@ begin
         
         -- Program at $9500: illegal ext op, then LDA #$0000005C, STA $0644, BRK
         poke(16#9500#, x"02");
-        poke(16#9501#, x"99");  -- illegal extended opcode
+        poke(16#9501#, x"E7");  -- illegal extended opcode
         poke(16#9502#, x"A9");
         poke(16#9503#, x"5C");
         poke(16#9504#, x"00");
@@ -5756,8 +5800,8 @@ begin
         poke(16#8039#, x"AD");  -- LDA $3000 (fault)
         poke(16#803A#, x"00");
         poke(16#803B#, x"30");
-        poke(16#803C#, x"02");  -- extended STP
-        poke(16#803D#, x"92");
+        poke(16#803C#, x"DB");  -- STP
+        poke(16#803D#, x"EA");  -- NOP (padding)
         
         irq_n <= '1';
         nmi_n <= '1';

@@ -665,12 +665,13 @@ begin
     -- Wide mode detection
     ---------------------------------------------------------------------------
     
-    W_mode <= '1' when M_width = WIDTH_32 else '0';
-    compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
-    M_width_eff <= WIDTH_32 when ext_ldq = '1' else
-                   ext_alu_size when ext_alu = '1' else
-                   M_width;
-    X_width_eff <= X_width;
+W_mode <= '1' when M_width = WIDTH_32 else '0';
+compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
+M_width_eff <= WIDTH_32 when ext_ldq = '1' else
+               ext_alu_size when ext_alu = '1' else
+               WIDTH_32 when W_mode = '1' else
+               M_width;
+X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
     -- DP alignment check for R_mode: DP address must be multiple of 4
@@ -1022,7 +1023,7 @@ begin
                             state <= ST_DECODE;
                             data_byte_count <= (others => '0');
                         elsif is_extended = '1' and
-                              ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
+                              ((IR_EXT >= x"80" and IR_EXT <= x"97") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
                               is_regalu_ext = '0' then
                             -- Extended ALU/Shifter/Extend needs mode/op byte
                             is_regalu_ext <= '1';
@@ -2720,7 +2721,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
 
     ---------------------------------------------------------------------------
-    -- Shifter Result Computation ($02 $E9)
+    -- Shifter Result Computation ($02 $98)
     ---------------------------------------------------------------------------
     
     process(IS_SHIFTER, SHIFT_OP, SHIFT_COUNT, shifter_src_data, A_reg, P_reg)
@@ -3225,9 +3226,10 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             end if;
         end if;
     end process;
-    is_bit_op <= '1' when (IS_ALU_OP = '1' and ALU_OP = "001" and
-                           (IR = x"24" or IR = x"2C" or IR = x"34" or
-                            IR = x"3C" or IR = x"89"))
+is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
+                        (IR = x"24" or IR = x"2C" or IR = x"34" or
+                         IR = x"3C" or IR = x"89")) or
+                       (ext_alu = '1' and IR_EXT = x"88"))
                 else '0';
     
     read_width <= WIDTH_32 when (IS_JML = '1' and ADDR_MODE = "1011") else
@@ -3757,8 +3759,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                                                 IR_EXT = x"A2" or IR_EXT = x"A3")) else '0';
     ext_tta <= '1' when (is_extended = '1' and IR_EXT = x"9A") else '0';
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
-    ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"88" or IR_EXT = x"89")) else '0';
-    ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"8A" or IR_EXT = x"8B")) else '0';
+    ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"9C" or IR_EXT = x"9D")) else '0';
+    ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"9E" or IR_EXT = x"9F")) else '0';
     ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or
                                          IR_EXT = x"B5" or IR_EXT = x"B8" or IR_EXT = x"B9")) else '0';
     ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3" or IR_EXT = x"B6" or

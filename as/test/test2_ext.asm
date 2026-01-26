@@ -47,15 +47,15 @@ FLAG_TEST:
 
 ; Temp register
 TEMP_TEST:
-    TTA                 ; $02 $86
-    TAT                 ; $02 $87
+    TTA                 ; $02 $9A
+    TAT                 ; $02 $9B
 
 ; 64-bit load/store
 QUAD_TEST:
-    LDQ $20             ; $02 $88 $20
-    LDQ $1234           ; $02 $89 $34 $12
-    STQ $30             ; $02 $8A $30
-    STQ $2345           ; $02 $8B $45 $23
+    LDQ $20             ; $02 $9C $20
+    LDQ $1234           ; $02 $9D $34 $12
+    STQ $30             ; $02 $9E $30
+    STQ $2345           ; $02 $9F $45 $23
 
 ; LEA
 LEA_TEST:

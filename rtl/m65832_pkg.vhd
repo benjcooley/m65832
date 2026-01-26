@@ -109,7 +109,7 @@ package M65832_pkg is
     ---------------------------------------------------------------------------
     -- Shifter/Rotate Extended Opcode ($02 $98)
     ---------------------------------------------------------------------------
-    -- Format: $02 $E9 [op|cnt] [dest_dp] [src_dp]
+    -- Format: $02 $98 [op|cnt] [dest_dp] [src_dp]
     --   op (bits 7-5): shift operation
     --   cnt (bits 4-0): shift count (0-31 for immediate, or 11111 for A-sourced)
     
@@ -128,7 +128,7 @@ package M65832_pkg is
     ---------------------------------------------------------------------------
     -- Sign/Zero Extend Extended Opcode ($02 $99)
     ---------------------------------------------------------------------------
-    -- Format: $02 $EA [subop] [dest_dp] [src_dp]
+    -- Format: $02 $99 [subop] [dest_dp] [src_dp]
     
     constant EXT_EXTEND   : std_logic_vector(7 downto 0) := x"99";
     

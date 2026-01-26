@@ -131,6 +131,57 @@ test_error "Division by zero" "X = 10 / 0"
 test_error "Unmatched parens" "    LDA #(1+2"
 
 echo
+echo "--- 32-bit Mode Address Validation ---"
+# Raw addresses should fail in 32-bit mode - need B+$XXXX
+test_error "Raw 16-bit address in 32-bit mode" "    .M32
+    .X32
+    LDA \$1234"
+
+test_error "Raw abs,X in 32-bit mode" "    .M32
+    .X32
+    LDA \$1234,X"
+
+# B+ syntax should work
+test_success "B+offset in 32-bit mode" "    .M32
+    .X32
+    LDA B+\$1234"
+
+test_success "B+offset,X in 32-bit mode" "    .M32
+    .X32
+    LDA B+\$1234,X"
+
+# 24-bit long addressing not valid in 32-bit mode
+test_error "24-bit long in 32-bit mode" "    .M32
+    .X32
+    LDA \$123456"
+
+# 32-bit addresses need Extended ALU (not traditional opcodes)
+test_error "32-bit addr with traditional opcode" "    .M32
+    .X32
+    LDA \$12345678"
+
+# DP (zero page) addresses should still work
+test_success "DP address in 32-bit mode" "    .M32
+    .X32
+    LDA \$20"
+
+test_success "DP,X in 32-bit mode" "    .M32
+    .X32
+    LDA \$20,X"
+
+# Odd hex digit counts should be errors
+test_error "Odd hex digits (1)" "    LDA #\$1"
+test_error "Odd hex digits (3)" "    LDA #\$123"
+test_error "Odd hex digits (5)" "    LDA #\$12345"
+test_error "Odd hex digits (7)" "    LDA #\$1234567"
+
+# Even hex digit counts should work
+test_success "Even hex digits (2)" "    LDA #\$12"
+test_success "Even hex digits (4)" "    LDA #\$1234"
+test_success "Even hex digits (8)" "    .M32
+    LDA #\$12345678"
+
+echo
 echo "=== Results ==="
 echo "Passed: $PASS"
 echo "Failed: $FAIL"

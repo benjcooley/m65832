@@ -61,6 +61,8 @@ Width encoding: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved
 | Native-16 | 0 | 01 | 01 | 65816 compatible |
 | Native-32 | 0 | 10 | 10 | Full 32-bit mode |
 
+In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
+
 ### Mode Switching
 ```asm
 ; Enter Native Mode (from emulation)
@@ -442,6 +444,7 @@ Bits 4-0: count (0-31), or $1F for shift by A.
 In 32-bit mode:
 - **Traditional instructions** operate on 32-bit data
 - **Extended ALU** ($02 $80-$97) supports 8/16/32-bit via mode byte
+- M/X width flags are ignored for sizing in 32-bit mode
 
 ```asm
 ; Traditional instructions - always 32-bit data
@@ -459,6 +462,7 @@ ADC.B A, R1             ; 8-bit add
 ; WAI/STP (standard 65816)
 WAI                     ; $CB
 STP                     ; $DB
+; $42 is reserved/unused in 32-bit mode
 ```
 
 ---

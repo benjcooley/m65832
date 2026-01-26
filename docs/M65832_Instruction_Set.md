@@ -7,7 +7,7 @@ A complete, verified reference for all M65832 instructions.
 ## Overview
 
 The M65832 extends the WDC 65C816 instruction set with:
-- **32-bit operations** via extended M/X width flags
+- **32-bit operations** in native-32 mode; 8/16 via Extended ALU
 - **Extended ALU** ($02 $80-$97) with mode byte for 8/16/32-bit sized operations
 - **New instructions** for multiply, divide, atomics, and system control
 - **Extended opcode page ($02)** for new operations
@@ -31,7 +31,7 @@ All standard 6502 and 65816 opcodes are preserved. The M65832 adds capabilities 
 
 ### Operand Width Rules
 
-The M and X flags control operand widths:
+The M and X flags control operand widths in emulation/native-16 modes:
 
 | Flag State | Accumulator Width | Index Width |
 |------------|-------------------|-------------|
@@ -40,7 +40,7 @@ The M and X flags control operand widths:
 | M/X = 10 | 32-bit | 32-bit |
 | M/X = 11 | Reserved | Reserved |
 
-In **emulation mode** (E=1), all operations are 8-bit.
+In **emulation mode** (E=1), all operations are 8-bit. In **native-32** (M/X=10), standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
 
 ---
 
@@ -1488,11 +1488,13 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 - Address size is determined by operand format:
   - `B+$XXXX` = B-relative 16-bit (default)
   - 32-bit absolute is **Extended ALU only**
+- M/X width flags are ignored for sizing in 32-bit mode
 
 **Extended ALU Instructions ($02 $80-$97):**
 - Data size is encoded in the mode byte (bits 7-6): BYTE, WORD, or LONG
 - Address mode is encoded in the mode byte (bits 4-0)
 - Use `.B`, `.W`, `.L` suffixes in assembly
+- `$42` is reserved/unused in 32-bit mode
 
 **For sized operations, use Extended ALU:**
 ```asm

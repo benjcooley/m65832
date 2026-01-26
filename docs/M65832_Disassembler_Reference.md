@@ -476,7 +476,7 @@ Branch instructions show the computed target address:
 
 ### 32-bit Mode Instructions
 
-Instructions with data/address prefixes show the size suffix and full addresses:
+Extended ALU instructions show the size suffix and full addresses:
 
 ```
 0000800C  LDA #$12345678       ; 32-bit data (always in 32-bit mode)

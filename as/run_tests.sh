@@ -46,6 +46,7 @@ run_test "Include files" "test/test3_include.asm" 0
 run_test "Sections" "test/test4_sections.asm" 0
 run_test "Expressions" "test/test6_expressions.asm" 0
 run_test "Shifter/extend instructions (R0-R63)" "test/test7_extended.asm" 0
+run_test "Extended ALU ($02 $80-$97) instructions" "test/test8_ext_alu.asm" 0
 
 # Test hex output
 echo -n "Test: Intel HEX output... "

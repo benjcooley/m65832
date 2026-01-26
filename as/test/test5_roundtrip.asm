@@ -29,8 +29,8 @@ SKIP:
     .BYTE $02, $50          ; FENCE
     .BYTE $02, $C0          ; FADD.S
 
-; WID prefix with 32-bit immediate (assembled as bytes)
-    .BYTE $42, $A9, $78, $56, $34, $12  ; WID LDA #$12345678
+; 32-bit immediate (assembled as bytes)
+    .BYTE $A9, $78, $56, $34, $12  ; LDA #$12345678
 
 DONE:
     RTS

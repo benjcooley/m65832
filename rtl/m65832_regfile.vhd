@@ -192,6 +192,9 @@ begin
             VBRr <= (others => '0');
             Tr   <= (others => '0');
             Pr   <= "00110000001100";  -- K=0, E=1, S=1, R=0, M1:M0=00, X1:X0=00, D=1, I=1, Z=0, C=0
+            for i in 0 to 63 loop
+                RegWindow(i) <= (others => '0');
+            end loop;
             
         elsif rising_edge(CLK) then
             if EN = '1' then

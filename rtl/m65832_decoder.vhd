@@ -298,20 +298,16 @@ begin
                 when x"9B" => INSTR_LEN <= "010";  -- TAT (T = A)
                 
                 -- 64-bit load/store (A=low, T=high)
-                when x"88" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDQ dp
-                when x"89" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDQ abs
-                when x"8A" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
-                when x"8B" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
+                when x"9C" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDQ dp
+                when x"9D" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDQ abs
+                when x"9E" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
+                when x"9F" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
                 
                 -- FPU load/store (64-bit)
                 when x"B0" | x"B2" | x"B4" | x"B6" | x"B8" | x"BA" =>
                     ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDF/STF dp
                 when x"B1" | x"B3" | x"B5" | x"B7" | x"B9" | x"BB" =>
                     ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDF/STF abs
-                
-                -- WAI/STP (extended)
-                when x"91" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
-                when x"92" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
                 
                 -- LEA
                 when x"A0" =>
@@ -328,8 +324,10 @@ begin
                      x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
                     INSTR_LEN <= "010";
                 
-                -- Extended ALU ($02 $80-$87) with mode byte
-                when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | x"86" | x"87" =>
+                -- Extended ALU ($02 $80-$97) with mode byte
+                when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | x"86" | x"87" |
+                     x"88" | x"89" | x"8A" | x"8B" | x"8C" | x"8D" | x"8E" | x"8F" |
+                     x"90" | x"97" =>
                     IS_EXT_OP <= '1';
                     EXT_ALU <= '1';
                     if IS_REGALU_EXT = '1' then
@@ -342,12 +340,23 @@ begin
                         -- Map opcode to ALU/reg-ALU operation
                         case IR_EXT is
                             when x"80" => REGALU_OP <= REGALU_LD;  ALU_OP <= "101"; -- LD -> LDA
+                            when x"81" => ALU_OP <= "100"; -- ST -> STA (A-target only)
                             when x"82" => REGALU_OP <= REGALU_ADC; ALU_OP <= "011";
                             when x"83" => REGALU_OP <= REGALU_SBC; ALU_OP <= "111";
                             when x"84" => REGALU_OP <= REGALU_AND; ALU_OP <= "001";
                             when x"85" => REGALU_OP <= REGALU_ORA; ALU_OP <= "000";
                             when x"86" => REGALU_OP <= REGALU_EOR; ALU_OP <= "010";
                             when x"87" => REGALU_OP <= REGALU_CMP; ALU_OP <= "110";
+                            when x"88" => ALU_OP <= "001"; -- BIT
+                            when x"89" => ALU_OP <= "001"; -- TSB (A-target only)
+                            when x"8A" => ALU_OP <= "001"; -- TRB (A-target only)
+                            when x"8B" => RMW_OP <= "111"; -- INC
+                            when x"8C" => RMW_OP <= "110"; -- DEC
+                            when x"8D" => RMW_OP <= "000"; -- ASL
+                            when x"8E" => RMW_OP <= "010"; -- LSR
+                            when x"8F" => RMW_OP <= "001"; -- ROL
+                            when x"90" => RMW_OP <= "011"; -- ROR
+                            when x"97" => ALU_OP <= "100"; -- STZ (A-target only)
                             when others => null;
                         end case;
                         
@@ -355,8 +364,13 @@ begin
                         ext_len := 3;  -- $02, op, mode
                         regalu_src := REGALU_SRC_DP;
                         if ext_target = '1' then
-                            IS_REGALU <= '1';
-                            ext_len := 4;  -- + dest_dp
+                            if IR_EXT = x"80" or IR_EXT = x"82" or IR_EXT = x"83" or IR_EXT = x"84" or
+                               IR_EXT = x"85" or IR_EXT = x"86" or IR_EXT = x"87" then
+                                IS_REGALU <= '1';
+                                ext_len := 4;  -- + dest_dp
+                            else
+                                ILLEGAL_OP <= '1';
+                            end if;
                         else
                             IS_ALU_OP <= '1';
                         end if;
@@ -394,6 +408,15 @@ begin
                         end case;
                         
                         REGALU_SRC_MODE <= regalu_src;
+                        if ext_target = '0' and ext_addr = "00000" and
+                           (IR_EXT = x"8B" or IR_EXT = x"8C" or IR_EXT = x"8D" or
+                            IR_EXT = x"8E" or IR_EXT = x"8F" or IR_EXT = x"90") then
+                            IS_ALU_OP <= '0';
+                            IS_RMW_OP <= '1';
+                            REG_DST <= "000";
+                            ADDR_MODE <= "0000";
+                            ext_len := 3;
+                        end if;
                         if ext_len = 8 then
                             INSTR_LEN <= "000";
                         else

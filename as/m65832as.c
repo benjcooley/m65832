@@ -57,9 +57,9 @@ typedef enum {
     AM_ABSIND,      /* Abs Indirect: JMP ($xxxx) */
     AM_ABSINDX,     /* Abs Indexed Indirect: JMP ($xxxx,X) */
     AM_ABSLIND,     /* Abs Long Indirect: JML [$xxxx] */
-    /* WID-prefixed modes */
-    AM_IMM32,       /* 32-bit Immediate: WID LDA #$xxxxxxxx */
-    AM_ABS32,       /* 32-bit Absolute (legacy WID, now via ADDR32 prefix) */
+    /* Extended 32-bit modes (Extended ALU only) */
+    AM_IMM32,       /* 32-bit Immediate */
+    AM_ABS32,       /* 32-bit Absolute */
     AM_COUNT
 } AddrMode;
 
@@ -282,16 +282,13 @@ static const ExtInstruction ext_instructions[] = {
     { "PHVBR",  0x74, AM_IMP  },
     { "PLVBR",  0x75, AM_IMP  },
     /* Temp register */
-    { "TTA",    0x86, AM_IMP  },
-    { "TAT",    0x87, AM_IMP  },
+    { "TTA",    0x9A, AM_IMP  },
+    { "TAT",    0x9B, AM_IMP  },
     /* 64-bit load/store */
-    { "LDQ",    0x88, AM_DP   },
-    { "LDQ",    0x89, AM_ABS  },
-    { "STQ",    0x8A, AM_DP   },
-    { "STQ",    0x8B, AM_ABS  },
-    /* WAI/STP extended */
-    { "WAI32",  0x91, AM_IMP  },
-    { "STP32",  0x92, AM_IMP  },
+    { "LDQ",    0x9C, AM_DP   },
+    { "LDQ",    0x9D, AM_ABS  },
+    { "STQ",    0x9E, AM_DP   },
+    { "STQ",    0x9F, AM_ABS  },
     /* LEA */
     { "LEA",    0xA0, AM_DP   },
     { "LEA",    0xA1, AM_DPX  },
@@ -365,7 +362,7 @@ static const RegALUInstruction regalu_instructions[] = {
 #define REGALU_SRC_ABSY     0x08  /* abs,Y */
 #define REGALU_SRC_DP_IND   0x09  /* (dp) */
 
-/* Shifter instructions ($02 $E9 prefix)
+/* Shifter instructions ($02 $98 prefix)
  * Syntax: OP dest, src, #count  or  OP dest, src, A
  * Example: SHL $08, $04, #4  or  SHR R2, R1, A
  */
@@ -383,7 +380,7 @@ static const ShifterInstruction shifter_instructions[] = {
     { NULL, 0 }
 };
 
-/* Extend instructions ($02 $EA prefix)
+/* Extend instructions ($02 $99 prefix)
  * Syntax: OP dest, src
  * Example: SEXT8 $10, $0C  or  CLZ R4, R1
  */
@@ -902,6 +899,7 @@ typedef struct {
     uint32_t value;
     int force_width;    /* 0=auto, 1=byte, 2=word, 3=long, 4=quad */
     uint8_t mvp_dst;    /* For MVP/MVN */
+    int b_relative;     /* Explicit B+offset syntax */
 } Operand;
 
 static int parse_operand(Assembler *as, char *s, Operand *op) {
@@ -910,6 +908,7 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
     op->value = 0;
     op->force_width = 0;
     op->mvp_dst = 0;
+    op->b_relative = 0;
     
     if (!*p || *p == ';') {
         /* No operand = implied or accumulator */
@@ -940,8 +939,17 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
         int is_long = (bracket == '[');
         
         p = skip_whitespace(p);
+        if ((p[0] == 'B' || p[0] == 'b') && p[1] == '+') {
+            op->b_relative = 1;
+            p += 2;
+            p = skip_whitespace(p);
+        }
         if (!parse_expression(as, p, &op->value, (const char**)&p)) {
             error(as, "invalid indirect address");
+            return 0;
+        }
+        if (op->b_relative && op->value > 0xFFFF) {
+            error(as, "B+offset must be 16-bit");
             return 0;
         }
         p = skip_whitespace(p);
@@ -1010,6 +1018,38 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
         return 1;
     }
     
+    /* Explicit B+offset (32-bit mode syntax) */
+    if ((p[0] == 'B' || p[0] == 'b') && p[1] == '+') {
+        p += 2;
+        p = skip_whitespace(p);
+        if (!parse_expression(as, p, &op->value, (const char**)&p)) {
+            error(as, "invalid B+offset");
+            return 0;
+        }
+        if (op->value > 0xFFFF) {
+            error(as, "B+offset must be 16-bit");
+            return 0;
+        }
+        op->b_relative = 1;
+        p = skip_whitespace(p);
+        if (*p == ',') {
+            p++;
+            p = skip_whitespace(p);
+            if (*p == 'X' || *p == 'x') {
+                op->mode = AM_ABSX;
+                return 1;
+            }
+            if (*p == 'Y' || *p == 'y') {
+                op->mode = AM_ABSY;
+                return 1;
+            }
+            error(as, "expected X or Y index");
+            return 0;
+        }
+        op->mode = AM_ABS;
+        return 1;
+    }
+
     /* Direct/Absolute addressing */
     if (!parse_expression(as, p, &op->value, (const char**)&p)) {
         error(as, "invalid operand");
@@ -1092,6 +1132,18 @@ static const ExtInstruction *find_ext_instruction(const char *mnemonic, AddrMode
 static int get_imm_size(Assembler *as, const char *mnemonic, int data_override) {
     if (data_override == 1) return 1;
     if (data_override == 2) return 2;
+    /* In 32-bit mode, M/X sizing is ignored */
+    if (as->m_flag == 2) {
+        if (strcmp(mnemonic, "LDA") == 0 || strcmp(mnemonic, "STA") == 0 ||
+            strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
+            strcmp(mnemonic, "AND") == 0 || strcmp(mnemonic, "ORA") == 0 ||
+            strcmp(mnemonic, "EOR") == 0 || strcmp(mnemonic, "CMP") == 0 ||
+            strcmp(mnemonic, "BIT") == 0 ||
+            strcmp(mnemonic, "LDX") == 0 || strcmp(mnemonic, "LDY") == 0 ||
+            strcmp(mnemonic, "CPX") == 0 || strcmp(mnemonic, "CPY") == 0) {
+            return 4;
+        }
+    }
     /* Instructions that use M flag for width */
     if (strcmp(mnemonic, "LDA") == 0 || strcmp(mnemonic, "STA") == 0 ||
         strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
@@ -1133,69 +1185,133 @@ static int parse_next_mnemonic(char *mnemonic, char **operand) {
     return 1;
 }
 
-static int is_prefix_mnemonic(const char *mnemonic) {
-    return strcmp(mnemonic, "BYTE") == 0 ||
-           strcmp(mnemonic, "WORD") == 0 ||
-           strcmp(mnemonic, "ADDR32") == 0 ||
-           strcmp(mnemonic, "WID.B") == 0 ||
-           strcmp(mnemonic, "WID.W") == 0 ||
-           strcmp(mnemonic, "WID.A32") == 0;
+static int strip_size_suffix(char *mnemonic, int *size_code) {
+    char *dot = strrchr(mnemonic, '.');
+    *size_code = -1;
+    if (!dot) {
+        return 1;
+    }
+    if (dot[1] == '\0' || dot[2] != '\0') {
+        /* Not a single-char suffix - leave it alone */
+        return 1;
+    }
+    /* Only strip .B, .W, .L size suffixes */
+    switch (dot[1]) {
+        case 'B':
+            *size_code = 0;
+            *dot = '\0';  /* Strip the suffix */
+            break;
+        case 'W':
+            *size_code = 1;
+            *dot = '\0';
+            break;
+        case 'L':
+            *size_code = 2;
+            *dot = '\0';
+            break;
+        default:
+            /* Other suffixes (like .S, .D for FPU) - leave intact */
+            return 1;
+    }
+    return 1;
+}
+
+typedef struct {
+    const char *name;
+    uint8_t opcode;
+    int requires_src;
+    int allows_mem_dest;
+} ExtALUOp;
+
+static const ExtALUOp ext_alu_ops[] = {
+    /* LD/ST for register-targeted operations (R0-R63) */
+    { "LD",  0x80, 1, 0 },
+    { "ST",  0x81, 1, 1 },
+    /* Traditional mnemonics with size suffix for A-targeted */
+    { "LDA", 0x80, 1, 0 },
+    { "STA", 0x81, 1, 1 },
+    { "ADC", 0x82, 1, 0 },
+    { "SBC", 0x83, 1, 0 },
+    { "AND", 0x84, 1, 0 },
+    { "ORA", 0x85, 1, 0 },
+    { "EOR", 0x86, 1, 0 },
+    { "CMP", 0x87, 1, 0 },
+    { "BIT", 0x88, 1, 0 },
+    { "TSB", 0x89, 1, 1 },
+    { "TRB", 0x8A, 1, 1 },
+    { "INC", 0x8B, 0, 0 },
+    { "DEC", 0x8C, 0, 0 },
+    { "ASL", 0x8D, 0, 0 },
+    { "LSR", 0x8E, 0, 0 },
+    { "ROL", 0x8F, 0, 0 },
+    { "ROR", 0x90, 0, 0 },
+    { "STZ", 0x97, 0, 1 },
+    { NULL, 0, 0, 0 }
+};
+
+static const ExtALUOp *find_ext_alu_op(const char *mnemonic) {
+    for (int i = 0; ext_alu_ops[i].name; i++) {
+        if (strcmp(ext_alu_ops[i].name, mnemonic) == 0) {
+            return &ext_alu_ops[i];
+        }
+    }
+    return NULL;
+}
+
+static void append_byte(uint8_t *buf, int *len, uint32_t v) {
+    buf[(*len)++] = (uint8_t)(v & 0xFF);
+}
+
+static void append_word(uint8_t *buf, int *len, uint32_t v) {
+    append_byte(buf, len, v);
+    append_byte(buf, len, v >> 8);
+}
+
+static void append_quad(uint8_t *buf, int *len, uint32_t v) {
+    append_byte(buf, len, v);
+    append_byte(buf, len, v >> 8);
+    append_byte(buf, len, v >> 16);
+    append_byte(buf, len, v >> 24);
+}
+
+static int parse_ext_alu_dest(Assembler *as, const char *s, int *target, uint8_t *dest_dp) {
+    const char *p = skip_whitespace((char *)s);
+    if ((*p == 'A' || *p == 'a') && (!p[1] || isspace((unsigned char)p[1]) || p[1] == ',')) {
+        *target = 0;
+        return 1;
+    }
+    char token[MAX_LABEL];
+    int i = 0;
+    while (p[i] && !isspace((unsigned char)p[i]) && p[i] != ',' && i < (MAX_LABEL - 1)) {
+        token[i] = p[i];
+        i++;
+    }
+    token[i] = '\0';
+    if (token[0] == '\0') {
+        return 0;
+    }
+    int reg_addr = parse_register_alias(token);
+    if (reg_addr >= 0 && reg_addr <= 0xFF) {
+        *target = 1;
+        *dest_dp = (uint8_t)reg_addr;
+        return 1;
+    }
+    error(as, "extended ALU dest must be A or Rn");
+    return 0;
 }
 
 static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     Operand op;
-    uint8_t prefix_bytes[8];
-    int prefix_count = 0;
-    int data_override = 0; /* 0=default, 1=byte, 2=word */
-    int addr32_prefix = 0;
-    int saw_data_prefix = 0;
-    int saw_addr_prefix = 0;
+    int size_code = -1;
     
     str_upper(mnemonic);
     
-    /* Parse one-shot prefixes (32-bit mode only) */
-    while (is_prefix_mnemonic(mnemonic)) {
-        if (as->m_flag != 2) {
-            error(as, "prefixes only valid in 32-bit mode");
-            return 0;
-        }
-        if (strcmp(mnemonic, "BYTE") == 0 || strcmp(mnemonic, "WID.B") == 0) {
-            if (saw_data_prefix || saw_addr_prefix) {
-                error(as, "DATA prefix must appear once, before ADDR32");
-                return 0;
-            }
-            data_override = 1;
-            prefix_bytes[prefix_count++] = 0xCB;
-            saw_data_prefix = 1;
-        } else if (strcmp(mnemonic, "WORD") == 0 || strcmp(mnemonic, "WID.W") == 0) {
-            if (saw_data_prefix || saw_addr_prefix) {
-                error(as, "DATA prefix must appear once, before ADDR32");
-                return 0;
-            }
-            data_override = 2;
-            prefix_bytes[prefix_count++] = 0xDB;
-            saw_data_prefix = 1;
-        } else if (strcmp(mnemonic, "ADDR32") == 0 || strcmp(mnemonic, "WID.A32") == 0) {
-            if (saw_addr_prefix) {
-                error(as, "ADDR32 prefix appears multiple times");
-                return 0;
-            }
-            addr32_prefix = 1;
-            prefix_bytes[prefix_count++] = 0x42;
-            saw_addr_prefix = 1;
-        }
-        if (!parse_next_mnemonic(mnemonic, &operand)) {
-            error(as, "prefix requires instruction");
-            return 0;
-        }
-    }
-    
-    /* Parse operand */
-    if (!parse_operand(as, operand, &op)) {
+    if (!strip_size_suffix(mnemonic, &size_code)) {
+        error(as, "invalid size suffix");
         return 0;
     }
     
-    /* Check for shifter instructions ($02 $E9): SHL, SHR, SAR, ROL, ROR
+    /* Check for shifter instructions ($02 $98): SHL, SHR, SAR, ROL, ROR
      * These require 3 operands separated by commas (dest, src, count)
      * Standard ROL/ROR with accumulator mode have no operands or just "A" */
     for (int i = 0; shifter_instructions[i].name; i++) {
@@ -1249,9 +1365,9 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 return 0;
             }
             
-            /* Emit: $02 $E9 [op|cnt] [dest_dp] [src_dp] */
+            /* Emit: $02 $98 [op|cnt] [dest_dp] [src_dp] */
             emit_byte(as, 0x02);
-            emit_byte(as, 0xE9);
+            emit_byte(as, 0x98);
             emit_byte(as, shifter_instructions[i].op_code | (count & 0x1F));
             emit_byte(as, dest_dp & 0xFF);
             emit_byte(as, src_dp & 0xFF);
@@ -1259,7 +1375,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
-    /* Check for extend instructions ($02 $EA): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT */
+    /* Check for extend instructions ($02 $99): SEXT8, SEXT16, ZEXT8, ZEXT16, CLZ, CTZ, POPCNT */
     for (int i = 0; extend_instructions[i].name; i++) {
         if (strcmp(mnemonic, extend_instructions[i].name) == 0) {
             /* Parse: dest, src */
@@ -1285,9 +1401,9 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 return 0;
             }
             
-            /* Emit: $02 $EA [subop] [dest_dp] [src_dp] */
+            /* Emit: $02 $99 [subop] [dest_dp] [src_dp] */
             emit_byte(as, 0x02);
-            emit_byte(as, 0xEA);
+            emit_byte(as, 0x99);
             emit_byte(as, extend_instructions[i].subop);
             emit_byte(as, dest_dp & 0xFF);
             emit_byte(as, src_dp & 0xFF);
@@ -1295,6 +1411,340 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
+    /* Extended ALU instructions ($02 $80-$97) */
+    const ExtALUOp *ext_alu = find_ext_alu_op(mnemonic);
+    if (ext_alu) {
+        const char *p = skip_whitespace(operand);
+        int dest_starts_reg = (*p == 'A' || *p == 'a' || *p == 'R' || *p == 'r');
+        int use_ext_alu = (size_code >= 0 || dest_starts_reg ||
+                           strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0);
+        if (!ext_alu->requires_src && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
+            use_ext_alu = 0;
+        }
+        if (use_ext_alu) {
+            int size = (size_code >= 0) ? size_code : 2;
+            if (size < 0 || size > 2) {
+                error(as, "invalid extended ALU size");
+                return 0;
+            }
+            int target = 0;
+            uint8_t dest_dp = 0;
+            uint8_t addr_mode = 0x00;
+            uint8_t operand_bytes[8];
+            int operand_len = 0;
+
+            if (ext_alu->requires_src) {
+                /* Split dest,src at top-level comma, but not ,X ,Y ,S which are addressing mode suffixes */
+                char *comma = NULL;
+                int paren_depth = 0;
+                int bracket_depth = 0;
+                for (char *q = operand; *q; q++) {
+                    if (*q == ';') break;
+                    if (*q == '(') paren_depth++;
+                    else if (*q == ')' && paren_depth > 0) paren_depth--;
+                    else if (*q == '[') bracket_depth++;
+                    else if (*q == ']' && bracket_depth > 0) bracket_depth--;
+                    else if (*q == ',' && paren_depth == 0 && bracket_depth == 0) {
+                        /* Check if this comma is followed by X, Y, or S (addressing mode suffix) */
+                        char *after = skip_whitespace(q + 1);
+                        char c = toupper((unsigned char)*after);
+                        char c2 = after[1];
+                        /* If followed by single X, Y, or S (and then nothing or whitespace/comment), 
+                           it's an addressing mode suffix, not a separator */
+                        if ((c == 'X' || c == 'Y' || c == 'S') && 
+                            (!c2 || isspace((unsigned char)c2) || c2 == ';' || c2 == ')')) {
+                            continue;  /* Skip this comma, it's part of addressing mode */
+                        }
+                        comma = q;
+                        break;
+                    }
+                }
+                /* For traditional mnemonics (LDA, STA, ADC, etc.) without comma,
+                   the single operand is the source and A is implicit dest */
+                int is_ld_st = (strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0);
+                if (!comma && is_ld_st) {
+                    error(as, "LD/ST require dest,src format");
+                    return 0;
+                }
+                
+                char *dest_str;
+                char *src_str;
+                if (comma) {
+                    *comma = '\0';
+                    dest_str = operand;
+                    src_str = comma + 1;
+                } else {
+                    /* Traditional mnemonic with implicit A destination */
+                    dest_str = "A";
+                    src_str = operand;
+                    target = 0;  /* A is the destination */
+                }
+
+                int mem_dest_case = 0;
+                if (!dest_starts_reg && ext_alu->allows_mem_dest) {
+                    Operand mem_op;
+                    if (!parse_operand(as, dest_str, &mem_op)) {
+                        return 0;
+                    }
+                    if (as->m_flag == 2 && mem_op.value > 0xFFFF && mem_op.value <= 0xFFFFFF) {
+                        error(as, "32-bit addresses must use 8 hex digits");
+                        return 0;
+                    }
+                    /* DP addresses must be 4-byte aligned in 32-bit mode */
+                    if (as->m_flag == 2 &&
+                        (mem_op.mode == AM_DP || mem_op.mode == AM_DPX || mem_op.mode == AM_DPY ||
+                         mem_op.mode == AM_IND || mem_op.mode == AM_INDX || mem_op.mode == AM_INDY ||
+                         mem_op.mode == AM_INDL || mem_op.mode == AM_INDLY) &&
+                        (mem_op.value & 3) != 0) {
+                        error(as, "DP address must be 4-byte aligned in 32-bit mode (use R0-R63)");
+                        return 0;
+                    }
+                    switch (mem_op.mode) {
+                        case AM_DP:      addr_mode = 0x00; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_DPX:     addr_mode = 0x01; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_DPY:     addr_mode = 0x02; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDX:    addr_mode = 0x03; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDY:    addr_mode = 0x04; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_IND:     addr_mode = 0x05; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDL:    addr_mode = 0x06; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_ABS:
+                        case AM_ABSX:
+                        case AM_ABSY: {
+                            int is_32 = mem_op.value > 0xFFFF;
+                            if (mem_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
+                            else if (mem_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
+                            else addr_mode = is_32 ? 0x12 : 0x0A;
+                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            else append_word(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        }
+                        case AM_ABSIND:
+                        case AM_ABSINDX:
+                        case AM_ABSLIND: {
+                            int is_32 = mem_op.value > 0xFFFF;
+                            if (mem_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
+                            else if (mem_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
+                            else addr_mode = is_32 ? 0x15 : 0x0D;
+                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            else append_word(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        }
+                        case AM_SR:
+                            addr_mode = 0x1C;
+                            append_byte(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        case AM_SRIY:
+                            addr_mode = 0x1D;
+                            append_byte(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        default:
+                            error(as, "unsupported extended ALU addressing mode");
+                            return 0;
+                    }
+                    if (!parse_ext_alu_dest(as, src_str, &target, &dest_dp)) {
+                        return 0;
+                    }
+                    mem_dest_case = 1;
+                }
+
+                if (mem_dest_case) {
+                    /* Memory destination path handled above */
+                } else {
+                if (!parse_ext_alu_dest(as, dest_str, &target, &dest_dp)) {
+                    return 0;
+                }
+
+                char *src_p = skip_whitespace(src_str);
+                if ((*src_p == 'A' || *src_p == 'a') && (!src_p[1] || isspace((unsigned char)src_p[1]) || src_p[1] == ';')) {
+                    addr_mode = 0x19;
+                } else if ((*src_p == 'X' || *src_p == 'x') && (!src_p[1] || isspace((unsigned char)src_p[1]) || src_p[1] == ';')) {
+                    addr_mode = 0x1A;
+                } else if ((*src_p == 'Y' || *src_p == 'y') && (!src_p[1] || isspace((unsigned char)src_p[1]) || src_p[1] == ';')) {
+                    addr_mode = 0x1B;
+                } else {
+                    Operand src_op;
+                    if (!parse_operand(as, src_str, &src_op)) {
+                        return 0;
+                    }
+                    if (as->m_flag == 2 && src_op.value > 0xFFFF && src_op.value <= 0xFFFFFF) {
+                        error(as, "32-bit addresses must use 8 hex digits");
+                        return 0;
+                    }
+                    if (as->m_flag == 2 &&
+                        (src_op.mode == AM_ABS || src_op.mode == AM_ABSX || src_op.mode == AM_ABSY ||
+                         src_op.mode == AM_ABSIND || src_op.mode == AM_ABSINDX || src_op.mode == AM_ABSLIND) &&
+                        src_op.value <= 0xFFFF && !src_op.b_relative) {
+                        error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
+                        return 0;
+                    }
+                    /* DP addresses must be 4-byte aligned in 32-bit mode */
+                    if (as->m_flag == 2 &&
+                        (src_op.mode == AM_DP || src_op.mode == AM_DPX || src_op.mode == AM_DPY ||
+                         src_op.mode == AM_IND || src_op.mode == AM_INDX || src_op.mode == AM_INDY ||
+                         src_op.mode == AM_INDL || src_op.mode == AM_INDLY) &&
+                        (src_op.value & 3) != 0) {
+                        error(as, "DP address must be 4-byte aligned in 32-bit mode (use R0-R63)");
+                        return 0;
+                    }
+                    switch (src_op.mode) {
+                        case AM_DP:      addr_mode = 0x00; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_DPX:     addr_mode = 0x01; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_DPY:     addr_mode = 0x02; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_INDX:    addr_mode = 0x03; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_INDY:    addr_mode = 0x04; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_IND:     addr_mode = 0x05; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_INDL:    addr_mode = 0x06; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, src_op.value); break;
+                        case AM_ABS:
+                        case AM_ABSX:
+                        case AM_ABSY: {
+                            int is_32 = src_op.value > 0xFFFF;
+                            if (src_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
+                            else if (src_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
+                            else addr_mode = is_32 ? 0x12 : 0x0A;
+                            if (is_32) append_quad(operand_bytes, &operand_len, src_op.value);
+                            else append_word(operand_bytes, &operand_len, src_op.value);
+                            break;
+                        }
+                        case AM_ABSIND:
+                        case AM_ABSINDX:
+                        case AM_ABSLIND: {
+                            int is_32 = src_op.value > 0xFFFF;
+                            if (src_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
+                            else if (src_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
+                            else addr_mode = is_32 ? 0x15 : 0x0D;
+                            if (is_32) append_quad(operand_bytes, &operand_len, src_op.value);
+                            else append_word(operand_bytes, &operand_len, src_op.value);
+                            break;
+                        }
+                        case AM_IMM:
+                            addr_mode = 0x18;
+                            if (size == 0 && src_op.value > 0xFF) {
+                                error(as, "immediate too large for .B");
+                                return 0;
+                            }
+                            if (size == 1 && src_op.value > 0xFFFF) {
+                                error(as, "immediate too large for .W");
+                                return 0;
+                            }
+                            if (size == 0) append_byte(operand_bytes, &operand_len, src_op.value);
+                            else if (size == 1) append_word(operand_bytes, &operand_len, src_op.value);
+                            else append_quad(operand_bytes, &operand_len, src_op.value);
+                            break;
+                        case AM_ACC:
+                            addr_mode = 0x19;
+                            break;
+                        case AM_SR:
+                            addr_mode = 0x1C;
+                            append_byte(operand_bytes, &operand_len, src_op.value);
+                            break;
+                        case AM_SRIY:
+                            addr_mode = 0x1D;
+                            append_byte(operand_bytes, &operand_len, src_op.value);
+                            break;
+                        default:
+                            error(as, "unsupported extended ALU addressing mode");
+                            return 0;
+                    }
+                }
+                }
+            } else {
+                /* Unary ops / STZ */
+                char *dest_str = operand;
+                char *comma = strchr(dest_str, ',');
+                if (comma) {
+                    error(as, "unexpected source operand");
+                    return 0;
+                }
+                if (dest_starts_reg && parse_ext_alu_dest(as, dest_str, &target, &dest_dp)) {
+                    addr_mode = 0x00;
+                } else if (ext_alu->allows_mem_dest) {
+                    Operand mem_op;
+                    if (!parse_operand(as, dest_str, &mem_op)) {
+                        return 0;
+                    }
+                    if (as->m_flag == 2 && mem_op.value > 0xFFFF && mem_op.value <= 0xFFFFFF) {
+                        error(as, "32-bit addresses must use 8 hex digits");
+                        return 0;
+                    }
+                    if (as->m_flag == 2 &&
+                        (mem_op.mode == AM_ABS || mem_op.mode == AM_ABSX || mem_op.mode == AM_ABSY ||
+                         mem_op.mode == AM_ABSIND || mem_op.mode == AM_ABSINDX || mem_op.mode == AM_ABSLIND) &&
+                        mem_op.value <= 0xFFFF && !mem_op.b_relative) {
+                        error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
+                        return 0;
+                    }
+                    switch (mem_op.mode) {
+                        case AM_DP:      addr_mode = 0x00; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_DPX:     addr_mode = 0x01; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_DPY:     addr_mode = 0x02; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDX:    addr_mode = 0x03; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDY:    addr_mode = 0x04; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_IND:     addr_mode = 0x05; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDL:    addr_mode = 0x06; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, mem_op.value); break;
+                        case AM_ABS:
+                        case AM_ABSX:
+                        case AM_ABSY: {
+                            int is_32 = mem_op.value > 0xFFFF;
+                            if (mem_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
+                            else if (mem_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
+                            else addr_mode = is_32 ? 0x12 : 0x0A;
+                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            else append_word(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        }
+                        case AM_ABSIND:
+                        case AM_ABSINDX:
+                        case AM_ABSLIND: {
+                            int is_32 = mem_op.value > 0xFFFF;
+                            if (mem_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
+                            else if (mem_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
+                            else addr_mode = is_32 ? 0x15 : 0x0D;
+                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            else append_word(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        }
+                        case AM_SR:
+                            addr_mode = 0x1C;
+                            append_byte(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        case AM_SRIY:
+                            addr_mode = 0x1D;
+                            append_byte(operand_bytes, &operand_len, mem_op.value);
+                            break;
+                        default:
+                            error(as, "unsupported extended ALU addressing mode");
+                            return 0;
+                    }
+                } else {
+                    error(as, "extended ALU dest must be A or Rn");
+                    return 0;
+                }
+            }
+
+            emit_byte(as, 0x02);
+            emit_byte(as, ext_alu->opcode);
+            emit_byte(as, (uint8_t)((size << 6) | (target ? 0x20 : 0x00) | (addr_mode & 0x1F)));
+            if (target) emit_byte(as, dest_dp);
+            for (int i = 0; i < operand_len; i++) {
+                emit_byte(as, operand_bytes[i]);
+            }
+            return 1;
+        }
+    }
+
+    if (size_code >= 0) {
+        error(as, "size suffix only valid for extended ALU");
+        return 0;
+    }
+
+    /* Parse operand */
+    if (!parse_operand(as, operand, &op)) {
+        return 0;
+    }
+
     /* Check for extended instructions first */
     const ExtInstruction *ext = find_ext_instruction(mnemonic, op.mode);
     if (ext) {
@@ -1339,24 +1789,11 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         return 0;
     }
 
-    /* WAI/STP escape in 32-bit mode */
-    if (as->m_flag == 2 && (strcmp(mnemonic, "WAI") == 0 || strcmp(mnemonic, "STP") == 0)) {
-        if (prefix_count != 0) {
-            error(as, "WAI/STP cannot be prefixed in 32-bit mode");
-            return 0;
-        }
-        if (strcmp(mnemonic, "WAI") == 0) {
-            emit_byte(as, 0x42);
-            emit_byte(as, 0xCB);
-            return 1;
-        }
-        if (strcmp(mnemonic, "STP") == 0) {
-            emit_byte(as, 0x42);
-            emit_byte(as, 0xDB);
-            return 1;
-        }
+    if (as->m_flag == 2 && strcmp(mnemonic, "WDM") == 0) {
+        error(as, "$42 (WDM) is reserved in 32-bit mode");
+        return 0;
     }
-    
+
     /* Handle branches specially */
     if (op.mode == AM_DP || op.mode == AM_ABS) {
         if (inst->opcodes[AM_REL] != 0xFF) {
@@ -1417,20 +1854,27 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         return 1;
     }
     
-    /* Enforce ADDR32 prefix usage for 32-bit absolute addresses */
-    if (as->m_flag == 2 && !addr32_prefix && op.value > 0xFFFF) {
-        error(as, "ADDR32 prefix required for 32-bit address");
-        return 0;
-    }
-    
-    /* Map 32-bit absolute variants when ADDR32 prefix is present */
-    if (addr32_prefix) {
-        if (mode == AM_ABSL) mode = AM_ABS;
-        else if (mode == AM_ABSLX) mode = AM_ABSX;
-        else if (mode == AM_ABSLIND) mode = AM_ABSIND;
-        else if (mode != AM_ABS && mode != AM_ABSX && mode != AM_ABSY &&
-                 mode != AM_ABSIND && mode != AM_ABSINDX) {
-            error(as, "ADDR32 prefix only valid with absolute addressing");
+    if (as->m_flag == 2) {
+        if (op.value > 0xFFFF) {
+            error(as, "32-bit absolute requires extended ALU");
+            return 0;
+        }
+        if ((mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
+             mode == AM_ABSIND || mode == AM_ABSINDX || mode == AM_ABSLIND) &&
+            op.value <= 0xFFFF && !op.b_relative) {
+            error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
+            return 0;
+        }
+        if (mode == AM_ABSL || mode == AM_ABSLX || mode == AM_ABSLIND) {
+            error(as, "24-bit long addressing not valid in 32-bit mode");
+            return 0;
+        }
+        /* DP addresses must be 4-byte aligned in 32-bit mode (R0-R63) */
+        if ((mode == AM_DP || mode == AM_DPX || mode == AM_DPY ||
+             mode == AM_IND || mode == AM_INDX || mode == AM_INDY ||
+             mode == AM_INDL || mode == AM_INDLY) &&
+            (op.value & 3) != 0) {
+            error(as, "DP address must be 4-byte aligned in 32-bit mode (use R0-R63)");
             return 0;
         }
     }
@@ -1452,10 +1896,6 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
-    /* Emit prefixes, then opcode */
-    for (int i = 0; i < prefix_count; i++) {
-        emit_byte(as, prefix_bytes[i]);
-    }
     emit_byte(as, inst->opcodes[mode]);
     
     /* Emit operand */
@@ -1465,7 +1905,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             break;
         case AM_IMM:
             {
-                int size = get_imm_size(as, mnemonic, data_override);
+                int size = get_imm_size(as, mnemonic, 0);
                 if (size == 1) emit_byte(as, op.value & 0xFF);
                 else if (size == 2) emit_word(as, op.value & 0xFFFF);
                 else emit_quad(as, op.value);
@@ -1488,8 +1928,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         case AM_ABSY:
         case AM_ABSIND:
         case AM_ABSINDX:
-            if (addr32_prefix) emit_quad(as, op.value);
-            else emit_word(as, op.value & 0xFFFF);
+            emit_word(as, op.value & 0xFFFF);
             break;
         case AM_ABSL:
         case AM_ABSLX:
@@ -1838,10 +2277,6 @@ static int is_mnemonic(const char *word) {
         if (strcmp(ext_instructions[i].name, upper) == 0)
             return 1;
     }
-    
-    /* Check WID prefix */
-    if (strcmp(upper, "WID") == 0)
-        return 1;
     
     return 0;
 }

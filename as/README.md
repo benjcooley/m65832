@@ -228,12 +228,11 @@ Tell the assembler what width to use for immediates:
     MVP #$01,#$02       ; Block Move
 ```
 
-### WID Prefix (32-bit)
+### 32-bit Absolute (Extended ALU)
 
 ```asm
-    WID LDA #$12345678      ; 32-bit immediate
-    WID LDA $12345678       ; 32-bit absolute address
-    WID JMP $C0001000       ; Jump to 32-bit address
+    LD R0, $12345678        ; 32-bit absolute (Extended ALU)
+    LD.B A, $C0001000       ; 8-bit load from 32-bit address
 ```
 
 ## M65832 Extended Instructions

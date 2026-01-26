@@ -164,6 +164,7 @@ typedef enum {
     TRAP_PRIVILEGE,
     TRAP_BREAKPOINT,    /* Debugger breakpoint */
     TRAP_WATCHPOINT,    /* Debugger watchpoint */
+    TRAP_ALIGNMENT,     /* RSET alignment error (already handled) */
 } m65832_trap_t;
 
 /* ============================================================================
@@ -397,7 +398,9 @@ struct m65832_cpu {
     uint8_t  timer_ctrl;    /* Timer control register */
     uint32_t timer_cmp;     /* Timer compare value */
     uint32_t timer_cnt;     /* Timer counter */
+    uint32_t timer_latch;   /* Timer latched value at IRQ */
     bool     timer_irq;     /* Timer IRQ pending */
+    bool     timer_latched; /* True if timer_latch is valid */
     
     /* LL/SC atomics */
     uint32_t ll_addr;       /* Load-linked address */
@@ -447,9 +450,6 @@ struct m65832_cpu {
     } watchpoints[16];
     int      num_watchpoints;
 
-    /* One-shot size prefix state (32-bit mode only) */
-    uint8_t  prefix_addr32;
-    
     /* 6502 coprocessor */
     m6502_cpu_t *coproc;    /* NULL if not configured */
     

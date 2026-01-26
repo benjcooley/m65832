@@ -258,16 +258,16 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { "PHVBR",  AM_IMP  }, { "PLVBR",  AM_IMP  }, { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    /* 0x80-0x8F: Temp register, 64-bit ops */
+    /* 0x80-0x8F: Extended ALU (handled separately) */
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    /* 0x90-0x9F: Temp register, 64-bit ops */
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "TTA",    AM_IMP  }, { "TAT",    AM_IMP  },
     { "LDQ",    AM_DP   }, { "LDQ",    AM_ABS  }, { "STQ",    AM_DP   }, { "STQ",    AM_ABS  },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    /* 0x90-0x9F: Extended WAI/STP */
-    { NULL,     AM_UNKNOWN }, { "WAI32", AM_IMP  }, { "STP32", AM_IMP  }, { NULL,  AM_UNKNOWN },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xA0-0xAF: LEA */
     { "LEA",    AM_DP   }, { "LEA",    AM_DPX  }, { "LEA",    AM_ABS  }, { "LEA",    AM_ABSX },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
@@ -288,10 +288,10 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { "FNEG.D", AM_IMP  }, { "FABS.D", AM_IMP  }, { "FSQRT.D",AM_IMP  }, { "FSIN.D", AM_IMP  },
     { "FCOS.D", AM_IMP  }, { "FTAN.D", AM_IMP  }, { "FLOG.D", AM_IMP  }, { "FEXP.D", AM_IMP  },
     { "F2I.D",  AM_IMP  }, { "I2F.D",  AM_IMP  }, { "FCMP.D", AM_IMP  }, { NULL,  AM_UNKNOWN },
-    /* 0xE0-0xEF: FPU conversion/move, Register-targeted ALU, Shifter, Extend */
+    /* 0xE0-0xEF: FPU conversion/move (reserved for future) */
     { "FMV01",  AM_IMP  }, { "FMV10",  AM_IMP  }, { "FMV02",  AM_IMP  }, { "FMV20",  AM_IMP  },
     { "FMV12",  AM_IMP  }, { "FMV21",  AM_IMP  }, { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    { "REGALU", AM_UNKNOWN }, { "SHIFT", AM_UNKNOWN }, { "EXTEND", AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xF0-0xFF: Reserved */
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
@@ -299,6 +299,35 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
 };
+
+static const char *get_ext_alu_name(uint8_t opcode) {
+    switch (opcode) {
+        case 0x80: return "LD";
+        case 0x81: return "ST";
+        case 0x82: return "ADC";
+        case 0x83: return "SBC";
+        case 0x84: return "AND";
+        case 0x85: return "ORA";
+        case 0x86: return "EOR";
+        case 0x87: return "CMP";
+        case 0x88: return "BIT";
+        case 0x89: return "TSB";
+        case 0x8A: return "TRB";
+        case 0x8B: return "INC";
+        case 0x8C: return "DEC";
+        case 0x8D: return "ASL";
+        case 0x8E: return "LSR";
+        case 0x8F: return "ROL";
+        case 0x90: return "ROR";
+        case 0x97: return "STZ";
+        default: return NULL;
+    }
+}
+
+static void format_dp_reg(char *out, size_t out_size, uint8_t dp) {
+    if ((dp & 3) == 0) snprintf(out, out_size, "R%d", dp / 4);
+    else snprintf(out, out_size, "$%02X", dp);
+}
 
 /* Get instruction size for addressing mode */
 static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
@@ -342,7 +371,7 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
 
 /* Format operand based on addressing mode */
 static void format_operand(char *out, size_t out_size, AddrMode mode,
-                           const uint8_t *operand, int opsize, uint32_t pc) {
+                           const uint8_t *operand, int opsize, uint32_t pc, int m_flag) {
     uint32_t val;
     int32_t rel;
     
@@ -375,15 +404,18 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             break;
         case AM_ABS:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "$%04X", val);
+            if (m_flag == 2) snprintf(out, out_size, "B+$%04X", val);
+            else snprintf(out, out_size, "$%04X", val);
             break;
         case AM_ABSX:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "$%04X,X", val);
+            if (m_flag == 2) snprintf(out, out_size, "B+$%04X,X", val);
+            else snprintf(out, out_size, "$%04X,X", val);
             break;
         case AM_ABSY:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "$%04X,Y", val);
+            if (m_flag == 2) snprintf(out, out_size, "B+$%04X,Y", val);
+            else snprintf(out, out_size, "$%04X,Y", val);
             break;
         case AM_IND:
             snprintf(out, out_size, "($%02X)", operand[0]);
@@ -429,15 +461,18 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             break;
         case AM_ABSIND:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "($%04X)", val);
+            if (m_flag == 2) snprintf(out, out_size, "(B+$%04X)", val);
+            else snprintf(out, out_size, "($%04X)", val);
             break;
         case AM_ABSINDX:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "($%04X,X)", val);
+            if (m_flag == 2) snprintf(out, out_size, "(B+$%04X,X)", val);
+            else snprintf(out, out_size, "($%04X,X)", val);
             break;
         case AM_ABSLIND:
             val = operand[0] | (operand[1] << 8);
-            snprintf(out, out_size, "[$%04X]", val);
+            if (m_flag == 2) snprintf(out, out_size, "[B+$%04X]", val);
+            else snprintf(out, out_size, "[$%04X]", val);
             break;
         default:
             snprintf(out, out_size, "???");
@@ -469,40 +504,21 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     AddrMode mode;
     int prefix_len = 0;
     int is_ext = 0;
-    int data_prefix = 0;   /* 0=none, 1=byte, 2=word */
-    int addr32_prefix = 0;
-    char prefix_str[64];
-    prefix_str[0] = '\0';
+    int m_flag = ctx->m_flag;
+    int x_flag = ctx->x_flag;
     
-    /* Check for size prefixes (32-bit mode only) */
-    if (ctx->m_flag == 2) {
-        if (buflen >= 2 && buf[0] == 0x42 && (buf[1] == 0xCB || buf[1] == 0xDB)) {
-            snprintf(out, out_size, "%s", buf[1] == 0xCB ? "WAI" : "STP");
-            return 2;
-        }
-        size_t idx = 0;
-        if (buflen > 0 && (buf[0] == 0xCB || buf[0] == 0xDB)) {
-            data_prefix = (buf[0] == 0xCB) ? 1 : 2;
-            strncat(prefix_str, data_prefix == 1 ? "BYTE " : "WORD ",
-                    sizeof(prefix_str) - strlen(prefix_str) - 1);
-            idx++;
-        }
-        if (idx < buflen && buf[idx] == 0x42) {
-            addr32_prefix = 1;
-            strncat(prefix_str, "ADDR32 ", sizeof(prefix_str) - strlen(prefix_str) - 1);
-            idx++;
-        }
-        prefix_len = (int)idx;
-        if (prefix_len > 0) {
-            if (buflen <= (size_t)prefix_len) {
-                snprintf(out, out_size, ".BYTE $%02X", buf[0]);
-                return 1;
-            }
-            opcode = buf[prefix_len];
-        }
+    if (m_flag == 2 || x_flag == 2) {
+        m_flag = 2;
+        x_flag = 2;
     }
+
+    if (m_flag == 2 && opcode == 0x42) {
+        snprintf(out, out_size, ".BYTE $42");
+        return 1;
+    }
+
     /* Check for extended prefix ($02) */
-    if (prefix_len == 0 && opcode == 0x02 && buflen > 1) {
+    if (opcode == 0x02 && buflen > 1) {
         is_ext = 1;
         prefix_len = 1;
         opcode = buf[1];
@@ -510,132 +526,235 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     
     /* Look up instruction */
     if (is_ext) {
-        /* Special handling for register-targeted ALU, shifter, and extend instructions */
-        if (opcode == 0xE8 && buflen >= 5) {
-            /* $02 $E8 [op|mode] [dest_dp] [src...] - Register-targeted ALU */
-            static const char *alu_ops[] = {"LD", "ADC", "SBC", "AND", "ORA", "EOR", "CMP", "???"};
-            uint8_t op_mode = buf[2];
-            uint8_t op = (op_mode >> 4) & 0x07;
-            uint8_t src_mode = op_mode & 0x0F;
-            uint8_t dest_dp = buf[3];
-            /* Format dest with R0-R63 if aligned */
-            char dest_str[16];
-            if ((dest_dp & 3) == 0)
-                snprintf(dest_str, sizeof(dest_str), "R%d", dest_dp / 4);
-            else
-                snprintf(dest_str, sizeof(dest_str), "$%02X", dest_dp);
-            /* Format source operand */
-            char src_str[32];
-            int len = 4;
-            switch (src_mode) {
-                case 0x00: /* (dp,X) */
-                    if (buflen > 4) {
-                        uint8_t src_dp = buf[4];
-                        if ((src_dp & 3) == 0)
-                            snprintf(src_str, sizeof(src_str), "(R%d,X)", src_dp / 4);
-                        else
-                            snprintf(src_str, sizeof(src_str), "($%02X,X)", src_dp);
-                        len = 5;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "(dp,X)");
-                    }
-                    break;
-                case 0x01: /* dp */
-                    if (buflen > 4) {
-                        uint8_t src_dp = buf[4];
-                        if ((src_dp & 3) == 0)
-                            snprintf(src_str, sizeof(src_str), "R%d", src_dp / 4);
-                        else
-                            snprintf(src_str, sizeof(src_str), "$%02X", src_dp);
-                        len = 5;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "dp");
-                    }
-                    break;
-                case 0x02: /* #imm */
-                    len = 8; /* assume 32-bit */
-                    if (buflen >= 8) {
-                        uint32_t imm = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-                        snprintf(src_str, sizeof(src_str), "#$%08X", imm);
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "#imm");
-                    }
-                    break;
-                case 0x03: /* A */
-                    snprintf(src_str, sizeof(src_str), "A");
-                    break;
-                case 0x04: /* (dp),Y */
-                    if (buflen > 4) {
-                        uint8_t src_dp = buf[4];
-                        if ((src_dp & 3) == 0)
-                            snprintf(src_str, sizeof(src_str), "(R%d),Y", src_dp / 4);
-                        else
-                            snprintf(src_str, sizeof(src_str), "($%02X),Y", src_dp);
-                        len = 5;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "(dp),Y");
-                    }
-                    break;
-                case 0x05: /* dp,X */
-                    if (buflen > 4) {
-                        uint8_t src_dp = buf[4];
-                        if ((src_dp & 3) == 0)
-                            snprintf(src_str, sizeof(src_str), "R%d,X", src_dp / 4);
-                        else
-                            snprintf(src_str, sizeof(src_str), "$%02X,X", src_dp);
-                        len = 5;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "dp,X");
-                    }
-                    break;
-                case 0x06: /* abs */
-                    if (buflen >= 6) {
-                        uint16_t addr = buf[4] | (buf[5] << 8);
-                        snprintf(src_str, sizeof(src_str), "$%04X", addr);
-                        len = 6;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "abs");
-                    }
-                    break;
-                case 0x07: /* abs,X */
-                    if (buflen >= 6) {
-                        uint16_t addr = buf[4] | (buf[5] << 8);
-                        snprintf(src_str, sizeof(src_str), "$%04X,X", addr);
-                        len = 6;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "abs,X");
-                    }
-                    break;
-                case 0x08: /* abs,Y */
-                    if (buflen >= 6) {
-                        uint16_t addr = buf[4] | (buf[5] << 8);
-                        snprintf(src_str, sizeof(src_str), "$%04X,Y", addr);
-                        len = 6;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "abs,Y");
-                    }
-                    break;
-                case 0x09: /* (dp) */
-                    if (buflen > 4) {
-                        uint8_t src_dp = buf[4];
-                        if ((src_dp & 3) == 0)
-                            snprintf(src_str, sizeof(src_str), "(R%d)", src_dp / 4);
-                        else
-                            snprintf(src_str, sizeof(src_str), "($%02X)", src_dp);
-                        len = 5;
-                    } else {
-                        snprintf(src_str, sizeof(src_str), "(dp)");
-                    }
-                    break;
-                default:
-                    snprintf(src_str, sizeof(src_str), "???");
-                    break;
+        const char *ext_alu = get_ext_alu_name(opcode);
+        if (ext_alu) {
+            if (buflen < 3) {
+                snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                return 2;
             }
-            snprintf(out, out_size, "%s %s,%s", alu_ops[op], dest_str, src_str);
-            return len > (int)buflen ? 4 : len;
+            uint8_t mode = buf[2];
+            int size = (mode >> 6) & 0x03;
+            int target = (mode >> 5) & 0x01;
+            uint8_t addr_mode = mode & 0x1F;
+            const char *suffix = (size == 0) ? ".B" : (size == 1) ? ".W" : (size == 2) ? "" : ".?";
+            int index = 3;
+            char dest_str[16];
+            if (target) {
+                if (buflen <= (size_t)index) {
+                    snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                    return 2;
+                }
+                format_dp_reg(dest_str, sizeof(dest_str), buf[index++]);
+            } else {
+                snprintf(dest_str, sizeof(dest_str), "A");
+            }
+
+            char src_str[64];
+            src_str[0] = '\0';
+            int unary_no_src = (addr_mode == 0x00) &&
+                               (opcode == 0x8B || opcode == 0x8C || opcode == 0x8D ||
+                                opcode == 0x8E || opcode == 0x8F || opcode == 0x90 ||
+                                (opcode == 0x97 && target == 1));
+            if (!unary_no_src) {
+                uint32_t val32;
+                uint16_t val16;
+                uint8_t val8;
+                int need = 0;
+                switch (addr_mode) {
+                    case 0x00: need = 1; break;
+                    case 0x01: need = 1; break;
+                    case 0x02: need = 1; break;
+                    case 0x03: need = 1; break;
+                    case 0x04: need = 1; break;
+                    case 0x05: need = 1; break;
+                    case 0x06: need = 1; break;
+                    case 0x07: need = 1; break;
+                    case 0x08: need = 2; break;
+                    case 0x09: need = 2; break;
+                    case 0x0A: need = 2; break;
+                    case 0x0B: need = 2; break;
+                    case 0x0C: need = 2; break;
+                    case 0x0D: need = 2; break;
+                    case 0x10: need = 4; break;
+                    case 0x11: need = 4; break;
+                    case 0x12: need = 4; break;
+                    case 0x13: need = 4; break;
+                    case 0x14: need = 4; break;
+                    case 0x15: need = 4; break;
+                    case 0x18: need = (size == 0) ? 1 : (size == 1) ? 2 : 4; break;
+                    case 0x19: need = 0; break;
+                    case 0x1A: need = 0; break;
+                    case 0x1B: need = 0; break;
+                    case 0x1C: need = 1; break;
+                    case 0x1D: need = 1; break;
+                    default: need = 0; break;
+                }
+                if (buflen < (size_t)(index + need)) {
+                    snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                    return 2;
+                }
+                switch (addr_mode) {
+                    case 0x00:
+                        val8 = buf[index++];
+                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        break;
+                    case 0x01:
+                        val8 = buf[index++];
+                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        snprintf(src_str + strlen(src_str), sizeof(src_str) - strlen(src_str), ",X");
+                        break;
+                    case 0x02:
+                        val8 = buf[index++];
+                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        snprintf(src_str + strlen(src_str), sizeof(src_str) - strlen(src_str), ",Y");
+                        break;
+                    case 0x03: {
+                        char base[16];
+                        val8 = buf[index++];
+                        format_dp_reg(base, sizeof(base), val8);
+                        snprintf(src_str, sizeof(src_str), "(%s,X)", base);
+                        break;
+                    }
+                    case 0x04: {
+                        char base[16];
+                        val8 = buf[index++];
+                        format_dp_reg(base, sizeof(base), val8);
+                        snprintf(src_str, sizeof(src_str), "(%s),Y", base);
+                        break;
+                    }
+                    case 0x05: {
+                        char base[16];
+                        val8 = buf[index++];
+                        format_dp_reg(base, sizeof(base), val8);
+                        snprintf(src_str, sizeof(src_str), "(%s)", base);
+                        break;
+                    }
+                    case 0x06: {
+                        char base[16];
+                        val8 = buf[index++];
+                        format_dp_reg(base, sizeof(base), val8);
+                        snprintf(src_str, sizeof(src_str), "[%s]", base);
+                        break;
+                    }
+                    case 0x07: {
+                        char base[16];
+                        val8 = buf[index++];
+                        format_dp_reg(base, sizeof(base), val8);
+                        snprintf(src_str, sizeof(src_str), "[%s],Y", base);
+                        break;
+                    }
+                    case 0x08:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X" : "$%04X", val16);
+                        break;
+                    case 0x09:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X,X" : "$%04X,X", val16);
+                        break;
+                    case 0x0A:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X,Y" : "$%04X,Y", val16);
+                        break;
+                    case 0x0B:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "(B+$%04X)" : "($%04X)", val16);
+                        break;
+                    case 0x0C:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "(B+$%04X,X)" : "($%04X,X)", val16);
+                        break;
+                    case 0x0D:
+                        val16 = buf[index] | (buf[index + 1] << 8);
+                        index += 2;
+                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "[B+$%04X]" : "[$%04X]", val16);
+                        break;
+                    case 0x10:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "$%08X", val32);
+                        break;
+                    case 0x11:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "$%08X,X", val32);
+                        break;
+                    case 0x12:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "$%08X,Y", val32);
+                        break;
+                    case 0x13:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "($%08X)", val32);
+                        break;
+                    case 0x14:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "($%08X,X)", val32);
+                        break;
+                    case 0x15:
+                        val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                        index += 4;
+                        snprintf(src_str, sizeof(src_str), "[$%08X]", val32);
+                        break;
+                    case 0x18:
+                        if (size == 0) {
+                            val8 = buf[index++];
+                            snprintf(src_str, sizeof(src_str), "#$%02X", val8);
+                        } else if (size == 1) {
+                            val16 = buf[index] | (buf[index + 1] << 8);
+                            index += 2;
+                            snprintf(src_str, sizeof(src_str), "#$%04X", val16);
+                        } else {
+                            val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
+                            index += 4;
+                            snprintf(src_str, sizeof(src_str), "#$%08X", val32);
+                        }
+                        break;
+                    case 0x19:
+                        snprintf(src_str, sizeof(src_str), "A");
+                        break;
+                    case 0x1A:
+                        snprintf(src_str, sizeof(src_str), "X");
+                        break;
+                    case 0x1B:
+                        snprintf(src_str, sizeof(src_str), "Y");
+                        break;
+                    case 0x1C:
+                        val8 = buf[index++];
+                        snprintf(src_str, sizeof(src_str), "$%02X,S", val8);
+                        break;
+                    case 0x1D:
+                        val8 = buf[index++];
+                        snprintf(src_str, sizeof(src_str), "($%02X,S),Y", val8);
+                        break;
+                    default:
+                        snprintf(src_str, sizeof(src_str), "???");
+                        break;
+                }
+            }
+
+            if (unary_no_src) {
+                snprintf(out, out_size, "%s%s %s", ext_alu, suffix, dest_str);
+                return index;
+            }
+            if (opcode == 0x97 && target == 0 && addr_mode != 0x19 && addr_mode != 0x1A && addr_mode != 0x1B) {
+                snprintf(out, out_size, "%s%s %s", ext_alu, suffix, src_str);
+                return index;
+            }
+            snprintf(out, out_size, "%s%s %s,%s", ext_alu, suffix, dest_str, src_str);
+            return index;
         }
-        if (opcode == 0xE9 && buflen >= 5) {
-            /* $02 $E9 [op|cnt] [dest_dp] [src_dp] - Barrel shifter */
+
+        /* Special handling for shifter and extend instructions */
+        if (opcode == 0x98 && buflen >= 5) {
+            /* $02 $98 [op|cnt] [dest_dp] [src_dp] - Barrel shifter */
             static const char *shift_ops[] = {"SHL", "SHR", "SAR", "ROL", "ROR", "???", "???", "???"};
             uint8_t op_cnt = buf[2];
             uint8_t shift_op = (op_cnt >> 5) & 0x07;
@@ -659,8 +778,8 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
             }
             return 5;
         }
-        if (opcode == 0xEA && buflen >= 5) {
-            /* $02 $EA [subop] [dest_dp] [src_dp] - Extend operations */
+        if (opcode == 0x99 && buflen >= 5) {
+            /* $02 $99 [subop] [dest_dp] [src_dp] - Extend operations */
             static const char *ext_ops[] = {
                 "SEXT8", "SEXT16", "ZEXT8", "ZEXT16", "CLZ", "CTZ", "POPCNT", "???"
             };
@@ -680,7 +799,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
             if (subop < 7) {
                 snprintf(out, out_size, "%s %s,%s", ext_ops[subop], dest_str, src_str);
             } else {
-                snprintf(out, out_size, ".BYTE $02,$EA,$%02X,$%02X,$%02X", subop, dest_dp, src_dp);
+                snprintf(out, out_size, ".BYTE $02,$99,$%02X,$%02X,$%02X", subop, dest_dp, src_dp);
             }
             return 5;
         }
@@ -699,26 +818,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     }
     
     /* Get operand size */
-    int opsize;
-    if (data_prefix == 1) {
-        if (mode == AM_IMM || mode == AM_IMM_M || mode == AM_IMM_X)
-            opsize = 1;
-        else
-            opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
-    } else if (data_prefix == 2) {
-        if (mode == AM_IMM || mode == AM_IMM_M || mode == AM_IMM_X)
-            opsize = 2;
-        else
-            opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
-    } else {
-        opsize = get_operand_size(mode, ctx->m_flag, ctx->x_flag);
-    }
-    
-    if (addr32_prefix &&
-        (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
-         mode == AM_ABSIND || mode == AM_ABSINDX)) {
-        opsize = 4;
-    }
+    int opsize = get_operand_size(mode, m_flag, x_flag);
     
     int total_len = 1 + prefix_len + opsize;
     
@@ -731,38 +831,13 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     char operand_str[64];
     const uint8_t *operand_bytes = buf + 1 + prefix_len;
     
-    if (addr32_prefix &&
-        (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
-         mode == AM_ABSIND || mode == AM_ABSINDX)) {
-        /* ADDR32 prefix: show 32-bit address */
-        uint32_t addr = operand_bytes[0] | (operand_bytes[1] << 8) |
-                       (operand_bytes[2] << 16) | (operand_bytes[3] << 24);
-        if (mode == AM_ABS)
-            snprintf(operand_str, sizeof(operand_str), "$%08X", addr);
-        else if (mode == AM_ABSX)
-            snprintf(operand_str, sizeof(operand_str), "$%08X,X", addr);
-        else if (mode == AM_ABSY)
-            snprintf(operand_str, sizeof(operand_str), "$%08X,Y", addr);
-        else if (mode == AM_ABSIND)
-            snprintf(operand_str, sizeof(operand_str), "($%08X)", addr);
-        else
-            snprintf(operand_str, sizeof(operand_str), "($%08X,X)", addr);
-    } else {
-        format_operand(operand_str, sizeof(operand_str), mode, operand_bytes, opsize, pc);
-    }
+    format_operand(operand_str, sizeof(operand_str), mode, operand_bytes, opsize, pc, m_flag);
     
     /* Build output string */
-    if (prefix_len > 0) {
-        if (operand_str[0])
-            snprintf(out, out_size, "%s%s %s", prefix_str, mnemonic, operand_str);
-        else
-            snprintf(out, out_size, "%s%s", prefix_str, mnemonic);
-    } else {
-        if (operand_str[0])
-            snprintf(out, out_size, "%s %s", mnemonic, operand_str);
-        else
-            snprintf(out, out_size, "%s", mnemonic);
-    }
+    if (operand_str[0])
+        snprintf(out, out_size, "%s %s", mnemonic, operand_str);
+    else
+        snprintf(out, out_size, "%s", mnemonic);
     
     /* Track state changes from REP/SEP */
     if (strcmp(mnemonic, "REP") == 0 && opsize >= 1) {

@@ -69,12 +69,12 @@ done:
     STP                   ; Stop processor
 
 ; Expected byte sequences for verification:
-; SHL $10, $04, #4    -> $02 $E9 $04 $10 $04  (op=0, count=4, dest=$10, src=$04)
-; SHR $14, $08, #8    -> $02 $E9 $28 $14 $08  (op=1, count=8, dest=$14, src=$08)
-; SAR $18, $0C, #16   -> $02 $E9 $50 $18 $0C  (op=2, count=16, dest=$18, src=$0C)
-; ROL $1C, $10, #1    -> $02 $E9 $61 $1C $10  (op=3, count=1, dest=$1C, src=$10)
-; ROR $20, $14, #2    -> $02 $E9 $82 $20 $14  (op=4, count=2, dest=$20, src=$14)
-; SHL R20, R10, A     -> $02 $E9 $1F $50 $28  (op=0, count=31/A, dest=R20=$50, src=R10=$28)
-; SEXT8 $30, $04      -> $02 $EA $00 $30 $04  (subop=0, dest=$30, src=$04)
-; CLZ $40, $14        -> $02 $EA $04 $40 $14  (subop=4, dest=$40, src=$14)
-; POPCNT $48, $1C     -> $02 $EA $06 $48 $1C  (subop=6, dest=$48, src=$1C)
+; SHL $10, $04, #4    -> $02 $98 $04 $10 $04  (op=0, count=4, dest=$10, src=$04)
+; SHR $14, $08, #8    -> $02 $98 $28 $14 $08  (op=1, count=8, dest=$14, src=$08)
+; SAR $18, $0C, #16   -> $02 $98 $50 $18 $0C  (op=2, count=16, dest=$18, src=$0C)
+; ROL $1C, $10, #1    -> $02 $98 $61 $1C $10  (op=3, count=1, dest=$1C, src=$10)
+; ROR $20, $14, #2    -> $02 $98 $82 $20 $14  (op=4, count=2, dest=$20, src=$14)
+; SHL R20, R10, A     -> $02 $98 $1F $50 $28  (op=0, count=31/A, dest=R20=$50, src=R10=$28)
+; SEXT8 $30, $04      -> $02 $99 $00 $30 $04  (subop=0, dest=$30, src=$04)
+; CLZ $40, $14        -> $02 $99 $04 $40 $14  (subop=4, dest=$40, src=$14)
+; POPCNT $48, $1C     -> $02 $99 $06 $48 $1C  (subop=6, dest=$48, src=$1C)

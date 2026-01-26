@@ -7,10 +7,31 @@ High-performance emulator for the M65832 processor architecture. Supports the fu
 - **Complete M65832 CPU emulation**
   - All 6502/65816 instructions
   - M65832 extended instructions ($02 prefix)
-  - WID prefix for 32-bit operands ($42)
+  - Extended ALU sizing via $02 prefix (WID removed)
   - Variable register widths (8/16/32-bit)
   - Default: 32-bit native mode (for new code)
   - Optional: 6502 emulation mode (for legacy code)
+  
+- **Floating Point Unit (FPU)**
+  - Three 64-bit FPU registers (F0, F1, F2)
+  - Single-precision operations (FADD.S, FSUB.S, FMUL.S, FDIV.S, FNEG.S, FABS.S, FCMP.S)
+  - Double-precision operations (FADD.D, FSUB.D, FMUL.D, FDIV.D, FNEG.D, FABS.D, FCMP.D)
+  - Conversion instructions (F2I.S, I2F.S, F2I.D, I2F.D)
+  - Load/store (LDF0/LDF1/LDF2, STF0/STF1/STF2)
+  - Reserved opcode trap for software emulation
+  
+- **Memory Management Unit (MMU)**
+  - Two-level page table walking
+  - TLB with 16 entries
+  - Page fault exception handling with FAULTVA latching
+  - User/supervisor page protection
+  - Write protection
+  
+- **Timer**
+  - 32-bit compare/count timer
+  - IRQ generation on count match
+  - Count latching at IRQ for precise reading
+  - Auto-reset mode
   
 - **6502 Coprocessor**
   - Cycle-accurate 6502/65C02 emulation

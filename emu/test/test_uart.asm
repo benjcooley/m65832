@@ -8,7 +8,7 @@
         .m8                 ; 8-bit accumulator
         .x16                ; 16-bit index
 
-; UART registers (32-bit addresses, need WID prefix)
+; UART registers (32-bit absolute via Extended ALU)
 UART_BASE   = $FFFFF100
 UART_STATUS = $FFFFF100
 UART_TX     = $FFFFF104
@@ -123,11 +123,11 @@ done_name:
 putchar:
         pha                     ; Save character
 putchar_wait:
-        wid lda UART_STATUS     ; Check status (32-bit address)
+        LD.B A, UART_STATUS     ; Check status (32-bit address)
         and #TX_READY           ; TX ready?
         beq putchar_wait        ; No, wait
         pla                     ; Restore character
-        wid sta UART_TX         ; Send it (32-bit address)
+        ST.B UART_TX, A         ; Send it (32-bit address)
         rts
 
 ; ============================================================================
@@ -135,10 +135,10 @@ putchar_wait:
 ; ============================================================================
 getchar:
 getchar_wait:
-        wid lda UART_STATUS     ; Check status (32-bit address)
+        LD.B A, UART_STATUS     ; Check status (32-bit address)
         and #RX_AVAIL           ; RX available?
         beq getchar_wait        ; No, wait
-        wid lda UART_RX         ; Read character (32-bit address)
+        LD.B A, UART_RX         ; Read character (32-bit address)
         rts
 
 ; ============================================================================

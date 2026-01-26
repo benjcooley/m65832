@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 /* ============================================================================
  * Internal Macros
@@ -85,12 +86,20 @@ static void tlb_flush_all(m65832_cpu_t *cpu) {
 static void timer_tick(m65832_cpu_t *cpu, int cycles) {
     if (!(cpu->timer_ctrl & TIMER_ENABLE)) return;
     
+    uint32_t old_cnt = cpu->timer_cnt;
     cpu->timer_cnt += cycles;
     
-    if (cpu->timer_cnt >= cpu->timer_cmp) {
+    /* Only trigger on transition from below to at-or-above CMP */
+    bool was_below = (old_cnt < cpu->timer_cmp);
+    bool now_at_or_above = (cpu->timer_cnt >= cpu->timer_cmp);
+    
+    if (was_below && now_at_or_above) {
         if (cpu->timer_ctrl & TIMER_IRQ_ENABLE) {
             cpu->timer_ctrl |= TIMER_IRQ_PENDING;
             cpu->timer_irq = true;
+            /* Latch the count value at the moment of IRQ */
+            cpu->timer_latch = cpu->timer_cmp;  /* Latch at CMP value */
+            cpu->timer_latched = true;
         }
         if (cpu->timer_ctrl & TIMER_AUTORESET) {
             cpu->timer_cnt = 0;
@@ -109,7 +118,8 @@ static uint32_t sysreg_read(m65832_cpu_t *cpu, uint32_t addr) {
         return 0;
     }
     
-    switch (addr & 0xFF) {
+    uint32_t offset = addr & 0xFF;
+    switch (offset) {
         case 0x00: return cpu->mmucr;                           /* MMUCR */
         case 0x04: return 0;                                    /* TLBINVAL (write-only) */
         case 0x08: return cpu->asid;                            /* ASID */
@@ -120,8 +130,19 @@ static uint32_t sysreg_read(m65832_cpu_t *cpu, uint32_t addr) {
         case 0x1C: return 0;                                    /* TLBFLUSH (write-only) */
         case 0x40: return cpu->timer_ctrl;                      /* TIMER_CTRL */
         case 0x44: return cpu->timer_cmp;                       /* TIMER_CMP */
-        case 0x48: return cpu->timer_cnt;                       /* TIMER_CNT */
-        default:   return 0;
+        case 0x48:                                              /* TIMER_CNT */
+            /* Return latched value if valid, otherwise live count */
+            return cpu->timer_latched ? cpu->timer_latch : cpu->timer_cnt;
+        default:
+            /* Undefined sysreg offsets fall through to flat memory */
+            if (cpu->memory && (0xF000 + offset + 3) < cpu->memory_size) {
+                uint32_t addr32 = 0xF000 + (offset & ~3);
+                return cpu->memory[addr32] | 
+                       ((uint32_t)cpu->memory[addr32 + 1] << 8) |
+                       ((uint32_t)cpu->memory[addr32 + 2] << 16) |
+                       ((uint32_t)cpu->memory[addr32 + 3] << 24);
+            }
+            return 0;
     }
 }
 
@@ -133,7 +154,8 @@ static void sysreg_write(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
     
-    switch (addr & 0xFF) {
+    uint32_t offset = addr & 0xFF;
+    switch (offset) {
         case 0x00:  /* MMUCR */
             /* Preserve fault type bits (read-only), update control bits */
             cpu->mmucr = (cpu->mmucr & MMUCR_FTYPE_MASK) | (val & ~MMUCR_FTYPE_MASK);
@@ -181,6 +203,18 @@ static void sysreg_write(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
             
         case 0x48:  /* TIMER_CNT */
             cpu->timer_cnt = val;
+            cpu->timer_latched = false;  /* Clear latch when writing count */
+            break;
+            
+        default:
+            /* Undefined sysreg offsets fall through to flat memory */
+            if (cpu->memory && (0xF000 + offset + 3) < cpu->memory_size) {
+                uint32_t addr32 = 0xF000 + (offset & ~3);
+                cpu->memory[addr32] = (uint8_t)val;
+                cpu->memory[addr32 + 1] = (uint8_t)(val >> 8);
+                cpu->memory[addr32 + 2] = (uint8_t)(val >> 16);
+                cpu->memory[addr32 + 3] = (uint8_t)(val >> 24);
+            }
             break;
     }
 }
@@ -360,9 +394,14 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
         check_watchpoint(cpu, addr, false);
     }
     
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;  /* Map to page zero */
+    }
+    
     /* System registers bypass MMU */
     if (is_sysreg(addr)) {
-        uint32_t reg_addr = addr & ~3;
+        uint32_t reg_addr = (addr & 0xFF) & ~3;  /* Offset within sysreg page */
         uint32_t val = sysreg_read(cpu, reg_addr);
         return (val >> ((addr & 3) * 8)) & 0xFF;
     }
@@ -377,8 +416,9 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
-            cpu->trap = TRAP_PAGE_FAULT;
-            cpu->trap_addr = addr;
+            /* mmu_translate already set faultva and fault type in mmucr */
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
             return 0xFF;
         }
     }
@@ -401,6 +441,11 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
         check_watchpoint(cpu, addr, true);
     }
     
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;  /* Map to page zero */
+    }
+    
     /* Invalidate LL/SC reservation if writing to linked address */
     if (cpu->ll_valid && addr == cpu->ll_addr) {
         cpu->ll_valid = false;
@@ -413,7 +458,7 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
             privilege_violation(cpu);
             return;
         }
-        uint32_t reg_addr = addr & ~3;
+        uint32_t reg_addr = (addr & 0xFF) & ~3;  /* Offset within sysreg page */
         uint32_t old = sysreg_read(cpu, reg_addr);
         int shift = (addr & 3) * 8;
         uint32_t mask = 0xFF << shift;
@@ -432,8 +477,9 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 1, !FLAG_TST(cpu, P_S))) {
-            cpu->trap = TRAP_PAGE_FAULT;
-            cpu->trap_addr = addr;
+            /* mmu_translate already set faultva and fault type in mmucr */
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
             return;
         }
     }
@@ -451,6 +497,11 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
 }
 
 static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;
+    }
+    
     /* Check MMIO regions first */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->read) {
@@ -467,6 +518,11 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
 }
 
 static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;
+    }
+    
     /* Check MMIO regions first */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->write) {
@@ -485,6 +541,11 @@ static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
 }
 
 static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;
+    }
+    
     /* Check MMIO regions first */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->read) {
@@ -504,6 +565,11 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
 }
 
 static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
+    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
+        addr = addr & 0xFF;
+    }
+    
     /* Check MMIO regions first */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->write) {
@@ -644,6 +710,14 @@ static inline uint32_t addr_dp(m65832_cpu_t *cpu) {
     uint8_t offset = fetch8(cpu);
     if (FLAG_TST(cpu, P_R)) {
         /* Register window mode - map to register file */
+        /* In R=1 mode, DP offsets must be 4-byte aligned */
+        if ((offset & 3) != 0) {
+            /* Unaligned access in RSET mode - trap to illegal instruction.
+             * Set TRAP_ALIGNMENT to indicate instruction should abort. */
+            illegal_instruction(cpu);
+            cpu->trap = TRAP_ALIGNMENT;  /* Signal to abort current instruction */
+            return 0;  /* Return value won't be used */
+        }
         return 0xFFFFFF00 | offset;  /* Special marker for reg access */
     }
     return (cpu->d + offset) & 0xFFFFFFFF;
@@ -666,27 +740,18 @@ static inline uint32_t addr_dpy(m65832_cpu_t *cpu) {
 
 /* Absolute */
 static inline uint32_t addr_abs(m65832_cpu_t *cpu) {
-    if (cpu->prefix_addr32) {
-        return fetch32(cpu);
-    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset) & 0xFFFFFFFF;
 }
 
 /* Absolute, X */
 static inline uint32_t addr_absx(m65832_cpu_t *cpu) {
-    if (cpu->prefix_addr32) {
-        return fetch32(cpu) + cpu->x;
-    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset + cpu->x) & 0xFFFFFFFF;
 }
 
 /* Absolute, Y */
 static inline uint32_t addr_absy(m65832_cpu_t *cpu) {
-    if (cpu->prefix_addr32) {
-        return fetch32(cpu) + cpu->y;
-    }
     uint16_t offset = fetch16(cpu);
     return (cpu->b + offset + cpu->y) & 0xFFFFFFFF;
 }
@@ -1110,6 +1175,100 @@ static inline void write_val(m65832_cpu_t *cpu, uint32_t addr, uint32_t val, int
     }
 }
 
+static inline uint32_t width_mask(int width) {
+    return (width == 4) ? 0xFFFFFFFFu : ((1u << (width * 8)) - 1u);
+}
+
+static inline uint32_t trunc_width(uint32_t val, int width) {
+    return val & width_mask(width);
+}
+
+static void op_bit_ext(m65832_cpu_t *cpu, uint32_t dest, uint32_t src, int width) {
+    uint32_t mask = width_mask(width);
+    uint32_t sign = 1u << (width * 8 - 1);
+    uint32_t ovf = 1u << (width * 8 - 2);
+    FLAG_PUT(cpu, P_Z, ((dest & src) & mask) == 0);
+    FLAG_PUT(cpu, P_N, src & sign);
+    FLAG_PUT(cpu, P_V, src & ovf);
+}
+
+static inline int ext_mode_width(uint8_t mode) {
+    switch ((mode >> 6) & 0x03) {
+        case 0: return 1;
+        case 1: return 2;
+        case 2: return 4;
+        default: return 0;
+    }
+}
+
+static bool ext_compute_addr(m65832_cpu_t *cpu, uint8_t addr_mode, uint32_t *addr_out) {
+    uint32_t base;
+    switch (addr_mode) {
+        case 0x00: *addr_out = addr_dp(cpu); return true;
+        case 0x01: *addr_out = addr_dpx(cpu); return true;
+        case 0x02: *addr_out = addr_dpy(cpu); return true;
+        case 0x03: *addr_out = addr_dpxi(cpu); return true;
+        case 0x04: *addr_out = addr_dpiy(cpu); return true;
+        case 0x05: *addr_out = addr_dpi(cpu); return true;
+        case 0x06: *addr_out = addr_dpil(cpu); return true;
+        case 0x07: *addr_out = addr_dpily(cpu); return true;
+        case 0x08: *addr_out = addr_abs(cpu); return true;
+        case 0x09: *addr_out = addr_absx(cpu); return true;
+        case 0x0A: *addr_out = addr_absy(cpu); return true;
+        case 0x0B: /* (abs) */
+            base = (cpu->b + fetch16(cpu)) & 0xFFFFFFFF;
+            *addr_out = (SIZE_M(cpu) == 4 && !IS_EMU(cpu)) ? mem_read32(cpu, base) : mem_read16(cpu, base);
+            return true;
+        case 0x0C: /* (abs,X) */
+            base = (cpu->b + fetch16(cpu) + cpu->x) & 0xFFFFFFFF;
+            *addr_out = (SIZE_M(cpu) == 4 && !IS_EMU(cpu)) ? mem_read32(cpu, base) : mem_read16(cpu, base);
+            return true;
+        case 0x0D: /* [abs] */
+            base = (cpu->b + fetch16(cpu)) & 0xFFFFFFFF;
+            *addr_out = mem_read32(cpu, base);
+            return true;
+        case 0x10: *addr_out = fetch32(cpu); return true;
+        case 0x11: *addr_out = fetch32(cpu) + cpu->x; return true;
+        case 0x12: *addr_out = fetch32(cpu) + cpu->y; return true;
+        case 0x13: /* (abs32) */
+            base = fetch32(cpu);
+            *addr_out = mem_read32(cpu, base);
+            return true;
+        case 0x14: /* (abs32,X) */
+            base = fetch32(cpu) + cpu->x;
+            *addr_out = mem_read32(cpu, base);
+            return true;
+        case 0x15: /* [abs32] */
+            base = fetch32(cpu);
+            *addr_out = mem_read32(cpu, base);
+            return true;
+        case 0x1C: *addr_out = addr_sr(cpu); return true;
+        case 0x1D: *addr_out = addr_sriy(cpu); return true;
+        default:
+            return false;
+    }
+}
+
+static bool ext_read_source(m65832_cpu_t *cpu, uint8_t addr_mode, int width, uint32_t *val_out) {
+    uint32_t addr;
+    switch (addr_mode) {
+        case 0x18: /* #imm */
+            if (width == 4) *val_out = fetch32(cpu);
+            else if (width == 2) *val_out = fetch16(cpu);
+            else *val_out = fetch8(cpu);
+            return true;
+        case 0x19: *val_out = trunc_width(cpu->a, width); return true;
+        case 0x1A: *val_out = trunc_width(cpu->x, width); return true;
+        case 0x1B: *val_out = trunc_width(cpu->y, width); return true;
+        default:
+            if (!ext_compute_addr(cpu, addr_mode, &addr)) {
+                return false;
+            }
+            *val_out = read_val(cpu, addr, width);
+            return true;
+    }
+}
+
 /* ============================================================================
  * Instruction Execution - Main Dispatch
  * ========================================================================= */
@@ -1118,57 +1277,17 @@ static inline void write_val(m65832_cpu_t *cpu, uint32_t addr, uint32_t val, int
 static int execute_instruction(m65832_cpu_t *cpu) {
     uint8_t opcode = fetch8(cpu);
     int cycles = 2;  /* Base cycles */
-    /* M65832: Width is controlled by M1:M0 and X1:X0 bits regardless of E mode */
+    /* M65832: In native-32 mode, widths are fixed to 32-bit for standard ops */
     int width_m = SIZE_M(cpu);
     int width_x = SIZE_X(cpu);
-    int data_prefix = 0;  /* 0=none, 1=byte, 2=word */
-    int escaped_wai_stp = 0;
     uint32_t addr, val;
     int8_t rel8;
     int16_t rel16;
     uint8_t ext_op;
 
-    /* One-shot prefixes (32-bit mode only) */
-    cpu->prefix_addr32 = 0;
-    if (width_m == 4 && width_x == 4) {
-        if (opcode == 0x42) {
-            uint8_t next = fetch8(cpu);
-            if (next == 0xCB || next == 0xDB) {
-                opcode = next;  /* Escape WAI/STP */
-                escaped_wai_stp = 1;
-            } else {
-                cpu->prefix_addr32 = 1;
-                opcode = next;
-            }
-        }
-        if (!escaped_wai_stp && (opcode == 0xCB || opcode == 0xDB)) {
-            if (cpu->prefix_addr32) {
-                illegal_instruction(cpu);
-                cpu->prefix_addr32 = 0;
-                return 7;
-            }
-            data_prefix = (opcode == 0xCB) ? 1 : 2;
-            opcode = fetch8(cpu);
-            if (opcode == 0xCB || opcode == 0xDB) {
-                illegal_instruction(cpu);
-                cpu->prefix_addr32 = 0;
-                return 7;
-            }
-            if (opcode == 0x42) {
-                cpu->prefix_addr32 = 1;
-                opcode = fetch8(cpu);
-            }
-        } else if (opcode == 0x42) {
-            cpu->prefix_addr32 = 1;
-            opcode = fetch8(cpu);
-        }
-        if (data_prefix == 1) {
-            width_m = 1;
-            width_x = 1;
-        } else if (data_prefix == 2) {
-            width_m = 2;
-            width_x = 2;
-        }
+    /* M65832: When M is 32-bit, X is also forced to 32-bit (matches VHDL) */
+    if (width_m == 4) {
+        width_x = 4;
     }
 
     switch (opcode) {
@@ -1181,6 +1300,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0xA5: /* LDA dp */
             addr = addr_dp(cpu);
+            if (cpu->trap == TRAP_ALIGNMENT) { cycles = 7; break; }
             cpu->a = read_val(cpu, addr, width_m);
             update_nz(cpu, cpu->a, width_m);
             cycles = 3;
@@ -2410,13 +2530,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Jumps ============ */
         case 0x4C: /* JMP abs */
-            if (cpu->prefix_addr32) {
-                cpu->pc = fetch32(cpu);
-                cycles = 4;
-            } else {
-                cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
-                cycles = 3;
-            }
+            cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
+            cycles = 3;
             break;
         case 0x5C: /* JMP long (24-bit, keeping for 65816 compat) */
             addr = fetch16(cpu);
@@ -2426,23 +2541,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0x6C: /* JMP (abs) */
             addr = addr_abs(cpu);
-            if (cpu->prefix_addr32) {
-                cpu->pc = mem_read32(cpu, addr);
-                cycles = 6;
-            } else {
-                cpu->pc = mem_read16(cpu, addr);
-                cycles = 5;
-            }
+            cpu->pc = mem_read16(cpu, addr);
+            cycles = 5;
             break;
         case 0x7C: /* JMP (abs,X) */
             addr = addr_absx(cpu);
-            if (cpu->prefix_addr32) {
-                cpu->pc = mem_read32(cpu, addr);
-                cycles = 7;
-            } else {
-                cpu->pc = mem_read16(cpu, addr);
-                cycles = 6;
-            }
+            cpu->pc = mem_read16(cpu, addr);
+            cycles = 6;
             break;
         case 0xDC: /* JML [abs] */
             addr = addr_abs(cpu);
@@ -2452,17 +2557,10 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Subroutines ============ */
         case 0x20: /* JSR abs */
-            if (cpu->prefix_addr32) {
-                addr = fetch32(cpu);
-                push32(cpu, cpu->pc);
-                cpu->pc = addr;
-                cycles = 8;
-            } else {
-                addr = fetch16(cpu);
-                push16(cpu, (uint16_t)(cpu->pc - 1));
-                cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
-                cycles = 6;
-            }
+            addr = fetch16(cpu);
+            push16(cpu, (uint16_t)(cpu->pc - 1));
+            cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
+            cycles = 6;
             break;
         case 0x22: /* JSL long */
             addr = fetch16(cpu);
@@ -2474,15 +2572,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0xFC: /* JSR (abs,X) */
             addr = addr_absx(cpu);
-            if (cpu->prefix_addr32) {
-                push32(cpu, cpu->pc);
-                cpu->pc = mem_read32(cpu, addr);
-                cycles = 9;
-            } else {
-                push16(cpu, (uint16_t)(cpu->pc - 1));
-                cpu->pc = mem_read16(cpu, addr);
-                cycles = 8;
-            }
+            push16(cpu, (uint16_t)(cpu->pc - 1));
+            cpu->pc = mem_read16(cpu, addr);
+            cycles = 8;
             break;
         case 0x60: /* RTS */
             cpu->pc = (pull16(cpu) + 1) & 0xFFFF;
@@ -2512,6 +2604,193 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                 ext_op = fetch8(cpu);
                 cycles = 3;  /* Base for extended */
                 switch (ext_op) {
+                    /* === Extended ALU ($02 $80-$97) === */
+                    case 0x80: /* LD */
+                    case 0x81: /* ST */
+                    case 0x82: /* ADC */
+                    case 0x83: /* SBC */
+                    case 0x84: /* AND */
+                    case 0x85: /* ORA */
+                    case 0x86: /* EOR */
+                    case 0x87: /* CMP */
+                    case 0x88: /* BIT */
+                    case 0x89: /* TSB */
+                    case 0x8A: /* TRB */
+                    case 0x8B: /* INC */
+                    case 0x8C: /* DEC */
+                    case 0x8D: /* ASL */
+                    case 0x8E: /* LSR */
+                    case 0x8F: /* ROL */
+                    case 0x90: /* ROR */
+                    case 0x97: { /* STZ */
+                        uint8_t mode = fetch8(cpu);
+                        int ext_width = ext_mode_width(mode);
+                        uint8_t addr_mode = mode & 0x1F;
+                        bool target = (mode & 0x20) != 0;
+                        uint8_t dest_dp = 0;
+                        uint32_t dest_addr = 0;
+                        uint32_t src_val = 0;
+                        uint32_t dest_val = 0;
+                        uint32_t result = 0;
+                        uint32_t addr_ext = 0;
+                        bool ok = (ext_width != 0);
+
+                        if (target) {
+                            dest_dp = fetch8(cpu);
+                            /* Check P_R for register window mode */
+                            if (FLAG_TST(cpu, P_R)) {
+                                dest_addr = 0xFFFFFF00 | dest_dp;  /* Register window marker */
+                            } else {
+                                dest_addr = cpu->d + dest_dp;
+                            }
+                        }
+
+                        switch (ext_op) {
+                            case 0x80: /* LD */
+                                ok = ok && ext_read_source(cpu, addr_mode, ext_width, &src_val);
+                                if (ok) {
+                                    src_val = trunc_width(src_val, ext_width);
+                                    if (target) {
+                                        write_val(cpu, dest_addr, src_val, ext_width);
+                                    } else {
+                                        cpu->a = src_val;
+                                    }
+                                    update_nz(cpu, src_val, ext_width);
+                                }
+                                break;
+                            case 0x81: /* ST */
+                                ok = ok && ext_compute_addr(cpu, addr_mode, &addr_ext);
+                                if (ok) {
+                                    if (target) {
+                                        src_val = read_val(cpu, dest_addr, ext_width);
+                                    } else {
+                                        src_val = trunc_width(cpu->a, ext_width);
+                                    }
+                                    write_val(cpu, addr_ext, src_val, ext_width);
+                                }
+                                break;
+                            case 0x82: /* ADC */
+                            case 0x83: /* SBC */
+                            case 0x84: /* AND */
+                            case 0x85: /* ORA */
+                            case 0x86: /* EOR */
+                            case 0x87: /* CMP */
+                            case 0x88: /* BIT */
+                                ok = ok && ext_read_source(cpu, addr_mode, ext_width, &src_val);
+                                if (ok) {
+                                    src_val = trunc_width(src_val, ext_width);
+                                    if (target) {
+                                        dest_val = read_val(cpu, dest_addr, ext_width);
+                                    } else {
+                                        dest_val = trunc_width(cpu->a, ext_width);
+                                    }
+                                    switch (ext_op) {
+                                        case 0x82: /* ADC */
+                                            result = do_adc(cpu, dest_val, src_val, ext_width);
+                                            if (target) write_val(cpu, dest_addr, result, ext_width);
+                                            else cpu->a = result;
+                                            break;
+                                        case 0x83: /* SBC */
+                                            result = do_sbc(cpu, dest_val, src_val, ext_width);
+                                            if (target) write_val(cpu, dest_addr, result, ext_width);
+                                            else cpu->a = result;
+                                            break;
+                                        case 0x84: /* AND */
+                                            result = dest_val & src_val;
+                                            if (target) write_val(cpu, dest_addr, result, ext_width);
+                                            else cpu->a = result;
+                                            update_nz(cpu, result, ext_width);
+                                            break;
+                                        case 0x85: /* ORA */
+                                            result = dest_val | src_val;
+                                            if (target) write_val(cpu, dest_addr, result, ext_width);
+                                            else cpu->a = result;
+                                            update_nz(cpu, result, ext_width);
+                                            break;
+                                        case 0x86: /* EOR */
+                                            result = dest_val ^ src_val;
+                                            if (target) write_val(cpu, dest_addr, result, ext_width);
+                                            else cpu->a = result;
+                                            update_nz(cpu, result, ext_width);
+                                            break;
+                                        case 0x87: /* CMP */
+                                            do_cmp(cpu, dest_val, src_val, ext_width);
+                                            break;
+                                        case 0x88: /* BIT */
+                                            op_bit_ext(cpu, dest_val, src_val, ext_width);
+                                            break;
+                                        default:
+                                            break;
+                                    }
+                                }
+                                break;
+                            case 0x89: /* TSB */
+                            case 0x8A: /* TRB */
+                            case 0x97: /* STZ */
+                                ok = ok && ext_compute_addr(cpu, addr_mode, &addr_ext);
+                                if (ok) {
+                                    if (ext_op == 0x97) {
+                                        write_val(cpu, addr_ext, 0, ext_width);
+                                    } else {
+                                        uint32_t old_val = read_val(cpu, addr_ext, ext_width);
+                                        uint32_t src = target ? read_val(cpu, dest_addr, ext_width)
+                                                              : trunc_width(cpu->a, ext_width);
+                                        FLAG_PUT(cpu, P_Z, ((old_val & src) & width_mask(ext_width)) == 0);
+                                        if (ext_op == 0x89) {
+                                            write_val(cpu, addr_ext, old_val | src, ext_width);
+                                        } else {
+                                            write_val(cpu, addr_ext, old_val & ~src, ext_width);
+                                        }
+                                    }
+                                }
+                                break;
+                            case 0x8B: /* INC */
+                            case 0x8C: /* DEC */
+                            case 0x8D: /* ASL */
+                            case 0x8E: /* LSR */
+                            case 0x8F: /* ROL */
+                            case 0x90: /* ROR */
+                                if (addr_mode != 0x00) {
+                                    ok = false;
+                                    break;
+                                }
+                                if (target) {
+                                    dest_val = read_val(cpu, dest_addr, ext_width);
+                                } else {
+                                    dest_val = trunc_width(cpu->a, ext_width);
+                                }
+                                switch (ext_op) {
+                                    case 0x8B: result = op_inc(cpu, dest_val, ext_width); break;
+                                    case 0x8C: result = op_dec(cpu, dest_val, ext_width); break;
+                                    case 0x8D: result = op_asl(cpu, dest_val, ext_width); break;
+                                    case 0x8E: result = op_lsr(cpu, dest_val, ext_width); break;
+                                    case 0x8F: result = op_rol(cpu, dest_val, ext_width); break;
+                                    case 0x90: result = op_ror(cpu, dest_val, ext_width); break;
+                                    default: result = dest_val; break;
+                                }
+                                if (target) {
+                                    write_val(cpu, dest_addr, result, ext_width);
+                                } else {
+                                    cpu->a = result;
+                                }
+                                break;
+                            default:
+                                ok = false;
+                                break;
+                        }
+
+                        if (!ok) {
+                            if (SIZE_M(cpu) == 4 || FLAG_TST(cpu, P_K)) {
+                                cycles = 2;
+                            } else {
+                                illegal_instruction(cpu);
+                                cycles = 7;
+                            }
+                        } else {
+                            cycles = 5;
+                        }
+                        break;
+                    }
                     case 0x00: /* MUL dp */
                         addr = addr_dp(cpu);
                         val = read_val(cpu, addr, width_m);
@@ -2695,29 +2974,29 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     }
                     
-                    case 0x20: /* SD imm32 - Set D register from 32-bit immediate */
-                        cpu->d = fetch32(cpu);
+                    case 0x20: /* SVBR imm32 */
+                        cpu->vbr = fetch32(cpu);
                         cycles = 4;
                         break;
-                    case 0x21: /* SD dp - Set D register from dp memory */
+                    case 0x21: /* SVBR dp */
                         addr = addr_dp(cpu);
-                        cpu->d = mem_read32(cpu, addr);
+                        cpu->vbr = mem_read32(cpu, addr);
                         cycles = 5;
                         break;
-                    case 0x22: /* SB imm32 - Set B register from 32-bit immediate */
+                    case 0x22: /* SB imm32 */
                         cpu->b = fetch32(cpu);
                         cycles = 4;
                         break;
-                    case 0x23: /* SB dp - Set B register from dp memory */
+                    case 0x23: /* SB dp */
                         addr = addr_dp(cpu);
                         cpu->b = mem_read32(cpu, addr);
                         cycles = 5;
                         break;
-                    case 0x24: /* SD_X imm32 - Set D from immediate (alt) */
+                    case 0x24: /* SD imm32 */
                         cpu->d = fetch32(cpu);
                         cycles = 4;
                         break;
-                    case 0x25: /* SD_X dp - Set D from dp (alt) */
+                    case 0x25: /* SD dp */
                         addr = addr_dp(cpu);
                         cpu->d = mem_read32(cpu, addr);
                         cycles = 5;
@@ -2750,11 +3029,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         update_nz32(cpu, cpu->a);
                         cycles = 4;
                         break;
-                    case 0x30: /* ENR - Enable Register window */
+                    case 0x30: /* RSET - Enable Register window */
                         FLAG_SET(cpu, P_R);
                         cycles = 2;
                         break;
-                    case 0x31: /* DSR - Disable Register window */
+                    case 0x31: /* RCLR - Disable Register window */
                         FLAG_CLR(cpu, P_R);
                         cycles = 2;
                         break;
@@ -2776,172 +3055,86 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                     case 0x52: /* FENCEW */
                         cycles = 2;
                         break;
-                    case 0x86: /* TTA - T to A */
-                        cpu->a = cpu->t;
-                        update_nz(cpu, cpu->a, width_m);
+                    case 0x70: /* PHD - Push D (32-bit) */
+                        push32(cpu, cpu->d);
                         cycles = 2;
                         break;
-                    case 0x87: /* TAT - A to T */
+                    case 0x71: /* PLD - Pull D (32-bit) */
+                        cpu->d = pull32(cpu);
+                        cycles = 2;
+                        break;
+                    case 0x72: /* PHB - Push B (32-bit) */
+                        push32(cpu, cpu->b);
+                        cycles = 2;
+                        break;
+                    case 0x73: /* PLB - Pull B (32-bit) */
+                        cpu->b = pull32(cpu);
+                        cycles = 2;
+                        break;
+                    case 0x74: /* PHVBR - Push VBR (32-bit) */
+                        push32(cpu, cpu->vbr);
+                        cycles = 2;
+                        break;
+                    case 0x75: /* PLVBR - Pull VBR (32-bit) */
+                        cpu->vbr = pull32(cpu);
+                        cycles = 2;
+                        break;
+                    case 0x9A: /* TTA - T to A */
+                        cpu->a = cpu->t;
+                        update_nz32(cpu, cpu->a);
+                        cycles = 2;
+                        break;
+                    case 0x9B: /* TAT - A to T */
                         cpu->t = cpu->a;
                         cycles = 2;
                         break;
                     
                     /* === 64-bit Load/Store (LDQ/STQ) === */
-                    case 0x88: /* LDQ dp - Load 64-bit (A=low, T=high) */
+                    case 0x9C: /* LDQ dp - Load 64-bit (A=low, T=high) */
                         addr = addr_dp(cpu);
                         cpu->a = mem_read32(cpu, addr);
                         cpu->t = mem_read32(cpu, addr + 4);
                         update_nz32(cpu, cpu->a);
                         cycles = 6;
                         break;
-                    case 0x89: /* LDQ abs - Load 64-bit */
+                    case 0x9D: /* LDQ abs - Load 64-bit */
                         addr = addr_abs(cpu);
                         cpu->a = mem_read32(cpu, addr);
                         cpu->t = mem_read32(cpu, addr + 4);
                         update_nz32(cpu, cpu->a);
                         cycles = 7;
                         break;
-                    case 0x8A: /* STQ dp - Store 64-bit (A=low, T=high) */
+                    case 0x9E: /* STQ dp - Store 64-bit (A=low, T=high) */
                         addr = addr_dp(cpu);
                         mem_write32(cpu, addr, cpu->a);
                         mem_write32(cpu, addr + 4, cpu->t);
                         cycles = 6;
                         break;
-                    case 0x8B: /* STQ abs - Store 64-bit */
+                    case 0x9F: /* STQ abs - Store 64-bit */
                         addr = addr_abs(cpu);
                         mem_write32(cpu, addr, cpu->a);
                         mem_write32(cpu, addr + 4, cpu->t);
                         cycles = 7;
                         break;
                     
-                    /* === Register-Targeted ALU ($E8) === */
-                    case 0xE8: {
-                        /* Format: $02 $E8 [op|mode] [dest_dp] [source_operand...] */
-                        uint8_t op_mode = fetch8(cpu);
-                        uint8_t op = (op_mode >> 4) & 0x0F;
-                        uint8_t mode = op_mode & 0x0F;
-                        uint8_t dest_dp = fetch8(cpu);
-                        uint32_t dest_addr = cpu->d + dest_dp;
-                        uint32_t src_val;
-                        
-                        /* Fetch source based on addressing mode */
-                        switch (mode) {
-                            case 0x0: /* (dp,X) */
-                                addr = addr_dpxi(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x1: /* dp */
-                                addr = addr_dp(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x2: /* #imm */
-                                if (width_m == 4) src_val = fetch32(cpu);
-                                else if (width_m == 2) src_val = fetch16(cpu);
-                                else src_val = fetch8(cpu);
-                                break;
-                            case 0x3: /* A */
-                                src_val = cpu->a;
-                                break;
-                            case 0x4: /* (dp),Y */
-                                addr = addr_dpiy(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x5: /* dp,X */
-                                addr = addr_dpx(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x6: /* abs */
-                                addr = addr_abs(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x7: /* abs,X */
-                                addr = addr_absx(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x8: /* abs,Y */
-                                addr = addr_absy(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0x9: /* (dp) */
-                                addr = addr_dpi(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0xA: /* [dp] */
-                                addr = addr_dpil(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0xB: /* [dp],Y */
-                                addr = addr_dpily(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0xC: /* sr,S */
-                                addr = addr_sr(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            case 0xD: /* (sr,S),Y */
-                                addr = addr_sriy(cpu);
-                                src_val = read_val(cpu, addr, width_m);
-                                break;
-                            default:
-                                src_val = 0;
-                                break;
-                        }
-                        
-                        /* Read destination value */
-                        uint32_t dest_val = read_val(cpu, dest_addr, width_m);
-                        uint32_t result;
-                        
-                        /* Perform operation */
-                        switch (op) {
-                            case 0: /* LD - just load source to dest */
-                                result = src_val;
-                                write_val(cpu, dest_addr, result, width_m);
-                                update_nz(cpu, result, width_m);
-                                break;
-                            case 1: /* ADC */
-                                result = do_adc(cpu, dest_val, src_val, width_m);
-                                write_val(cpu, dest_addr, result, width_m);
-                                break;
-                            case 2: /* SBC */
-                                result = do_sbc(cpu, dest_val, src_val, width_m);
-                                write_val(cpu, dest_addr, result, width_m);
-                                break;
-                            case 3: /* AND */
-                                result = dest_val & src_val;
-                                write_val(cpu, dest_addr, result, width_m);
-                                update_nz(cpu, result, width_m);
-                                break;
-                            case 4: /* ORA */
-                                result = dest_val | src_val;
-                                write_val(cpu, dest_addr, result, width_m);
-                                update_nz(cpu, result, width_m);
-                                break;
-                            case 5: /* EOR */
-                                result = dest_val ^ src_val;
-                                write_val(cpu, dest_addr, result, width_m);
-                                update_nz(cpu, result, width_m);
-                                break;
-                            case 6: /* CMP - compare only, don't write */
-                                do_cmp(cpu, dest_val, src_val, width_m);
-                                break;
-                            default:
-                                break;
-                        }
-                        cycles = 5;  /* Base cycles, varies by mode */
-                        break;
-                    }
-                    
-                    /* === Barrel Shifter ($E9) === */
-                    case 0xE9: {
-                        /* Format: $02 $E9 [op|cnt] [dest_dp] [src_dp] */
+                    /* === Barrel Shifter ($98) === */
+                    case 0x98: {
+                        /* Format: $02 $98 [op|cnt] [dest_dp] [src_dp] */
                         uint8_t op_cnt = fetch8(cpu);
                         uint8_t shift_op = (op_cnt >> 5) & 0x07;
                         uint8_t count = op_cnt & 0x1F;
                         uint8_t dest_dp = fetch8(cpu);
                         uint8_t src_dp = fetch8(cpu);
                         
-                        uint32_t dest_addr = cpu->d + dest_dp;
-                        uint32_t src_addr = cpu->d + src_dp;
+                        /* Check P_R for register window mode */
+                        uint32_t dest_addr, src_addr;
+                        if (FLAG_TST(cpu, P_R)) {
+                            dest_addr = 0xFFFFFF00 | dest_dp;
+                            src_addr = 0xFFFFFF00 | src_dp;
+                        } else {
+                            dest_addr = cpu->d + dest_dp;
+                            src_addr = cpu->d + src_dp;
+                        }
                         uint32_t src_val = read_val(cpu, src_addr, width_m);
                         uint32_t result;
                         
@@ -3007,15 +3200,22 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     }
                     
-                    /* === Sign/Zero Extend ($EA) === */
-                    case 0xEA: {
-                        /* Format: $02 $EA [subop] [dest_dp] [src_dp] */
+                    /* === Sign/Zero Extend ($99) === */
+                    case 0x99: {
+                        /* Format: $02 $99 [subop] [dest_dp] [src_dp] */
                         uint8_t subop = fetch8(cpu);
                         uint8_t dest_dp = fetch8(cpu);
                         uint8_t src_dp = fetch8(cpu);
                         
-                        uint32_t dest_addr = cpu->d + dest_dp;
-                        uint32_t src_addr = cpu->d + src_dp;
+                        /* Check P_R for register window mode */
+                        uint32_t dest_addr, src_addr;
+                        if (FLAG_TST(cpu, P_R)) {
+                            dest_addr = 0xFFFFFF00 | dest_dp;
+                            src_addr = 0xFFFFFF00 | src_dp;
+                        } else {
+                            dest_addr = cpu->d + dest_dp;
+                            src_addr = cpu->d + src_dp;
+                        }
                         uint32_t src_val = read_val(cpu, src_addr, width_m);
                         uint32_t result;
                         
@@ -3074,6 +3274,224 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         write_val(cpu, dest_addr, result, width_m);
                         update_nz(cpu, result, width_m);
                         cycles = 3;
+                        break;
+                    }
+                    
+                    /* === FPU Load/Store ($B0-$BB) === */
+                    case 0xB0: /* LDF0 dp */
+                    case 0xB4: /* LDF1 dp */
+                    case 0xB8: { /* LDF2 dp */
+                        addr = addr_dp(cpu);
+                        uint32_t lo = mem_read32(cpu, addr);
+                        uint32_t hi = mem_read32(cpu, addr + 4);
+                        uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
+                        int freg = (ext_op - 0xB0) / 4;
+                        /* Store as double-precision bits */
+                        union { uint64_t u; double d; } conv;
+                        conv.u = val64;
+                        cpu->f[freg] = conv.d;
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xB1: /* LDF0 abs */
+                    case 0xB5: /* LDF1 abs */
+                    case 0xB9: { /* LDF2 abs */
+                        addr = addr_abs(cpu);
+                        uint32_t lo = mem_read32(cpu, addr);
+                        uint32_t hi = mem_read32(cpu, addr + 4);
+                        uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
+                        int freg = (ext_op - 0xB1) / 4;
+                        union { uint64_t u; double d; } conv;
+                        conv.u = val64;
+                        cpu->f[freg] = conv.d;
+                        cycles = 6;
+                        break;
+                    }
+                    case 0xB2: /* STF0 dp */
+                    case 0xB6: /* STF1 dp */
+                    case 0xBA: { /* STF2 dp */
+                        addr = addr_dp(cpu);
+                        int freg = (ext_op - 0xB2) / 4;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
+                        mem_write32(cpu, addr + 4, (uint32_t)(conv.u >> 32));
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xB3: /* STF0 abs */
+                    case 0xB7: /* STF1 abs */
+                    case 0xBB: { /* STF2 abs */
+                        addr = addr_abs(cpu);
+                        int freg = (ext_op - 0xB3) / 4;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
+                        mem_write32(cpu, addr + 4, (uint32_t)(conv.u >> 32));
+                        cycles = 6;
+                        break;
+                    }
+                    
+                    /* === FPU Single-Precision Arithmetic ($C0-$C8) === */
+                    case 0xC0: { /* FADD.S - F0 = F1 + F2 */
+                        union { uint32_t u; float f; } f1, f2, f0;
+                        union { uint64_t u; double d; } conv1, conv2, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
+                        f0.f = f1.f + f2.f;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 4;
+                        break;
+                    }
+                    case 0xC1: { /* FSUB.S - F0 = F1 - F2 */
+                        union { uint32_t u; float f; } f1, f2, f0;
+                        union { uint64_t u; double d; } conv1, conv2, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
+                        f0.f = f1.f - f2.f;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 4;
+                        break;
+                    }
+                    case 0xC2: { /* FMUL.S - F0 = F1 * F2 */
+                        union { uint32_t u; float f; } f1, f2, f0;
+                        union { uint64_t u; double d; } conv1, conv2, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
+                        f0.f = f1.f * f2.f;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 6;
+                        break;
+                    }
+                    case 0xC3: { /* FDIV.S - F0 = F1 / F2 */
+                        union { uint32_t u; float f; } f1, f2, f0;
+                        union { uint64_t u; double d; } conv1, conv2, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
+                        f0.f = f1.f / f2.f;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 10;
+                        break;
+                    }
+                    case 0xC4: { /* FNEG.S - F0 = -F1 */
+                        union { uint32_t u; float f; } f1, f0;
+                        union { uint64_t u; double d; } conv1, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        f0.f = -f1.f;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xC5: { /* FABS.S - F0 = |F1| */
+                        union { uint32_t u; float f; } f1, f0;
+                        union { uint64_t u; double d; } conv1, conv0;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        f0.f = fabsf(f1.f);
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xC6: { /* FCMP.S - Compare F1 to F2 */
+                        union { uint32_t u; float f; } f1, f2;
+                        union { uint64_t u; double d; } conv1, conv2;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
+                        FLAG_PUT(cpu, P_Z, f1.f == f2.f);
+                        FLAG_PUT(cpu, P_C, f1.f >= f2.f);
+                        FLAG_PUT(cpu, P_N, f1.f < f2.f);
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xC7: { /* F2I.S - A = (int32)F1 */
+                        union { uint32_t u; float f; } f1;
+                        union { uint64_t u; double d; } conv1;
+                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
+                        cpu->a = (uint32_t)(int32_t)f1.f;
+                        update_nz32(cpu, cpu->a);
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xC8: { /* I2F.S - F0 = (float32)A */
+                        union { uint32_t u; float f; } f0;
+                        union { uint64_t u; double d; } conv0;
+                        f0.f = (float)(int32_t)cpu->a;
+                        conv0.u = (uint64_t)f0.u;
+                        cpu->f[0] = conv0.d;
+                        cycles = 3;
+                        break;
+                    }
+                    
+                    /* === FPU Double-Precision Arithmetic ($D0-$D8) === */
+                    case 0xD0: { /* FADD.D - F0 = F1 + F2 */
+                        cpu->f[0] = cpu->f[1] + cpu->f[2];
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xD1: { /* FSUB.D - F0 = F1 - F2 */
+                        cpu->f[0] = cpu->f[1] - cpu->f[2];
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xD2: { /* FMUL.D - F0 = F1 * F2 */
+                        cpu->f[0] = cpu->f[1] * cpu->f[2];
+                        cycles = 8;
+                        break;
+                    }
+                    case 0xD3: { /* FDIV.D - F0 = F1 / F2 */
+                        cpu->f[0] = cpu->f[1] / cpu->f[2];
+                        cycles = 15;
+                        break;
+                    }
+                    case 0xD4: { /* FNEG.D - F0 = -F1 */
+                        cpu->f[0] = -cpu->f[1];
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xD5: { /* FABS.D - F0 = |F1| */
+                        cpu->f[0] = fabs(cpu->f[1]);
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xD6: { /* FCMP.D - Compare F1 to F2 */
+                        FLAG_PUT(cpu, P_Z, cpu->f[1] == cpu->f[2]);
+                        FLAG_PUT(cpu, P_C, cpu->f[1] >= cpu->f[2]);
+                        FLAG_PUT(cpu, P_N, cpu->f[1] < cpu->f[2]);
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xD7: { /* F2I.D - A = (int64)F1 (low 32 bits) */
+                        int64_t ival = (int64_t)cpu->f[1];
+                        cpu->a = (uint32_t)ival;
+                        cpu->t = (uint32_t)(ival >> 32);
+                        update_nz32(cpu, cpu->a);
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xD8: { /* I2F.D - F0 = (float64)A:T */
+                        int64_t ival = (int64_t)((uint64_t)cpu->a | ((uint64_t)cpu->t << 32));
+                        cpu->f[0] = (double)ival;
+                        cycles = 3;
+                        break;
+                    }
+                    
+                    /* Reserved FPU opcodes ($D9-$DF) trap to software emulation */
+                    case 0xD9:
+                    case 0xDA:
+                    case 0xDB:
+                    case 0xDC:
+                    case 0xDD:
+                    case 0xDE:
+                    case 0xDF: {
+                        /* Trap via SYSCALL vector + opcode * 4 */
+                        uint32_t trap_vector = VEC_SYSCALL + (ext_op * 4);
+                        exception_enter(cpu, trap_vector, cpu->pc);
+                        cycles = 7;
                         break;
                     }
                     
@@ -3279,7 +3697,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
     }
 
-    cpu->prefix_addr32 = 0;
     return cycles;
 }
 
@@ -3367,7 +3784,9 @@ void m65832_emu_reset(m65832_cpu_t *cpu) {
     cpu->timer_ctrl = 0;
     cpu->timer_cmp = 0;
     cpu->timer_cnt = 0;
+    cpu->timer_latch = 0;
     cpu->timer_irq = false;
+    cpu->timer_latched = false;
     
     /* LL/SC reset */
     cpu->ll_addr = 0;
@@ -3409,7 +3828,8 @@ void m65832_emu_enter_native32(m65832_cpu_t *cpu) {
 }
 
 bool m65832_emu_is_running(m65832_cpu_t *cpu) {
-    return cpu && cpu->running && !cpu->stopped && !cpu->halted;
+    /* Halted (WAI) is still "running" - timer can still tick and wake it */
+    return cpu && cpu->running && !cpu->stopped;
 }
 
 /* ============================================================================
@@ -3773,7 +4193,16 @@ int m65832_step(m65832_cpu_t *cpu) {
         return 7;
     }
     
-    if (cpu->halted) return 1;  /* WAI - just burn a cycle */
+    if (cpu->halted) {
+        /* WAI - burn a cycle but still tick timer */
+        cpu->cycles++;
+        timer_tick(cpu, 1);
+        /* Timer IRQ can wake from WAI */
+        if (cpu->timer_irq && !cpu->irq_pending) {
+            cpu->irq_pending = true;
+        }
+        return 1;
+    }
     
     /* Check breakpoints */
     for (int i = 0; i < cpu->num_breakpoints; i++) {
@@ -4035,6 +4464,7 @@ const char *m65832_trap_name(m65832_trap_t trap) {
         case TRAP_PRIVILEGE: return "PRIVILEGE";
         case TRAP_BREAKPOINT: return "BREAKPOINT";
         case TRAP_WATCHPOINT: return "WATCHPOINT";
+        case TRAP_ALIGNMENT: return "ALIGNMENT";
         default: return "UNKNOWN";
     }
 }

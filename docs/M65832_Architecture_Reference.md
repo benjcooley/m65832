@@ -56,7 +56,7 @@ The M65832 is a direct evolution of the WDC 65C816, extending it to a true 32-bi
 
 - **Register Window**: Direct Page can map to a 64×32-bit hardware register file
 - **Base Registers**: D (Direct), B (Absolute base), VBR (Virtual 6502 base)
-- **Width Flags**: M and X flags extended to select 8/16/32-bit operations
+- **Width Flags**: M/X control 8/16-bit sizing in 65816 native; ignored for sizing in 32-bit mode (use Extended ALU size bits)
 - **Two-Level Paging**: 32-bit VA → 65-bit PA translation
 - **Supervisor/User Modes**: Full privilege separation for OS support
 - **Atomic Operations**: Compare-and-swap for lock-free programming
@@ -147,7 +147,7 @@ Value:    $78    $56    $34    $12     ; Represents $12345678
 
 | Feature | Specification |
 |---------|---------------|
-| Data widths | 8, 16, 32 bits (flag-selectable) |
+| Data widths | 8, 16, 32 bits (32-bit mode uses Extended ALU for 8/16) |
 | Virtual address | 32 bits (4 GB) |
 | Physical address | 65 bits (32 exabytes) |
 | Page size | 4 KB |
@@ -475,12 +475,15 @@ In 32-bit mode:
 
 ### 7.1 Immediate
 
-Operand is part of instruction. In native-32 mode, traditional instructions are fixed 32-bit; use Extended ALU for 8/16-bit immediates. In emulation/native-16, width follows M/X.
+Operand is part of instruction. In native-32 mode, traditional instructions are fixed 32-bit and M/X is ignored for sizing; use Extended ALU for 8/16-bit immediates. In emulation/native-16, width follows M/X.
 
 ```asm
+; 65816 native sizing (M/X-controlled)
 LDA #$12        ; 8-bit immediate (M=00)
 LDA #$1234      ; 16-bit immediate (M=01)
-LDA #$12345678  ; 32-bit immediate (M=10)
+
+; 32-bit native sizing (traditional instructions are fixed 32-bit)
+LDA #$12345678  ; 32-bit immediate
 ```
 
 Encoding:
@@ -1505,7 +1508,7 @@ The M65832 supports three operating modes with different assembly conventions:
 |------|-------------|------------|------------|----------|
 | **6502 Emulation** | E=1 | 8-bit only | 16-bit (VBR-relative) | Classic 6502 code |
 | **65816 Native** | E=0, M/X=00 or 01 | 8/16-bit via M/X | 24-bit bank:offset | 65816 compatible |
-| **32-bit Native** | E=0, M/X=10 | 8/16/32-bit via prefixes | B+16 or 32-bit | Modern M65832 code |
+| **32-bit Native** | E=0, M/X=10 | 32-bit default; 8/16 via Extended ALU | B+16 or 32-bit | Modern M65832 code |
 
 ### 15.2 Data/Address Size by Mode
 
@@ -1564,6 +1567,7 @@ STP                     ; $DB
 - 32-bit addresses MUST be written with 8 hex digits: `$A0001234`
 - B+offset MUST be written as `B+$XXXX` with exactly 4 hex digits
 - For sized operations (8/16-bit), use Extended ALU not traditional instructions
+- `$42` is reserved/unused in 32-bit mode
 
 #### 65816 Mode Assembly Syntax
 
