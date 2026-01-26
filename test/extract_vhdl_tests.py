@@ -400,7 +400,7 @@ def run_emulator_test_v2(test, verbose=False):
 def main():
     parser = argparse.ArgumentParser(description='Extract and run VHDL tests on emulator')
     parser.add_argument('--vhdl-only', action='store_true', help='Just parse and show tests')
-    parser.add_argument('--test', type=int, help='Run specific test number')
+    parser.add_argument('--test', type=int, action='append', help='Run specific test number(s)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     parser.add_argument('--list', '-l', action='store_true', help='List all tests')
     args = parser.parse_args()
@@ -418,23 +418,23 @@ def main():
     
     if args.list or args.vhdl_only:
         for test in tests:
-            print(f"Test {test.number}: {test.name}")
-            print(f"  Pokes: {len(test.pokes)}, Checks: {len(test.checks)}, Cycles: {test.cycles}")
             if args.verbose:
+                print(f"Test {test.number}: {test.name}")
+                print(f"  Pokes: {len(test.pokes)}, Checks: {len(test.checks)}, Cycles: {test.cycles}")
                 for addr, data in test.pokes[:5]:
                     print(f"    poke(${addr:04X}, ${data:02X})")
                 if len(test.pokes) > 5:
                     print(f"    ... and {len(test.pokes) - 5} more")
                 for addr, expected, msg in test.checks:
                     print(f"    check(${addr:04X}, ${expected:02X}, \"{msg}\")")
-            print()
-        
-        if args.vhdl_only:
-            return
+                print()
+            else:
+                print(f"  {test.number:3d}  {test.name}")
+        return  # Exit after listing
     
     # Run tests
     if args.test:
-        tests = [t for t in tests if t.number == args.test]
+        tests = [t for t in tests if t.number in args.test]
         if not tests:
             print(f"Test {args.test} not found")
             sys.exit(1)
