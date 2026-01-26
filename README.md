@@ -101,33 +101,106 @@ GHDL testbenches:
 
 ## Architecture Highlights
 
-### Virtual 6502 Mode
+### Extended ALU with Register Targeting
 
-Run unmodified 6502 code anywhere in the 32-bit address space:
+The Extended ALU ($02 prefix) supports explicit sizing and direct register-to-register operations:
 
 ```asm
-SVBR #$10000000     ; 6502 sees $0000-$FFFF at VA $10000000-$1000FFFF
-SEC
-XCE                 ; Enter emulation mode
-JMP $C000           ; Actually jumps to $1000C000
+; Load/store with explicit sizes
+LD.B  R0, #$42          ; 8-bit immediate to R0
+LD.W  R1, #$1234        ; 16-bit immediate to R1
+LD    R2, #$12345678    ; 32-bit immediate to R2
+
+; Register-to-register arithmetic
+ADC   R0, R1            ; R0 += R1 + carry (32-bit)
+ADC.W R0, R1            ; 16-bit add
+SBC   R2, #$100         ; R2 -= $100
+
+; All traditional operations work with R targets
+AND   R0, R1            ; R0 &= R1
+ORA   R0, #$FF          ; R0 |= $FF
+EOR   R3, R4            ; R3 ^= R4
+INC   R0                ; R0++
+ASL   R1                ; R1 <<= 1
 ```
 
-### Register Window
+### 64 Hardware Registers
 
-64 general-purpose 32-bit registers accessible via Direct Page:
+When R=1, Direct Page maps to 64×32-bit registers (R0-R63):
 
 ```asm
-RSET                ; Enable register window
-LDA $00             ; A = R0
-ADC $04             ; A += R1
-STA $08             ; R2 = A
+RSET                    ; Enable register window
+LD    R0, #$1000        ; R0 = $1000
+LD    R1, (R0)          ; R1 = [R0] (indirect through register)
+LD    R2, (R0),Y        ; R2 = [R0 + Y]
+ADD   R3, R1            ; R3 += R1
+ST    R3, result        ; Store to memory
+```
+
+### Hardware Multiply/Divide
+
+```asm
+LD    R0, #100
+MUL   R0, R1            ; R0 = R0 × R1 (signed), high word in T
+MULU  R0, R1            ; Unsigned multiply
+DIV   R0, R1            ; R0 = R0 / R1, T = remainder
+TTA                     ; A = T (get high word or remainder)
+```
+
+### 64-bit Operations
+
+```asm
+LDQ   R0                ; Load 64-bit: A = low, T = high
+STQ   result            ; Store 64-bit from A:T
+```
+
+### Floating Point Unit
+
+```asm
+LDF1  float1            ; F1 = [float1] (64-bit)
+LDF2  float2            ; F2 = [float2]
+FADD.S                  ; F0 = F1 + F2 (single precision)
+FADD.D                  ; F0 = F1 + F2 (double precision)
+STF0  result            ; Store result
+F2I.S                   ; A = (int)F1
+I2F.S                   ; F0 = (float)A
+FCMP.S                  ; Compare F1 to F2 (sets N, Z, C)
+```
+
+### Atomic Operations
+
+```asm
+; Compare-and-swap
+LD    X, expected       ; X = expected value
+LD    A, new_value      ; A = new value
+CAS   lock              ; if [lock]==X: [lock]=A, Z=1
+
+; Load-linked / Store-conditional
+LLI   counter           ; A = [counter], set link
+INC   A
+SCI   counter           ; if link valid: [counter]=A, Z=1
+BEQ   success           ; Retry if failed
 ```
 
 ### Base Registers Keep Code Small
 
 ```asm
-SB #$90000000       ; Set absolute base
-LDA $1234           ; Loads from $90001234 (3-byte instruction!)
+SB    #$90000000        ; Set absolute base
+LDA   B+$1234           ; Loads from $90001234 (3-byte instruction!)
+
+SD    #$00010000        ; Set direct page base
+LDA   R0                ; Access register window at $10000
+```
+
+### Virtual 6502 Mode
+
+Run unmodified 6502 code anywhere in the 32-bit address space:
+
+```asm
+SVBR  #$10000000        ; 6502 sees $0000-$FFFF at VA $10000000-$1000FFFF
+SEC
+XCE                     ; Enter emulation mode
+JMP   $C000             ; Actually jumps to $1000C000
 ```
 
 ### Classic Coprocessor: Cycle-Accurate 6502 Emulation
@@ -200,9 +273,16 @@ See [Classic Coprocessor](docs/M65832_Classic_Coprocessor.md) for complete detai
 
 ### Modern Features
 
-- **Atomic operations**: CAS, LL/SC for lock-free programming
-- **MMU**: 2-level page tables, 4KB pages
-- **Privilege levels**: Supervisor/User separation
+- **Extended ALU**: Register-to-register ops with 8/16/32-bit sizing
+- **64 Hardware Registers**: R0-R63 via register window (R=1)
+- **Hardware Multiply/Divide**: MUL, MULU, DIV, DIVU with 64-bit results
+- **Floating Point**: Single and double precision (F0-F2 registers)
+- **64-bit Load/Store**: LDQ/STQ for atomic 64-bit transfers
+- **Atomic Operations**: CAS, LL/SC for lock-free programming
+- **Barrel Shifter**: Variable shifts with count in register
+- **Bit Manipulation**: CLZ, CTZ, POPCNT, sign/zero extend
+- **MMU**: 2-level page tables, 4KB pages, TLB
+- **Privilege Levels**: Supervisor/User separation
 - **Linux ABI**: Standard calling convention with R0-R7 for arguments
 
 ## Project Structure
