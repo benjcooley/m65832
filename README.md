@@ -8,7 +8,7 @@ A 32-bit processor architecture extending the 65816, designed for:
 
 ## Overview
 
-The M65832 ("M" for Modern) is a spiritual successor to the WDC 65C816, extending it to a true 32-bit architecture while preserving the elegance and "feel" of the 6502 family.
+The M65832 ("M" for Modern) is a direct successor to the WDC 65C816, extending it to a true 32-bit architecture while preserving the elegance and "feel" of the 6502 family.
 
 ### Key Features
 
