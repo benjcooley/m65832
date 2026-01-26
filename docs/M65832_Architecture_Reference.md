@@ -393,8 +393,8 @@ $FFFF_F000 - $FFFF_FFFF   Exception vectors, system registers
 | Absolute,Y | B + abs16 + Y | 3 bytes |
 | (Absolute) | [B + abs16] | 3 bytes |
 | (Absolute,X) | [B + abs16 + X] | 3 bytes |
-| 32-bit Absolute (ADDR32) | abs32 | 5 bytes |
-| 32-bit Absolute,X | abs32 + X | 5 bytes |
+| 32-bit Absolute | abs32 | Extended ALU only |
+| 32-bit Absolute,X | abs32 + X | Extended ALU only |
 
 ### 5.3 Stack Operations
 
@@ -442,7 +442,6 @@ Emulation mode:
 Most instructions preserve 6502/65816 encodings. M65832 extensions use:
 
 1. **Extended Opcode Page ($02 prefix)**: Extended operations including sized ALU
-2. **WAI/STP encoding**: `$42 $CB` = WAI, `$42 $DB` = STP (32-bit mode only)
 
 ```
 Standard instruction:     [opcode] [operand...]
@@ -476,7 +475,7 @@ In 32-bit mode:
 
 ### 7.1 Immediate
 
-Operand is part of instruction. Width determined by M or X flag.
+Operand is part of instruction. In native-32 mode, traditional instructions are fixed 32-bit; use Extended ALU for 8/16-bit immediates. In emulation/native-16, width follows M/X.
 
 ```asm
 LDA #$12        ; 8-bit immediate (M=00)
@@ -558,14 +557,17 @@ JMP (B+$1234,X) ; ptr = [B + $1234 + X]; PC = ptr
 JMP ($1234)     ; ptr = [bank:$1234]; PC = ptr
 ```
 
-### 7.8 32-bit Absolute (ADDR32 Prefix)
+### 7.8 32-bit Absolute (Extended ALU Only)
 
-Full 32-bit address literal. Use sparingly.
+Full 32-bit address literal. Only available in Extended ALU instructions ($02 $80-$97).
 
 ```asm
-LDA $12345678         ; A = [$12345678] (8 hex digits = ADDR32)
-JMP $C0001000         ; PC = $C0001000
+; Extended ALU with 32-bit absolute (addr_mode $10)
+LD R0, $12345678      ; R0 = [$12345678] (8 hex digits)
+LD.B R1, $C0001000    ; R1 = [$C0001000] (8-bit load)
 ```
+
+For traditional instructions, use B-relative addressing with B set to the target region.
 
 ### 7.9 Relative (Branches)
 
@@ -602,7 +604,7 @@ LD.B A, Rn      A = Rn (8-bit, A-target)
 LD.W A, #imm    A = imm (16-bit, A-target)
 LD.B Rd, Rs     Rd = Rs (8-bit, Rn-target)
 LD Rd, #imm     Rd = imm (32-bit default)
-LD Rd, $ADDR32  Rd = [abs32] (32-bit absolute)
+LD Rd, $XXXXXXXX  Rd = [abs32] (32-bit absolute)
 ```
 
 **Encoding:** `$02 $80 [mode] [dest_dp?] [src...]`
@@ -811,13 +813,13 @@ Traditional (always 32-bit in 32-bit mode).
 JMP B+$XXXX         PC = B + abs16
 JMP (B+$XXXX)       PC = [B + abs16]
 JMP (B+$XXXX,X)     PC = [B + abs16 + X]
-JMP $XXXXXXXX       PC = abs32 (8 hex digits = ADDR32)
+JML $XXXXXXXX       PC = abs32 (8 hex digits)
 ```
 
 #### JSR - Jump to Subroutine
 ```
 JSR B+$XXXX         Push PC+2; PC = B + abs16
-JSR $XXXXXXXX       Push PC+4; PC = abs32
+JSL $XXXXXXXX       Push PC+4; PC = abs32
 ```
 
 #### RTS - Return from Subroutine
@@ -1520,8 +1522,7 @@ The M65832 supports three operating modes with different assembly conventions:
 
 #### 32-bit Native Mode (M/X = 10)
 
-In 32-bit mode, traditional instructions operate on 32-bit data by default.
-For 8-bit or 16-bit operations, use the Extended ALU instructions (`$02 $80-$97`).
+In 32-bit mode, traditional instructions operate on 32-bit data by default. The legacy M/X width flags are ignored for sizing; use Extended ALU (`$02 $80-$97`) for 8/16-bit operations.
 
 **Traditional instructions:**
 - Data size is always 32-bit
@@ -1532,9 +1533,6 @@ For 8-bit or 16-bit operations, use the Extended ALU instructions (`$02 $80-$97`
 - Full addressing mode flexibility
 - Use `.B`, `.W`, `.L` suffixes in assembly
 
-**Special opcodes:**
-- `$42 $CB` = WAI (Wait for Interrupt)
-- `$42 $DB` = STP (Stop Processor)
 
 ### 15.3 Assembly Syntax by Mode
 
@@ -1547,16 +1545,18 @@ LDA #$12345678          ; $A9 $78 $56 $34 $12 - 32-bit immediate
 ; Address forms
 LDA $12                 ; Direct Page (D + $12)
 LDA B+$1234             ; B + 16-bit offset - MUST be B+$XXXX
-LDA $A0001234           ; 32-bit absolute - MUST be 8 hex digits
+
+; For 32-bit absolute, use Extended ALU:
+LD R0, $A0001234        ; 32-bit absolute (Extended ALU only)
 
 ; For 8-bit/16-bit operations, use Extended ALU:
 LD.B R0, #$12           ; $02 $80 $38 $00 $12 - 8-bit immediate
 LD.W R0, #$1234         ; $02 $80 $78 $00 $34 $12 - 16-bit immediate
 ADC.B A, R0             ; $02 $82 $00 $00 - 8-bit add
 
-; WAI and STP
-WAI                     ; $42 $CB
-STP                     ; $42 $DB
+; WAI and STP (standard 65816)
+WAI                     ; $CB
+STP                     ; $DB
 ```
 
 **Important 32-bit mode rules:**
@@ -1653,8 +1653,8 @@ LDA $XX             ; D + offset (maps to Rn when R=1)
 LDA B+$XXXX         ; 32-bit mode: B + 16-bit offset
 LDA $XXXX           ; 65816 mode: bank:offset
 
-; 32-bit Absolute (32-bit mode only)
-LDA $XXXXXXXX       ; 8-digit hex = 32-bit address
+; 32-bit Absolute (Extended ALU only)
+LD R0, $XXXXXXXX    ; 8-digit hex = 32-bit address (Extended ALU)
 
 ; Indexed
 LDA R0,X            ; Register indexed (32-bit mode)
@@ -1716,7 +1716,7 @@ wait_tx:
     BRA print_loop
 
 done:
-    STP                     ; Stop processor ($42 $DB)
+    STP                     ; Stop processor ($DB)
 
 message:
     .BYTE "Hello, M65832!", 13, 10, 0
@@ -1801,7 +1801,6 @@ In 32-bit mode, traditional instructions operate on 32-bit data. For 8-bit or 16
 ```
 $A9 imm32        LDA #imm32        ; Always 32-bit in 32-bit mode
 $AD abs16        LDA B+$XXXX       ; B-relative addressing
-$AD abs32        LDA $XXXXXXXX     ; 32-bit absolute (8 hex digits)
 ```
 
 **Extended ALU for sized operations:**
@@ -1813,8 +1812,8 @@ $02 $80 $B8 $00 imm32     LD R0, #imm32     ; 32-bit immediate
 
 **WAI/STP (32-bit mode only):**
 ```
-$42 $CB          WAI               ; Wait for Interrupt
-$42 $DB          STP               ; Stop Processor
+$CB              WAI               ; Wait for Interrupt (standard 65816)
+$DB              STP               ; Stop Processor (standard 65816)
 ```
 
 ### A.3 Extended Opcode Page ($02 Prefix)
@@ -1899,8 +1898,8 @@ $02 $9F          STQ abs           ; Store 64-bit ([abs] = T:A)
 
 #### WAI/STP (32-bit Mode)
 ```
-$42 $CB          WAI               ; Wait for interrupt
-$42 $DB          STP               ; Stop processor
+$CB              WAI               ; Wait for interrupt (standard 65816)
+$DB              STP               ; Stop processor (standard 65816)
 ```
 
 #### LEA (Load Effective Address)

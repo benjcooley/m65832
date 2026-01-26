@@ -906,18 +906,19 @@ In 32-bit mode, distinguish between B-relative and absolute addressing:
     ; B + 16-bit offset (default absolute mode)
     LDA B+$1234             ; B register + $1234
 
-    ; 32-bit absolute (requires 8 hex digits)
-    LDA $A0001234           ; Full 32-bit address
+    ; 32-bit absolute - Extended ALU only
+    LD R0, $A0001234        ; Full 32-bit address (Extended ALU)
 
     ; INVALID in 32-bit mode:
     ; LDA $1234             ; Ambiguous - use B+$1234 instead
+    ; LDA $A0001234         ; Uses Extended ALU: LD Rn, $A0001234
 ```
 
 ### WAI and STP
 
 ```asm
-    WAI                     ; $42 $CB - Wait for Interrupt
-    STP                     ; $42 $DB - Stop Processor
+    WAI                     ; $CB - Wait for Interrupt (standard 65816)
+    STP                     ; $DB - Stop Processor (standard 65816)
 ```
 
 ### Assembly Examples
@@ -926,12 +927,15 @@ In 32-bit mode, distinguish between B-relative and absolute addressing:
     ; Traditional instructions - always 32-bit data
     LDA #$12345678          ; $A9 $78 $56 $34 $12
     LDA B+$2000             ; $AD $00 $20
-    JMP $C0001000           ; $4C $00 $10 $00 $C0
+    JMP B+$1000             ; $4C $00 $10 (B-relative)
 
     ; For 8-bit/16-bit operations, use Extended ALU:
     LD.B R0, #$12           ; $02 $80 $38 $00 $12
     LD.W R0, #$1234         ; $02 $80 $78 $00 $34 $12
     ADC.B A, R1             ; $02 $82 $00 $04
+    
+    ; For 32-bit absolute addressing, use Extended ALU:
+    LD R0, $C0001000        ; $02 $80 $B0 $00 $00 $10 $00 $C0
 ```
 
 ## Output Formats

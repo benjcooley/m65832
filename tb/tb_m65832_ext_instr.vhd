@@ -1,8 +1,8 @@
 -- M65832 Extended Instructions Testbench
 -- Tests the new extended instruction formats:
---   $02 $E8 - Register-targeted ALU (LD, ADC, SBC, AND, ORA, EOR, CMP)
---   $02 $E9 - Shifter/Rotate operations
---   $02 $EA - Sign/Zero extend operations
+--   $02 $80-$87 - Extended ALU with mode byte (reg-target via mode bit)
+--   $02 $98 - Shifter/Rotate operations
+--   $02 $99 - Sign/Zero extend operations
 --
 -- Copyright (c) 2026 M65832 Project
 -- SPDX-License-Identifier: GPL-3.0-or-later
@@ -81,9 +81,9 @@ begin
                 
                 -- Test program at $8000:
                 -- Tests for extended instructions:
-                --   $02 $E8 - Register-targeted ALU
-                --   $02 $E9 - Shifter/Rotate
-                --   $02 $EA - Sign/Zero Extend
+                --   $02 $80-$87 - Extended ALU (register-targeted via mode bit)
+                --   $02 $98 - Shifter/Rotate
+                --   $02 $99 - Sign/Zero Extend
                 --
                 pc := 16#8000#;
                 
@@ -107,10 +107,10 @@ begin
                 mem(pc) <= x"34"; pc := pc + 1;
                 mem(pc) <= x"12"; pc := pc + 1;
                 
-                -- $02 $E8 $03 $04: LD $04, A (store A to R1)
+                -- $02 $80 $79 $04: LD R1, A (WORD, target=Rn, src=A)
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"E8"; pc := pc + 1;
-                mem(pc) <= x"03"; pc := pc + 1;  -- op=0 (LD), mode=3 (A)
+                mem(pc) <= x"80"; pc := pc + 1;
+                mem(pc) <= x"79"; pc := pc + 1;  -- size=WORD, target=Rn, addr_mode=A
                 mem(pc) <= x"04"; pc := pc + 1;  -- dest_dp = $04 (R1)
                 
                 -- Store A to $0200 for verification
@@ -129,9 +129,9 @@ begin
                 -- TEST 2: SHL $08, $04, #4 (Shifter - shift left by 4)
                 ---------------------------------------------------------------
                 -- R1 = $1234, shift left by 4 -> R2 = $12340
-                -- $02 $E9 [op=000|cnt=00100] $08 $04
+                -- $02 $98 [op=000|cnt=00100] $08 $04
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"E9"; pc := pc + 1;
+                mem(pc) <= x"98"; pc := pc + 1;
                 mem(pc) <= x"04"; pc := pc + 1;  -- SHL (000), count=4 (00100)
                 mem(pc) <= x"08"; pc := pc + 1;  -- dest = $08 (R2)
                 mem(pc) <= x"04"; pc := pc + 1;  -- src = $04 (R1)
@@ -147,9 +147,9 @@ begin
                 -- TEST 3: SHR $0C, $04, #8 (Shifter - shift right by 8)
                 ---------------------------------------------------------------
                 -- R1 = $1234, shift right by 8 -> R3 = $12
-                -- $02 $E9 [op=001|cnt=01000] $0C $04
+                -- $02 $98 [op=001|cnt=01000] $0C $04
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"E9"; pc := pc + 1;
+                mem(pc) <= x"98"; pc := pc + 1;
                 mem(pc) <= x"28"; pc := pc + 1;  -- SHR (001), count=8 (01000)
                 mem(pc) <= x"0C"; pc := pc + 1;  -- dest = $0C (R3)
                 mem(pc) <= x"04"; pc := pc + 1;  -- src = $04 (R1)
@@ -171,9 +171,9 @@ begin
                 mem(pc) <= x"85"; pc := pc + 1;  -- STA $0C (R3)
                 mem(pc) <= x"0C"; pc := pc + 1;
                 
-                -- SEXT8: $02 $EA $00 $10 $0C
+                -- SEXT8: $02 $99 $00 $10 $0C
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"EA"; pc := pc + 1;
+                mem(pc) <= x"99"; pc := pc + 1;
                 mem(pc) <= x"00"; pc := pc + 1;  -- SEXT8
                 mem(pc) <= x"10"; pc := pc + 1;  -- dest = $10 (R4)
                 mem(pc) <= x"0C"; pc := pc + 1;  -- src = $0C (R3)
@@ -188,9 +188,9 @@ begin
                 ---------------------------------------------------------------
                 -- TEST 5: ZEXT8 $14, $0C (Zero extend 8->16/32)
                 ---------------------------------------------------------------
-                -- ZEXT8: $02 $EA $02 $14 $0C
+                -- ZEXT8: $02 $99 $02 $14 $0C
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"EA"; pc := pc + 1;
+                mem(pc) <= x"99"; pc := pc + 1;
                 mem(pc) <= x"02"; pc := pc + 1;  -- ZEXT8
                 mem(pc) <= x"14"; pc := pc + 1;  -- dest = $14 (R5)
                 mem(pc) <= x"0C"; pc := pc + 1;  -- src = $0C (R3)
@@ -212,9 +212,9 @@ begin
                 mem(pc) <= x"85"; pc := pc + 1;  -- STA $1C (R7)
                 mem(pc) <= x"1C"; pc := pc + 1;
                 
-                -- CLZ: $02 $EA $04 $18 $1C
+                -- CLZ: $02 $99 $04 $18 $1C
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"EA"; pc := pc + 1;
+                mem(pc) <= x"99"; pc := pc + 1;
                 mem(pc) <= x"04"; pc := pc + 1;  -- CLZ
                 mem(pc) <= x"18"; pc := pc + 1;  -- dest = $18 (R6)
                 mem(pc) <= x"1C"; pc := pc + 1;  -- src = $1C (R7)
@@ -236,9 +236,9 @@ begin
                 mem(pc) <= x"85"; pc := pc + 1;  -- STA $24 (R9)
                 mem(pc) <= x"24"; pc := pc + 1;
                 
-                -- CTZ: $02 $EA $05 $20 $24
+                -- CTZ: $02 $99 $05 $20 $24
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"EA"; pc := pc + 1;
+                mem(pc) <= x"99"; pc := pc + 1;
                 mem(pc) <= x"05"; pc := pc + 1;  -- CTZ
                 mem(pc) <= x"20"; pc := pc + 1;  -- dest = $20 (R8)
                 mem(pc) <= x"24"; pc := pc + 1;  -- src = $24 (R9)
@@ -260,9 +260,9 @@ begin
                 mem(pc) <= x"85"; pc := pc + 1;  -- STA $2C (R11)
                 mem(pc) <= x"2C"; pc := pc + 1;
                 
-                -- POPCNT: $02 $EA $06 $28 $2C
+                -- POPCNT: $02 $99 $06 $28 $2C
                 mem(pc) <= x"02"; pc := pc + 1;
-                mem(pc) <= x"EA"; pc := pc + 1;
+                mem(pc) <= x"99"; pc := pc + 1;
                 mem(pc) <= x"06"; pc := pc + 1;  -- POPCNT
                 mem(pc) <= x"28"; pc := pc + 1;  -- dest = $28 (R10)
                 mem(pc) <= x"2C"; pc := pc + 1;  -- src = $2C (R11)

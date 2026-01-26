@@ -10,7 +10,6 @@ The M65832 disassembler (`m65832dis`) is a portable disassembler that can decode
 
 - Full 6502/65816 instruction set support
 - M65832 extended instructions ($02 prefix) with mode byte decoding
-- WAI/STP decoding ($42 $CB, $42 $DB) in 32-bit mode
 - Configurable accumulator and index register widths
 - Hex byte display option
 - File offset and length control
@@ -405,15 +404,6 @@ For Direct Page addresses that are 4-byte aligned (multiples of 4), the disassem
 | R2 | $08 | ... | ... |
 | ... | ... | R63 | $FC |
 
-### WAI/STP Detection (32-bit Mode)
-
-In 32-bit mode, the disassembler recognizes WAI and STP by their unique encodings:
-
-| Encoding | Disassembly |
-|----------|-------------|
-| `$42 $CB` | `WAI` |
-| `$42 $DB` | `STP` |
-
 ### Extended ALU Size Suffixes
 
 Extended ALU instructions ($02 $80-$97) encode size in the mode byte:
@@ -473,7 +463,7 @@ Undefined opcodes are output as `.BYTE $XX` directives:
 | Direct Page | `$xx` or `Rn` | `LDA R0` |
 | Absolute | `B+$xxxx` | `LDA B+$1234` |
 | Absolute X | `B+$xxxx,X` | `LDA B+$1234,X` |
-| 32-bit Absolute | `$xxxxxxxx` | `LDA $A0001234` |
+| 32-bit Absolute | `$xxxxxxxx` | `LD R0,$A0001234` (Extended ALU) |
 
 ### Branch Targets
 
@@ -491,11 +481,11 @@ Instructions with data/address prefixes show the size suffix and full addresses:
 ```
 0000800C  LDA #$12345678       ; 32-bit data (always in 32-bit mode)
 00008011  LDA B+$1234          ; B-relative addressing
-00008014  LDA $C0001000        ; 32-bit absolute (8 hex digits)
-00008019  LD.B R0,#$12         ; Extended ALU 8-bit
+00008014  LD R0,$C0001000      ; Extended ALU 32-bit absolute
+0000801C  LD.B R0,#$12         ; Extended ALU 8-bit
 0000801E  LD.W R0,#$1234       ; Extended ALU 16-bit
-00008024  WAI                  ; $42 $CB
-00008026  STP                  ; $42 $DB
+00008024  WAI                  ; $CB (standard 65816)
+00008025  STP                  ; $DB (standard 65816)
 ```
 
 ## Limitations

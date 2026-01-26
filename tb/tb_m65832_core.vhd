@@ -3087,70 +3087,99 @@ begin
         check_mem(16#0317#, x"BE", "PEI high");
         
         -----------------------------------------------------------------------
-        -- TEST 87: WID immediate and WID absolute
+        -- TEST 87: Extended ALU sized register-target (byte/word)
         -----------------------------------------------------------------------
         report "";
-        report "TEST 87: WID immediate/absolute";
+        report "TEST 87: Extended ALU sized reg-target";
         
-        -- Program: set M=32-bit, WID LDA #imm32, STA $0318
+        -- Program: set M=32-bit, RSET, LDA #$11223344,
+        -- LD.B R1, A, LD.W R2, A, store R1/R2 for verification
         poke(16#8000#, x"C2");  -- REP
         poke(16#8001#, x"40");  -- clear M0
         poke(16#8002#, x"E2");  -- SEP
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
-        poke(16#8004#, x"42");  -- WID prefix
-        poke(16#8005#, x"A9");  -- LDA #
-        poke(16#8006#, x"44");  -- byte 0
-        poke(16#8007#, x"33");  -- byte 1
-        poke(16#8008#, x"22");  -- byte 2
-        poke(16#8009#, x"11");  -- byte 3
-        poke(16#800A#, x"8D");  -- STA abs
-        poke(16#800B#, x"18");  -- $18
-        poke(16#800C#, x"03");  -- $03 -> $0318-$031B
-        poke(16#800D#, x"00");  -- BRK
+        poke(16#8004#, x"02");  -- RSET
+        poke(16#8005#, x"30");
+        poke(16#8006#, x"A9");  -- LDA #$11223344
+        poke(16#8007#, x"44");
+        poke(16#8008#, x"33");
+        poke(16#8009#, x"22");
+        poke(16#800A#, x"11");
+        -- $02 $80 $39 $04: LD.B R1, A (size=BYTE, target=Rn, addr_mode=A)
+        poke(16#800B#, x"02");
+        poke(16#800C#, x"80");
+        poke(16#800D#, x"39");
+        poke(16#800E#, x"04");
+        -- $02 $80 $79 $08: LD.W R2, A (size=WORD, target=Rn, addr_mode=A)
+        poke(16#800F#, x"02");
+        poke(16#8010#, x"80");
+        poke(16#8011#, x"79");
+        poke(16#8012#, x"08");
+        -- Read back R1/R2 via DP and store to $0318/$031C
+        poke(16#8013#, x"A5");  -- LDA $04
+        poke(16#8014#, x"04");
+        poke(16#8015#, x"8D");  -- STA $0318
+        poke(16#8016#, x"18");
+        poke(16#8017#, x"03");
+        poke(16#8018#, x"A5");  -- LDA $08
+        poke(16#8019#, x"08");
+        poke(16#801A#, x"8D");  -- STA $031C
+        poke(16#801B#, x"1C");
+        poke(16#801C#, x"03");
+        poke(16#801D#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(260);
+        wait_cycles(320);
         
-        check_mem(16#0318#, x"44", "WID imm byte 0");
-        check_mem(16#0319#, x"33", "WID imm byte 1");
-        check_mem(16#031A#, x"22", "WID imm byte 2");
-        check_mem(16#031B#, x"11", "WID imm byte 3");
+        check_mem(16#0318#, x"44", "Ext ALU byte write low");
+        check_mem(16#0319#, x"00", "Ext ALU byte write high");
+        check_mem(16#031A#, x"00", "Ext ALU byte write high2");
+        check_mem(16#031B#, x"00", "Ext ALU byte write high3");
+        check_mem(16#031C#, x"44", "Ext ALU word write low");
+        check_mem(16#031D#, x"33", "Ext ALU word write high");
+        check_mem(16#031E#, x"00", "Ext ALU word write high2");
+        check_mem(16#031F#, x"00", "Ext ALU word write high3");
         
         -----------------------------------------------------------------------
-        -- TEST 87B: WID absolute address
+        -- TEST 87B: Extended ALU abs32 load (A-target)
         -----------------------------------------------------------------------
         report "";
-        report "TEST 87B: WID absolute";
+        report "TEST 87B: Extended ALU abs32";
         
-        -- Program: LDA #$5A, WID STA addr32 $00004000, WID LDA addr32, STA $031C
-        poke(16#8000#, x"A9");  -- LDA #
-        poke(16#8001#, x"5A");  -- $5A
-        poke(16#8002#, x"42");  -- WID prefix
-        poke(16#8003#, x"8D");  -- STA abs (32-bit addr)
-        poke(16#8004#, x"00");  -- addr0
-        poke(16#8005#, x"40");  -- addr1
-        poke(16#8006#, x"00");  -- addr2
-        poke(16#8007#, x"00");  -- addr3
-        poke(16#8008#, x"42");  -- WID prefix
-        poke(16#8009#, x"AD");  -- LDA abs (32-bit addr)
-        poke(16#800A#, x"00");  -- addr0
-        poke(16#800B#, x"40");  -- addr1
-        poke(16#800C#, x"00");  -- addr2
-        poke(16#800D#, x"00");  -- addr3
-        poke(16#800E#, x"8D");  -- STA abs
-        poke(16#800F#, x"1C");  -- $1C
-        poke(16#8010#, x"03");  -- $03 -> $031C
-        poke(16#8011#, x"00");  -- BRK
+        -- Preload memory at $00004000
+        poke(16#4000#, x"5A");
+        poke(16#4001#, x"00");
+        poke(16#4002#, x"00");
+        poke(16#4003#, x"00");
+        
+        -- Program: set M=32-bit, LD A abs32 $00004000 (size=LONG), STA $0320
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");
+        poke(16#8005#, x"80");  -- LD
+        poke(16#8006#, x"90");  -- size=LONG, target=A, addr_mode=abs32
+        poke(16#8007#, x"00");  -- addr0
+        poke(16#8008#, x"40");  -- addr1
+        poke(16#8009#, x"00");  -- addr2
+        poke(16#800A#, x"00");  -- addr3
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"20");  -- $20
+        poke(16#800D#, x"03");  -- $03 -> $0320-$0323
+        poke(16#800E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
         wait_cycles(260);
         
-        check_mem(16#4000#, x"5A", "WID abs store");
-        check_mem(16#031C#, x"5A", "WID abs load/store");
+        check_mem(16#0320#, x"5A", "Ext ALU abs32 load byte 0");
+        check_mem(16#0321#, x"00", "Ext ALU abs32 load byte 1");
+        check_mem(16#0322#, x"00", "Ext ALU abs32 load byte 2");
+        check_mem(16#0323#, x"00", "Ext ALU abs32 load byte 3");
         
         -----------------------------------------------------------------------
         -- TEST 88: SD + LEA (32-bit)
@@ -3787,19 +3816,18 @@ begin
         poke(16#800A#, x"8D");  -- STA abs
         poke(16#800B#, x"40");
         poke(16#800C#, x"06");
-        poke(16#800D#, x"42");  -- WID prefix
-        poke(16#800E#, x"A9");  -- LDA #imm32
-        poke(16#800F#, x"07");
+        poke(16#800D#, x"A9");  -- LDA #imm32
+        poke(16#800E#, x"07");
+        poke(16#800F#, x"00");
         poke(16#8010#, x"00");
         poke(16#8011#, x"00");
-        poke(16#8012#, x"00");
-        poke(16#8013#, x"02");  -- EXT prefix
-        poke(16#8014#, x"C8");  -- I2F.S
-        poke(16#8015#, x"02");  -- EXT prefix
-        poke(16#8016#, x"B3");  -- STF F0 abs
-        poke(16#8017#, x"50");
-        poke(16#8018#, x"06");
-        poke(16#8019#, x"00");  -- BRK
+        poke(16#8012#, x"02");  -- EXT prefix
+        poke(16#8013#, x"C8");  -- I2F.S
+        poke(16#8014#, x"02");  -- EXT prefix
+        poke(16#8015#, x"B3");  -- STF F0 abs
+        poke(16#8016#, x"50");
+        poke(16#8017#, x"06");
+        poke(16#8018#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);

@@ -105,12 +105,9 @@ architecture rtl of M65832_Core is
     signal IR           : std_logic_vector(7 downto 0);
     signal IR_EXT       : std_logic_vector(7 downto 0);
     signal is_extended  : std_logic;
-    signal wid_prefix   : std_logic;
-    signal wid_active   : std_logic;
-    signal data_prefix_valid   : std_logic;
-    signal data_prefix_pending : std_logic;
-    signal data_prefix_value   : std_logic_vector(1 downto 0);
-    signal data_prefix_value_pending : std_logic_vector(1 downto 0);
+    signal ext_addr32   : std_logic;
+    signal ext_alu      : std_logic;
+    signal ext_alu_size : std_logic_vector(1 downto 0);
     signal M_width_eff, X_width_eff  : std_logic_vector(1 downto 0);
     
     ---------------------------------------------------------------------------
@@ -190,7 +187,7 @@ architecture rtl of M65832_Core is
     signal IS_JSR, IS_JSL, IS_JMP_d, IS_JML       : std_logic;
     signal IS_PER, IS_WAI, IS_STP, IS_XCE         : std_logic;
     signal IS_REP, IS_SEP, IS_WDM                 : std_logic;
-    signal IS_EXT_OP, IS_WID                      : std_logic;
+    signal IS_EXT_OP                              : std_logic;
     signal IS_RSET, IS_RCLR, IS_SB, IS_SVBR       : std_logic;
     signal IS_CAS, IS_LLI, IS_SCI                 : std_logic;
     signal ILLEGAL_OP                              : std_logic;
@@ -238,8 +235,8 @@ architecture rtl of M65832_Core is
     signal f_reg_sel                           : std_logic_vector(1 downto 0);
     signal ext_fpu_trap                        : std_logic;
     
-    -- Register-targeted ALU ($02 $E8)
-    signal IR_EXT2          : std_logic_vector(7 downto 0);   -- op|mode byte for reg-ALU
+    -- Extended ALU/Shifter/Extend mode/op byte
+    signal IR_EXT2          : std_logic_vector(7 downto 0);   -- mode/op byte after ext opcode
     signal is_regalu_ext    : std_logic;                       -- Fetching reg-ALU op|mode
     signal IS_REGALU        : std_logic;                       -- Register-targeted ALU op
     signal REGALU_OP        : std_logic_vector(3 downto 0);   -- Operation code
@@ -639,7 +636,9 @@ begin
         IS_WDM          => IS_WDM,
         
         IS_EXT_OP       => IS_EXT_OP,
-        IS_WID          => IS_WID,
+        EXT_ALU         => ext_alu,
+        EXT_ALU_SIZE    => ext_alu_size,
+        EXT_ADDR32      => ext_addr32,
         IS_RSET         => IS_RSET,
         IS_RCLR         => IS_RCLR,
         IS_SB           => IS_SB,
@@ -669,9 +668,9 @@ begin
     W_mode <= '1' when M_width = WIDTH_32 else '0';
     compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
     M_width_eff <= WIDTH_32 when ext_ldq = '1' else
-                   data_prefix_value when data_prefix_valid = '1' else
+                   ext_alu_size when ext_alu = '1' else
                    M_width;
-    X_width_eff <= data_prefix_value when data_prefix_valid = '1' else X_width;
+    X_width_eff <= X_width;
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
     -- DP alignment check for R_mode: DP address must be multiple of 4
@@ -914,12 +913,6 @@ begin
             regalu_dest_addr <= (others => '0');
             regalu_dest_data <= (others => '0');
             regalu_src_data <= (others => '0');
-            wid_prefix <= '0';
-            wid_active <= '0';
-            data_prefix_valid <= '0';
-            data_prefix_pending <= '0';
-            data_prefix_value <= (others => '0');
-            data_prefix_value_pending <= (others => '0');
             data_buffer <= (others => '0');
             data_byte_count <= (others => '0');
             DR <= (others => '0');
@@ -1028,47 +1021,14 @@ begin
                             IR_EXT <= DATA_IN;
                             state <= ST_DECODE;
                             data_byte_count <= (others => '0');
-                        elsif is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0' then
-                            -- Register-targeted ALU/Shifter/Extend needs op|mode byte
+                        elsif is_extended = '1' and
+                              ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
+                              is_regalu_ext = '0' then
+                            -- Extended ALU/Shifter/Extend needs mode/op byte
                             is_regalu_ext <= '1';
                             IR_EXT2 <= DATA_IN;
                             state <= ST_DECODE;
-                        end if;
-                        
-                        -- Prefix handling (32-bit mode only):
-                        -- $CB = BYTE data prefix, $DB = WORD data prefix, $42 = ADDR32 prefix
-                        if (M_width = WIDTH_32 and wid_prefix = '1' and (IR = x"CB" or IR = x"DB")) then
-                            -- $42 $CB/$DB escape to WAI/STP
-                            wid_prefix <= '0';
-                            wid_active <= '0';
-                            data_prefix_pending <= '0';
-                            data_prefix_valid <= '0';
-                        end if;
-
-                        if IR = x"02" and is_extended = '0' then
-                            null;
-                        elsif is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0' then
-                            null;  -- Still fetching extended instruction bytes
-                        elsif (M_width = WIDTH_32 and wid_prefix = '0' and (IR = x"CB" or IR = x"DB")) then
-                            data_prefix_pending <= '1';
-                            if IR = x"CB" then
-                                data_prefix_value_pending <= WIDTH_8;
-                            else
-                                data_prefix_value_pending <= WIDTH_16;
-                            end if;
-                            data_prefix_valid <= '0';
-                            state <= ST_FETCH;
-                        elsif IS_WID = '1' then
-                            wid_prefix <= '1';
-                            wid_active <= '0';
-                            data_prefix_valid <= '0';
-                            state <= ST_FETCH;
                         else
-                            data_prefix_valid <= data_prefix_pending;
-                            data_prefix_value <= data_prefix_value_pending;
-                            data_prefix_pending <= '0';
-                            wid_active <= wid_prefix;
-                            wid_prefix <= '0';
                             data_byte_count <= (others => '0');
                             
                             -- Determine next state based on instruction
@@ -1144,13 +1104,19 @@ begin
                                 -- Phase 0: This byte is dest_dp
                                 regalu_dest_addr <= D_reg(31 downto 8) & DATA_IN;
                                 
-                                -- For source = A, we can go directly to read dest + execute
-                                if REGALU_SRC_MODE = "0011" then
-                                    -- Source is A - read dest value, then execute
+                                -- For source = A/X/Y, we can go directly to read dest + execute
+                                if REGALU_SRC_MODE = REGALU_SRC_A or REGALU_SRC_MODE = REGALU_SRC_X or REGALU_SRC_MODE = REGALU_SRC_Y then
+                                    -- Source is A/X/Y - read dest value, then execute
                                     if R_mode = '1' then
                                         -- Register window: read dest directly
                                         regalu_dest_data <= rw_data1;
-                                        regalu_src_data <= A_reg;
+                                        if REGALU_SRC_MODE = REGALU_SRC_X then
+                                            regalu_src_data <= X_reg;
+                                        elsif REGALU_SRC_MODE = REGALU_SRC_Y then
+                                            regalu_src_data <= Y_reg;
+                                        else
+                                            regalu_src_data <= A_reg;
+                                        end if;
                                         state <= ST_EXECUTE;
                                     else
                                         -- Memory: need to read dest
@@ -1344,8 +1310,8 @@ begin
                         else
                         -- Second address byte
                         data_buffer(15 downto 8) <= DATA_IN;
-                        -- WID absolute addressing uses 32-bit operand
-                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                        -- Extended ALU 32-bit absolute addressing
+                        if ext_addr32 = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
                             state <= ST_ADDR3;
                         -- Compute absolute address: high byte : low byte (with index if needed)
                         elsif ADDR_MODE = "0110" then
@@ -1406,7 +1372,7 @@ begin
                                 unsigned(B_reg));
                         end if;
                         
-                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                        if ext_addr32 = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
                             null;
                         elsif ADDR_MODE = "1000" and IS_JMP_d = '1' then
                             -- JMP (abs): pointer read follows
@@ -1449,7 +1415,7 @@ begin
                             -- JMP (abs,X): pointer low byte
                             DR <= DATA_IN;
                             state <= ST_ADDR4;
-                        elsif wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                        elsif ext_addr32 = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
                             data_buffer(23 downto 16) <= DATA_IN;
                             state <= ST_ADDR4;
                         elsif ADDR_MODE = "1000" then
@@ -1517,7 +1483,7 @@ begin
                                     resize(unsigned(data_buffer(15 downto 0)), 24),
                                     32));
                         end if;
-                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                        if ext_addr32 = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
                             null;
                         elsif IS_JMP_d = '1' and ADDR_MODE = "1001" then
                             null;
@@ -1536,7 +1502,7 @@ begin
                         end if;
                         
                     when ST_ADDR4 =>
-                        if wid_active = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
+                        if ext_addr32 = '1' and (ADDR_MODE = "0101" or ADDR_MODE = "0110" or ADDR_MODE = "0111") then
                             if ADDR_MODE = "0110" then
                                 eff_addr <= std_logic_vector(
                                     resize(
@@ -3789,8 +3755,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     ext_lea <= '1' when (is_extended = '1' and (IR_EXT = x"A0" or IR_EXT = x"A1" or
                                                 IR_EXT = x"A2" or IR_EXT = x"A3")) else '0';
-    ext_tta <= '1' when (is_extended = '1' and IR_EXT = x"86") else '0';
-    ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"87") else '0';
+    ext_tta <= '1' when (is_extended = '1' and IR_EXT = x"9A") else '0';
+    ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"88" or IR_EXT = x"89")) else '0';
     ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"8A" or IR_EXT = x"8B")) else '0';
     ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or
@@ -3843,7 +3809,9 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                            (state = ST_ADDR4 and is_indirect_addr = '0') or
                            state = ST_BRANCH or  -- Fetch branch offset
                            ((state = ST_DECODE) and IR = x"02" and is_extended = '0') or
-                           ((state = ST_DECODE) and is_extended = '1' and (IR_EXT = x"E8" or IR_EXT = x"E9" or IR_EXT = x"EA") and is_regalu_ext = '0') or
+                           ((state = ST_DECODE) and is_extended = '1' and
+                            ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
+                            is_regalu_ext = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
                else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSL = '1'))

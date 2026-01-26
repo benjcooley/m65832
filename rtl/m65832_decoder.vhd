@@ -18,9 +18,9 @@ entity M65832_Decoder is
         -- Instruction input
         IR              : in  std_logic_vector(7 downto 0);   -- Instruction register
         IR_EXT          : in  std_logic_vector(7 downto 0);   -- Extended opcode (after $02)
-        IR_EXT2         : in  std_logic_vector(7 downto 0);   -- Second extended byte (for $E8 reg-ALU)
+        IR_EXT2         : in  std_logic_vector(7 downto 0);   -- Second extended byte (mode/op byte)
         IS_EXTENDED     : in  std_logic;                       -- Using extended opcode page
-        IS_REGALU_EXT   : in  std_logic;                       -- Reading register-ALU op|mode byte
+        IS_REGALU_EXT   : in  std_logic;                       -- Reading extended mode/op byte
         
         -- Mode flags
         E_MODE          : in  std_logic;  -- Emulation mode
@@ -127,7 +127,9 @@ entity M65832_Decoder is
         
         -- M65832 Extensions
         IS_EXT_OP       : out std_logic;  -- Extended opcode ($02 prefix)
-        IS_WID          : out std_logic;  -- Wide immediate prefix
+        EXT_ALU         : out std_logic;  -- Extended ALU operation ($02 $80-$97)
+        EXT_ALU_SIZE    : out std_logic_vector(1 downto 0);  -- Extended ALU data size (from mode)
+        EXT_ADDR32      : out std_logic;  -- Extended ALU uses 32-bit absolute operand
         IS_RSET         : out std_logic;  -- Enable register window
         IS_RCLR         : out std_logic;  -- Disable register window
         IS_SB           : out std_logic;  -- Set B register
@@ -137,7 +139,7 @@ entity M65832_Decoder is
         IS_SCI          : out std_logic;  -- Store conditional
         ILLEGAL_OP      : out std_logic;
         
-        -- Register-Targeted ALU ($02 $E8)
+        -- Register-Targeted ALU (Extended ALU target=1)
         IS_REGALU       : out std_logic;  -- Register-targeted ALU operation
         REGALU_OP       : out std_logic_vector(3 downto 0);  -- Operation (LD/ADC/SBC/AND/ORA/EOR/CMP)
         REGALU_SRC_MODE : out std_logic_vector(3 downto 0);  -- Source addressing mode
@@ -177,6 +179,11 @@ begin
     
     process(IR, IR_EXT, IR_EXT2, IS_EXTENDED, IS_REGALU_EXT, E_MODE, M_WIDTH, X_WIDTH, COMPAT_MODE, cc, bbb, aaa)
         variable regalu_src : std_logic_vector(3 downto 0);
+        variable ext_mode   : std_logic_vector(7 downto 0);
+        variable ext_size   : std_logic_vector(1 downto 0);
+        variable ext_target : std_logic;
+        variable ext_addr   : std_logic_vector(4 downto 0);
+        variable ext_len    : integer range 1 to 8;
     begin
         -- Default outputs
         IS_ALU_OP     <= '0';
@@ -215,7 +222,9 @@ begin
         IS_WDM  <= '0';
         
         IS_EXT_OP <= '0';
-        IS_WID    <= '0';
+        EXT_ALU   <= '0';
+        EXT_ALU_SIZE <= WIDTH_32;
+        EXT_ADDR32 <= '0';
         IS_RSET   <= '0';
         IS_RCLR   <= '0';
         IS_SB     <= '0';
@@ -285,8 +294,8 @@ begin
                 when x"75" => IS_STACK <= '1'; REG_DST <= "111"; INSTR_LEN <= "010";  -- PLVBR (32)
                 
                 -- Transfer T (remainder/temp)
-                when x"86" => INSTR_LEN <= "010";  -- TTA (A = T)
-                when x"87" => INSTR_LEN <= "010";  -- TAT (T = A)
+                when x"9A" => INSTR_LEN <= "010";  -- TTA (A = T)
+                when x"9B" => INSTR_LEN <= "010";  -- TAT (T = A)
                 
                 -- 64-bit load/store (A=low, T=high)
                 when x"88" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDQ dp
@@ -319,99 +328,105 @@ begin
                      x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
                     INSTR_LEN <= "010";
                 
-                -- Register-Targeted ALU ($02 $E8)
-                when x"E8" =>
+                -- Extended ALU ($02 $80-$87) with mode byte
+                when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | x"86" | x"87" =>
                     IS_EXT_OP <= '1';
-                    IS_REGALU <= '1';
-                    -- op|mode byte is in IR_EXT2 when IS_REGALU_EXT='1'
+                    EXT_ALU <= '1';
                     if IS_REGALU_EXT = '1' then
-                        REGALU_OP <= IR_EXT2(7 downto 4);
-                        REGALU_SRC_MODE <= IR_EXT2(3 downto 0);
-                        regalu_src := IR_EXT2(3 downto 0);
+                        ext_mode := IR_EXT2;
+                        ext_size := ext_mode(7 downto 6);
+                        ext_target := ext_mode(5);
+                        ext_addr := ext_mode(4 downto 0);
+                        EXT_ALU_SIZE <= ext_size;
                         
-                        -- Determine instruction length based on source mode
-                        -- Base: $02 $E8 op|mode dest_dp = 4 bytes minimum
-                        case regalu_src is
-                            when "0011" =>  -- Source = A (no additional operand)
-                                INSTR_LEN <= "100";  -- 4 bytes
-                                ADDR_MODE <= "0000"; -- Implied/A
-                            when "0001" | "0101" | "1001" | "1010" | "1011" | "1100" | "1101" =>
-                                -- dp, dp,X, (dp), [dp], [dp],Y, sr,S, (sr,S),Y
-                                INSTR_LEN <= "101";  -- 5 bytes
-                                if regalu_src = "0001" then
-                                    ADDR_MODE <= "0010";  -- dp
-                                elsif regalu_src = "0101" then
-                                    ADDR_MODE <= "0011";  -- dp,X
-                                elsif regalu_src = "1001" then
-                                    ADDR_MODE <= "1000";  -- (dp)
-                                elsif regalu_src = "1010" then
-                                    ADDR_MODE <= "1011";  -- [dp]
-                                elsif regalu_src = "1011" then
-                                    ADDR_MODE <= "1100";  -- [dp],Y
-                                elsif regalu_src = "1100" then
-                                    ADDR_MODE <= "1101";  -- sr,S
-                                elsif regalu_src = "1101" then
-                                    ADDR_MODE <= "1110";  -- (sr,S),Y
-                                end if;
-                            when "0000" | "0100" =>
-                                -- (dp,X), (dp),Y
-                                INSTR_LEN <= "101";  -- 5 bytes
-                                if regalu_src = "0000" then
-                                    ADDR_MODE <= "1001";  -- (dp,X)
+                        -- Map opcode to ALU/reg-ALU operation
+                        case IR_EXT is
+                            when x"80" => REGALU_OP <= REGALU_LD;  ALU_OP <= "101"; -- LD -> LDA
+                            when x"82" => REGALU_OP <= REGALU_ADC; ALU_OP <= "011";
+                            when x"83" => REGALU_OP <= REGALU_SBC; ALU_OP <= "111";
+                            when x"84" => REGALU_OP <= REGALU_AND; ALU_OP <= "001";
+                            when x"85" => REGALU_OP <= REGALU_ORA; ALU_OP <= "000";
+                            when x"86" => REGALU_OP <= REGALU_EOR; ALU_OP <= "010";
+                            when x"87" => REGALU_OP <= REGALU_CMP; ALU_OP <= "110";
+                            when others => null;
+                        end case;
+                        
+                        -- Addressing mode mapping
+                        ext_len := 3;  -- $02, op, mode
+                        regalu_src := REGALU_SRC_DP;
+                        if ext_target = '1' then
+                            IS_REGALU <= '1';
+                            ext_len := 4;  -- + dest_dp
+                        else
+                            IS_ALU_OP <= '1';
+                        end if;
+                        
+                        case ext_addr is
+                            when "00000" => regalu_src := REGALU_SRC_DP;      ADDR_MODE <= "0010"; ext_len := ext_len + 1;
+                            when "00001" => regalu_src := REGALU_SRC_DPX;     ADDR_MODE <= "0011"; ext_len := ext_len + 1;
+                            when "00010" => regalu_src := REGALU_SRC_DP_Y;    ADDR_MODE <= "0100"; ext_len := ext_len + 1;
+                            when "00011" => regalu_src := REGALU_SRC_DPX_IND; ADDR_MODE <= "1001"; ext_len := ext_len + 1;
+                            when "00100" => regalu_src := REGALU_SRC_DP_Y;    ADDR_MODE <= "1010"; ext_len := ext_len + 1;
+                            when "00101" => regalu_src := REGALU_SRC_DP_IND;  ADDR_MODE <= "1000"; ext_len := ext_len + 1;
+                            when "00110" => regalu_src := REGALU_SRC_DP_LONG; ADDR_MODE <= "1011"; ext_len := ext_len + 1;
+                            when "00111" => regalu_src := REGALU_SRC_DPL_Y;   ADDR_MODE <= "1100"; ext_len := ext_len + 1;
+                            when "01000" => regalu_src := REGALU_SRC_ABS;     ADDR_MODE <= "0101"; ext_len := ext_len + 2;
+                            when "01001" => regalu_src := REGALU_SRC_ABSX;    ADDR_MODE <= "0110"; ext_len := ext_len + 2;
+                            when "01010" => regalu_src := REGALU_SRC_ABSY;    ADDR_MODE <= "0111"; ext_len := ext_len + 2;
+                            when "10000" => regalu_src := REGALU_SRC_ABS;     ADDR_MODE <= "0101"; EXT_ADDR32 <= '1'; ext_len := ext_len + 4;
+                            when "10001" => regalu_src := REGALU_SRC_ABSX;    ADDR_MODE <= "0110"; EXT_ADDR32 <= '1'; ext_len := ext_len + 4;
+                            when "10010" => regalu_src := REGALU_SRC_ABSY;    ADDR_MODE <= "0111"; EXT_ADDR32 <= '1'; ext_len := ext_len + 4;
+                            when "11000" => regalu_src := REGALU_SRC_IMM;     ADDR_MODE <= "0001";
+                                if ext_size = WIDTH_8 then
+                                    ext_len := ext_len + 1;
+                                elsif ext_size = WIDTH_16 then
+                                    ext_len := ext_len + 2;
                                 else
-                                    ADDR_MODE <= "1010";  -- (dp),Y
+                                    ext_len := ext_len + 4;
                                 end if;
-                            when "0010" =>  -- #imm (width dependent)
-                                ADDR_MODE <= "0001";  -- Immediate
-                                if M_WIDTH = WIDTH_32 then
-                                    INSTR_LEN <= "000";  -- 8 bytes (need to represent >7)
-                                elsif M_WIDTH = WIDTH_16 then
-                                    INSTR_LEN <= "110";  -- 6 bytes
-                                else
-                                    INSTR_LEN <= "101";  -- 5 bytes
-                                end if;
-                            when "0110" | "0111" | "1000" =>
-                                -- abs, abs,X, abs,Y
-                                INSTR_LEN <= "110";  -- 6 bytes
-                                if regalu_src = "0110" then
-                                    ADDR_MODE <= "0101";  -- abs
-                                elsif regalu_src = "0111" then
-                                    ADDR_MODE <= "0110";  -- abs,X
-                                else
-                                    ADDR_MODE <= "0111";  -- abs,Y
-                                end if;
+                            when "11001" => regalu_src := REGALU_SRC_A;       ADDR_MODE <= "0000";
+                            when "11010" => regalu_src := REGALU_SRC_X;       ADDR_MODE <= "0000";
+                            when "11011" => regalu_src := REGALU_SRC_Y;       ADDR_MODE <= "0000";
+                            when "11100" => regalu_src := REGALU_SRC_SR;      ADDR_MODE <= "1101"; ext_len := ext_len + 1;
+                            when "11101" => regalu_src := REGALU_SRC_SR_Y;    ADDR_MODE <= "1110"; ext_len := ext_len + 1;
                             when others =>
-                                INSTR_LEN <= "100";  -- 4 bytes default
                                 ILLEGAL_OP <= '1';
                         end case;
+                        
+                        REGALU_SRC_MODE <= regalu_src;
+                        if ext_len = 8 then
+                            INSTR_LEN <= "000";
+                        else
+                            INSTR_LEN <= std_logic_vector(to_unsigned(ext_len, 3));
+                        end if;
                     else
-                        -- Not yet fetched op|mode byte
+                        -- Not yet fetched mode byte
                         INSTR_LEN <= "011";  -- At least 3 bytes so far
                     end if;
                 
-                -- Shifter/Rotate ($02 $E9)
-                -- Format: $02 $E9 [op|cnt] [dest_dp] [src_dp]
-                when x"E9" =>
+                -- Shifter/Rotate ($02 $98)
+                -- Format: $02 $98 [op|cnt] [dest_dp] [src_dp]
+                when x"98" =>
                     IS_EXT_OP <= '1';
                     IS_SHIFTER <= '1';
                     if IS_REGALU_EXT = '1' then
                         -- op|cnt byte is in IR_EXT2
                         SHIFT_OP <= IR_EXT2(7 downto 5);
                         SHIFT_COUNT <= IR_EXT2(4 downto 0);
-                        INSTR_LEN <= "101";  -- 5 bytes: $02 $E9 op|cnt dest_dp src_dp
+                        INSTR_LEN <= "101";  -- 5 bytes: $02 $98 op|cnt dest_dp src_dp
                         ADDR_MODE <= "0010"; -- dp-like (two DP operands)
                     else
                         INSTR_LEN <= "011";  -- At least 3 bytes so far
                     end if;
                 
-                -- Sign/Zero Extend ($02 $EA)
-                -- Format: $02 $EA [subop] [dest_dp] [src_dp]
-                when x"EA" =>
+                -- Sign/Zero Extend ($02 $99)
+                -- Format: $02 $99 [subop] [dest_dp] [src_dp]
+                when x"99" =>
                     IS_EXT_OP <= '1';
                     IS_EXTEND <= '1';
                     if IS_REGALU_EXT = '1' then
                         EXTEND_OP <= IR_EXT2(3 downto 0);
-                        INSTR_LEN <= "101";  -- 5 bytes: $02 $EA subop dest_dp src_dp
+                        INSTR_LEN <= "101";  -- 5 bytes: $02 $99 subop dest_dp src_dp
                         ADDR_MODE <= "0010"; -- dp-like (two DP operands)
                     else
                         INSTR_LEN <= "011";  -- At least 3 bytes so far
@@ -474,7 +489,7 @@ begin
                     elsif IR = x"92" then
                         IS_ALU_OP <= '1'; ALU_OP <= "100"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- STA (dp)
                     elsif IR = x"42" then
-                        IS_WID <= '1'; INSTR_LEN <= "010";  -- WID prefix
+                        IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- Reserved (WDM)
                     elsif IR = x"C2" then
                         IS_REP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- REP #imm
                     elsif IR = x"E2" then
@@ -626,7 +641,7 @@ begin
                         
                         -- Control
                         when x"EA" => IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- NOP
-                        when x"42" => IS_WID <= '1'; INSTR_LEN <= "010";  -- WID prefix
+                        when x"42" => IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- Reserved (WDM)
                         when x"CB" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- WAI
                         when x"DB" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
                         

@@ -102,14 +102,13 @@ Width encoding: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved
 | Abs Indexed Y | `B+$XXXX,Y` | B + XXXX + Y | 3 |
 | Abs Indirect | `($XXXX)` | [B + XXXX] | 3 |
 | Abs Indexed Indirect | `($XXXX,X)` | [B + XXXX + X] | 3 |
-| Absolute Long | `$XXXXXX` | addr24 | 4 |
-| 32-bit Absolute | `$XXXXXXXX` | addr32 | 5-6 |
+| 32-bit Absolute | `LD Rn, $XXXXXXXX` | Extended ALU only |
 | Stack Relative | `$XX,S` | S + XX | 2 |
 | SR Indirect Indexed | `($XX,S),Y` | [S + XX] + Y | 2 |
 | Relative | `label` | PC + 2 + offset8 | 2 |
 | Relative Long | `label` | PC + 3 + offset16 | 3 |
 
-**32-bit mode:** Use `Rn` for registers, `B+$XXXX` for B-relative, `$XXXXXXXX` (8 digits) for 32-bit absolute.
+**32-bit mode:** Use `Rn` for registers, `B+$XXXX` for B-relative; 32-bit absolute (`$XXXXXXXX`) is Extended ALU only.
 
 ---
 
@@ -237,8 +236,8 @@ Setup: X=src, Y=dst, A=count-1
 | NOP | No operation | $EA |
 | BRK | Software break | $00 |
 | COP #sig | Coprocessor | $02 (6502/65816) |
-| WAI | Wait for IRQ | $42 $CB (32-bit mode) |
-| STP | Stop until reset | $42 $DB (32-bit mode) |
+| WAI | Wait for IRQ | $CB |
+| STP | Stop until reset | $DB |
 
 ---
 
@@ -295,8 +294,8 @@ All extended instructions use the `$02` prefix.
 | TRAP #n | $02 $40 | System call #n |
 | REPE #imm | $02 $60 | ExtP &= ~imm |
 | SEPE #imm | $02 $61 | ExtP \|= imm |
-| WAI | $42 $CB | Wait for interrupt |
-| STP | $42 $DB | Stop processor |
+| WAI | $CB | Wait for interrupt |
+| STP | $DB | Stop processor |
 
 ### Temp Register
 | Instruction | Encoding | Operation |
@@ -353,8 +352,8 @@ $08 abs         $18 #imm
 $09 abs,X       $19 A
 $0A abs,Y       $1A X
                 $1B Y
-$0E long24      $1C sr,S
-$0F long24,X    $1D (sr,S),Y
+                $1C sr,S
+                $1D (sr,S),Y
 ```
 
 **Examples:**
@@ -448,16 +447,18 @@ In 32-bit mode:
 ; Traditional instructions - always 32-bit data
 LDA #$12345678          ; 32-bit immediate
 LDA B+$1234             ; B-relative addressing
-LDA $A0001234           ; 32-bit absolute (8 hex digits)
+
+; 32-bit absolute - Extended ALU only:
+LD R0, $A0001234        ; Extended ALU with 32-bit address
 
 ; For 8-bit/16-bit ops, use Extended ALU:
 LD.B R0, #$12           ; 8-bit immediate to R0
 LD.W R0, #$1234         ; 16-bit immediate to R0
 ADC.B A, R1             ; 8-bit add
 
-; WAI/STP
-WAI                     ; $42 $CB
-STP                     ; $42 $DB
+; WAI/STP (standard 65816)
+WAI                     ; $CB
+STP                     ; $DB
 ```
 
 ---
@@ -638,8 +639,8 @@ atomic_inc:
 | Byte(s) | Meaning | Notes |
 |---------|---------|-------|
 | $02 | Extended opcode follows | M65832 new instructions |
-| $42 $CB | WAI | Wait for Interrupt |
-| $42 $DB | STP | Stop Processor |
+| $CB | WAI | Wait for Interrupt (65816) |
+| $DB | STP | Stop Processor (65816) |
 
 ### Common Opcodes
 | Op | Instruction | Op | Instruction |

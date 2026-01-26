@@ -150,11 +150,6 @@ Fx   SED      SBC      PLX      XCE      ---      SBC      INC      SBC
      impl     abs,Y    impl     impl     ---      abs,X    abs,X    long,X
 ```
 
-**Notes on repurposed opcodes (32-bit mode):**
-- (1) `$CB`: In 65816 mode = WAI. In 32-bit mode, standalone `$CB` is undefined.
-- (2) `$DB`: In 65816 mode = STP. In 32-bit mode, standalone `$DB` is undefined.
-- (3) `$42`: In 65816 mode = WDC reserved. In 32-bit mode, `$42` followed by `$CB` or `$DB` encodes WAI/STP.
-- **WAI** = `$42 $CB`, **STP** = `$42 $DB` (32-bit mode only).
 
 ### Extended Opcodes ($02 Prefix)
 
@@ -203,19 +198,38 @@ After the `$02` prefix byte:
 | $73 | PLB | Pull B (32-bit) |
 | $74 | PHVBR | Push VBR (32-bit) |
 | $75 | PLVBR | Pull VBR (32-bit) |
-| **Barrel Shifter** | | |
+| **Extended ALU ($80-$97)** | | |
+| $80 [mode] [dest?] [src...] | LD | Load with size/target/mode (see below) |
+| $81 [mode] [dest?] [src...] | ST | Store with size/target/mode |
+| $82 [mode] [dest?] [src...] | ADC | Add with carry |
+| $83 [mode] [dest?] [src...] | SBC | Subtract with borrow |
+| $84 [mode] [dest?] [src...] | AND | Logical AND |
+| $85 [mode] [dest?] [src...] | ORA | Logical OR |
+| $86 [mode] [dest?] [src...] | EOR | Exclusive OR |
+| $87 [mode] [dest?] [src...] | CMP | Compare |
+| $88 [mode] [dest?] [src...] | BIT | Bit test |
+| $89 [mode] [dest?] [src...] | TSB | Test and set bits |
+| $8A [mode] [dest?] [src...] | TRB | Test and reset bits |
+| $8B [mode] [dest?] [src...] | INC | Increment |
+| $8C [mode] [dest?] [src...] | DEC | Decrement |
+| $8D [mode] [dest?] [src...] | ASL | Arithmetic shift left |
+| $8E [mode] [dest?] [src...] | LSR | Logical shift right |
+| $8F [mode] [dest?] [src...] | ROL | Rotate left |
+| $90 [mode] [dest?] [src...] | ROR | Rotate right |
+| $97 [mode] [dest?] [src...] | STZ | Store zero |
+| **Barrel Shifter ($98)** | | |
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
-| **Extend Operations** | | |
+| **Extend Operations ($99)** | | |
 | $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
-| **Temp Register** | | |
+| **Temp Register ($9A-$9B)** | | |
 | $9A | TTA | Transfer T to A |
 | $9B | TAT | Transfer A to T |
-| **64-bit Load/Store** | | |
+| **64-bit Load/Store ($9C-$9F)** | | |
 | $9C [dp] | LDQ dp | Load quad (A:T = [dp]) |
 | $9D [abs16] | LDQ abs | Load quad |
 | $9E [dp] | STQ dp | Store quad ([dp] = A:T) |
 | $9F [abs16] | STQ abs | Store quad |
-| **Load Effective Address** | | |
+| **Load Effective Address ($A0-$A3)** | | |
 | $A0 [dp] | LEA dp | A = D + dp |
 | $A1 [dp] | LEA dp,X | A = D + dp + X |
 | $A2 [abs16] | LEA abs | A = B + abs |
@@ -241,30 +255,7 @@ After the `$02` prefix byte:
 | $D0-$D8 | (same as above with .D suffix) | Double-precision operations |
 | **Reserved FPU** | | |
 | $D9-$DF | (reserved) | Trap to software emulation |
-| $E0-$E6 | (reserved) | Trap to software emulation |
-| **Extended ALU ($80-$9F)** | | |
-| $80 [mode] [dest?] [src...] | LD | Load with size/target/mode (see below) |
-| $81 [mode] [dest?] [src...] | ST | Store with size/target/mode |
-| $82 [mode] [dest?] [src...] | ADC | Add with carry |
-| $83 [mode] [dest?] [src...] | SBC | Subtract with borrow |
-| $84 [mode] [dest?] [src...] | AND | Logical AND |
-| $85 [mode] [dest?] [src...] | ORA | Logical OR |
-| $86 [mode] [dest?] [src...] | EOR | Exclusive OR |
-| $87 [mode] [dest?] [src...] | CMP | Compare |
-| $88 [mode] [dest?] [src...] | BIT | Bit test |
-| $89 [mode] [dest?] [src...] | TSB | Test and set bits |
-| $8A [mode] [dest?] [src...] | TRB | Test and reset bits |
-| $8B [mode] [dest?] [src...] | INC | Increment |
-| $8C [mode] [dest?] [src...] | DEC | Decrement |
-| $8D [mode] [dest?] [src...] | ASL | Arithmetic shift left |
-| $8E [mode] [dest?] [src...] | LSR | Logical shift right |
-| $8F [mode] [dest?] [src...] | ROL | Rotate left |
-| $90 [mode] [dest?] [src...] | ROR | Rotate right |
-| $97 [mode] [dest?] [src...] | STZ | Store zero |
-| **Barrel Shifter ($98)** | | |
-| $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
-| **Extend Operations ($99)** | | |
-| $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
+| $E0-$FF | (reserved) | Future expansion |
 
 ### Extended ALU Instructions ($02 $80-$97)
 
@@ -314,8 +305,7 @@ Bit:   7   6   5   4   3   2   1   0
 | $0B | (abs) | Absolute Indirect | 2 |
 | $0C | (abs,X) | Absolute Indexed Indirect | 2 |
 | $0D | [abs] | Absolute Indirect Long | 2 |
-| $0E | long24 | 24-bit Long (65816) | 3 |
-| $0F | long24,X | 24-bit Long Indexed | 3 |
+| $0E-$0F | (reserved) | | |
 | $10 | abs32 | 32-bit Absolute | 4 |
 | $11 | abs32,X | 32-bit Absolute Indexed X | 4 |
 | $12 | abs32,Y | 32-bit Absolute Indexed Y | 4 |
@@ -1087,9 +1077,7 @@ Halts processor until interrupt received.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Implied | WAI | $42 $CB | 2 | 3+ |
-
-Note: 32-bit mode encoding. In 65816 mode, WAI is `$CB`.
+| Implied | WAI | $CB | 1 | 3+ |
 
 #### STP - Stop Processor
 
@@ -1097,9 +1085,7 @@ Halts processor until hardware reset.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Implied | STP | $42 $DB | 2 | 2 |
-
-Note: 32-bit mode encoding. In 65816 mode, STP is `$DB`.
+| Implied | STP | $DB | 1 | 2 |
 
 ---
 
@@ -1501,7 +1487,7 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 - Data size is **always 32-bit** in 32-bit mode
 - Address size is determined by operand format:
   - `B+$XXXX` = B-relative 16-bit (default)
-  - `$XXXXXXXX` = 32-bit absolute (8 hex digits)
+  - 32-bit absolute is **Extended ALU only**
 
 **Extended ALU Instructions ($02 $80-$97):**
 - Data size is encoded in the mode byte (bits 7-6): BYTE, WORD, or LONG
@@ -1519,10 +1505,6 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 ; 32-bit operations - Extended ALU (default size)
     LD R0, #$12345678       ; $02 $80 $B8 $00 $78 $56 $34 $12
 ```
-
-**WAI and STP (32-bit mode only):**
-- `WAI` = `$42 $CB`
-- `STP` = `$42 $DB`
 
 ---
 
@@ -1637,13 +1619,13 @@ Timer registers are memory-mapped in the MMIO region (addresses shown are full 3
 | DP Ind Long Indexed | `LDA [$XX],Y` | 32-bit [D + offset] + Y | 2 |
 | Absolute Indirect | `JMP ($XXXX)` | [B + addr16] | 3 |
 | Abs Indexed Indirect | `JMP ($XXXX,X)` | [B + addr16 + X] | 3 |
-| Absolute Long | `LDA $XXXXXX` | addr24 | 4 |
-| Abs Long Indexed | `LDA $XXXXXX,X` | addr24 + X | 4 |
+| Absolute Long | `LDA $XXXXXX` | addr24 (65816 mode only) | 4 |
+| Abs Long Indexed | `LDA $XXXXXX,X` | addr24 + X (65816 mode only) | 4 |
 | Stack Relative | `LDA $XX,S` | S + offset | 2 |
 | SR Indirect Indexed | `LDA ($XX,S),Y` | [S + offset] + Y | 2 |
 | Relative | `BEQ label` | PC + 2 + offset8 | 2 |
 | Relative Long | `BRL label` | PC + 3 + offset16 | 3 |
-| 32-bit Absolute | `LDA $XXXXXXXX` | addr32 | 5-6 |
+| 32-bit Absolute | `LD R0, $XXXXXXXX` | addr32 (Extended ALU only) | 5+ |
 
 **Note:** In 32-bit mode with R=1, Direct Page addresses $00-$FF map to hardware registers R0-R63. Use `Rn` notation (e.g., `LDA R4`) for clarity.
 

@@ -75,12 +75,10 @@ package M65832_pkg is
     constant ALU_SEC_SBC  : std_logic_vector(2 downto 0) := "111";
     
     ---------------------------------------------------------------------------
-    -- Register-Targeted ALU Extended Opcode ($02 $E8)
+    -- Register-Targeted ALU (Extended ALU, mode byte target=1)
     ---------------------------------------------------------------------------
     
-    constant EXT_REGALU   : std_logic_vector(7 downto 0) := x"E8";
-    
-    -- Register-targeted ALU operation codes (bits 7-4 of op|mode byte)
+    -- Register-targeted ALU operation codes (mapped from ext opcode)
     constant REGALU_LD    : std_logic_vector(3 downto 0) := "0000";  -- Load
     constant REGALU_ADC   : std_logic_vector(3 downto 0) := "0001";  -- Add with carry
     constant REGALU_SBC   : std_logic_vector(3 downto 0) := "0010";  -- Subtract with borrow
@@ -90,7 +88,7 @@ package M65832_pkg is
     constant REGALU_CMP   : std_logic_vector(3 downto 0) := "0110";  -- Compare
     constant REGALU_SHF   : std_logic_vector(3 downto 0) := "0111";  -- Shifts (reserved)
     
-    -- Register-targeted ALU source modes (bits 3-0 of op|mode byte)
+    -- Register-targeted ALU source modes (mapped from extended addr_mode)
     constant REGALU_SRC_DPX_IND : std_logic_vector(3 downto 0) := "0000";  -- (dp,X)
     constant REGALU_SRC_DP      : std_logic_vector(3 downto 0) := "0001";  -- dp
     constant REGALU_SRC_IMM     : std_logic_vector(3 downto 0) := "0010";  -- #imm
@@ -105,15 +103,17 @@ package M65832_pkg is
     constant REGALU_SRC_DPL_Y   : std_logic_vector(3 downto 0) := "1011";  -- [dp],Y
     constant REGALU_SRC_SR      : std_logic_vector(3 downto 0) := "1100";  -- sr,S
     constant REGALU_SRC_SR_Y    : std_logic_vector(3 downto 0) := "1101";  -- (sr,S),Y
+    constant REGALU_SRC_X       : std_logic_vector(3 downto 0) := "1110";  -- X register source
+    constant REGALU_SRC_Y       : std_logic_vector(3 downto 0) := "1111";  -- Y register source
     
     ---------------------------------------------------------------------------
-    -- Shifter/Rotate Extended Opcode ($02 $E9)
+    -- Shifter/Rotate Extended Opcode ($02 $98)
     ---------------------------------------------------------------------------
     -- Format: $02 $E9 [op|cnt] [dest_dp] [src_dp]
     --   op (bits 7-5): shift operation
     --   cnt (bits 4-0): shift count (0-31 for immediate, or 11111 for A-sourced)
     
-    constant EXT_SHIFTER  : std_logic_vector(7 downto 0) := x"E9";
+    constant EXT_SHIFTER  : std_logic_vector(7 downto 0) := x"98";
     
     -- Shift operation codes (bits 7-5 of op|cnt byte)
     constant SHIFT_SHL    : std_logic_vector(2 downto 0) := "000";  -- Shift left (logical)
@@ -126,11 +126,11 @@ package M65832_pkg is
     constant SHIFT_BY_A   : std_logic_vector(4 downto 0) := "11111";
     
     ---------------------------------------------------------------------------
-    -- Sign/Zero Extend Extended Opcode ($02 $EA)
+    -- Sign/Zero Extend Extended Opcode ($02 $99)
     ---------------------------------------------------------------------------
     -- Format: $02 $EA [subop] [dest_dp] [src_dp]
     
-    constant EXT_EXTEND   : std_logic_vector(7 downto 0) := x"EA";
+    constant EXT_EXTEND   : std_logic_vector(7 downto 0) := x"99";
     
     -- Extend operation codes
     constant EXTEND_SEXT8  : std_logic_vector(3 downto 0) := "0000";  -- Sign extend 8->32
