@@ -232,7 +232,7 @@ architecture rtl of M65832_Core is
     signal ext_tta, ext_tat                     : std_logic;
     signal ext_fpu                             : std_logic;
     signal ext_ldf, ext_stf                    : std_logic;
-    signal f_reg_sel                           : std_logic_vector(1 downto 0);
+    signal ext_fpu_xfer                        : std_logic;      -- FPU register transfer ops (E0-E5)
     signal ext_fpu_trap                        : std_logic;
     
     -- Extended ALU/Shifter/Extend mode/op byte
@@ -364,13 +364,12 @@ architecture rtl of M65832_Core is
     signal ext_flag_v       : std_logic;
     signal ext_flag_load    : std_logic;
 
-    -- FPU coprocessor registers (64-bit)
-    signal f0_reg           : std_logic_vector(63 downto 0);
-    signal f1_reg           : std_logic_vector(63 downto 0);
-    signal f2_reg           : std_logic_vector(63 downto 0);
+    -- FPU coprocessor registers (16 x 64-bit)
+    type fp_reg_array is array (0 to 15) of std_logic_vector(63 downto 0);
+    signal fp_regs          : fp_reg_array;
     signal fpu_result       : std_logic_vector(63 downto 0);
     signal fpu_int_result   : std_logic_vector(31 downto 0);
-    signal fpu_write_f0     : std_logic;
+    signal fpu_write_fd     : std_logic;                        -- Write to destination FP reg
     signal fpu_write_a      : std_logic;
     signal fpu_flag_z       : std_logic;
     signal fpu_flag_n       : std_logic;
@@ -379,6 +378,10 @@ architecture rtl of M65832_Core is
     signal fpu_flag_load    : std_logic;
     signal fpu_flag_c_load  : std_logic;
     signal f_stq_high_reg   : std_logic;
+    signal fpu_reg_byte     : std_logic_vector(7 downto 0);     -- FPU register byte (DDDD SSSS)
+    signal fpu_dest         : unsigned(3 downto 0);              -- Destination register (0-15)
+    signal fpu_src          : unsigned(3 downto 0);              -- Source register (0-15)
+    signal is_fpu_ext       : std_logic;                         -- Fetching FPU register byte
     
     signal stack_is_pull    : std_logic;
     signal stack_width      : std_logic_vector(1 downto 0);
@@ -928,6 +931,8 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
             ldq_high_phase <= '0';
             stq_high_reg <= '0';
             f_stq_high_reg <= '0';
+            is_fpu_ext <= '0';
+            fpu_reg_byte <= (others => '0');
             int_in_progress <= '0';
             int_step <= (others => '0');
             int_vector_addr <= (others => '0');
@@ -982,6 +987,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                         IR <= DATA_IN;
                         is_extended <= '0';
                         is_regalu_ext <= '0';
+                        is_fpu_ext <= '0';
                         regalu_phase <= "00";
                         state <= ST_DECODE;
                         if int_in_progress = '0' and rti_in_progress = '0' then
@@ -1028,6 +1034,18 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                             -- Extended ALU/Shifter/Extend needs mode/op byte
                             is_regalu_ext <= '1';
                             IR_EXT2 <= DATA_IN;
+                            state <= ST_DECODE;
+                        elsif is_extended = '1' and
+                              ((IR_EXT >= x"B0" and IR_EXT <= x"B3") or   -- FPU load/store
+                               (IR_EXT >= x"C0" and IR_EXT <= x"CA") or   -- FPU single-precision
+                               (IR_EXT >= x"D0" and IR_EXT <= x"DA") or   -- FPU double-precision
+                               (IR_EXT >= x"E0" and IR_EXT <= x"E5") or   -- FPU register transfers
+                               (IR_EXT >= x"CB" and IR_EXT <= x"CF") or   -- FPU reserved (single)
+                               (IR_EXT >= x"DB" and IR_EXT <= x"DF")) and -- FPU reserved (double)
+                              is_fpu_ext = '0' then
+                            -- FPU instructions need register byte
+                            is_fpu_ext <= '1';
+                            fpu_reg_byte <= DATA_IN;
                             state <= ST_DECODE;
                         else
                             data_byte_count <= (others => '0');
@@ -1080,6 +1098,9 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 regalu_phase <= "00";
                                 state <= ST_ADDR1;
                                 data_byte_count <= (others => '0');
+                            elsif ext_fpu = '1' or ext_fpu_xfer = '1' then
+                                -- FPU arithmetic or register transfer ops
+                                state <= ST_EXECUTE;
                             elsif ADDR_MODE = "0000" then
                                 -- Implied/Accumulator
                                 state <= ST_EXECUTE;
@@ -2264,17 +2285,14 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, f0_reg, f1_reg, f2_reg, f_reg_sel,
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, fp_regs, fpu_reg_byte,
             IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff,
             ext_stq, ext_stf)
         variable write_reg : std_logic_vector(31 downto 0);
         variable f_reg     : std_logic_vector(63 downto 0);
     begin
-        case f_reg_sel is
-            when "00" => f_reg := f0_reg;
-            when "01" => f_reg := f1_reg;
-            when others => f_reg := f2_reg;
-        end case;
+        -- For STF, register is in low nibble of fpu_reg_byte
+        f_reg := fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0))));
         -- Select source register for stores
         if state = ST_PUSH then
             write_reg := stack_write_reg_eff;
@@ -3006,22 +3024,27 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     end process;
 
     ---------------------------------------------------------------------------
-    -- FPU Coprocessor Operations (F0, F1, F2)
+    -- FPU Coprocessor Operations (F0-F15, two-operand destructive)
+    -- Format: Fd = Fd op Fs (binary) or Fd = op(Fs) (unary)
+    -- fpu_dest = destination register (from high nibble of reg byte)
+    -- fpu_src  = source register (from low nibble of reg byte)
     ---------------------------------------------------------------------------
 
-    process(IR_EXT, ext_fpu, f0_reg, f1_reg, f2_reg, A_reg)
-        variable f1_s, f2_s : float32;
-        variable f1_d, f2_d : float64;
+    process(IR_EXT, ext_fpu, ext_fpu_xfer, fp_regs, fpu_dest, fpu_src, A_reg, T_reg)
+        variable fd_s, fs_s : float32;
+        variable fd_d, fs_d : float64;
         variable s_res      : float32;
         variable d_res      : float64;
         variable int32_res  : signed(31 downto 0);
         variable a_int      : integer;
         variable s_bits     : std_logic_vector(31 downto 0);
         variable d_bits     : std_logic_vector(63 downto 0);
+        variable fd_reg     : std_logic_vector(63 downto 0);
+        variable fs_reg     : std_logic_vector(63 downto 0);
     begin
         fpu_result     <= (others => '0');
         fpu_int_result <= (others => '0');
-        fpu_write_f0   <= '0';
+        fpu_write_fd   <= '0';
         fpu_write_a    <= '0';
         fpu_flag_load  <= '0';
         fpu_flag_c_load <= '0';
@@ -3030,25 +3053,30 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         fpu_flag_v     <= '0';
         fpu_flag_c     <= '0';
 
+        -- Get source and destination registers
+        fd_reg := fp_regs(to_integer(fpu_dest));
+        fs_reg := fp_regs(to_integer(fpu_src));
+
         if ext_fpu = '1' then
+            -- Single-precision operations ($C0-$CA)
             if IR_EXT(7 downto 4) = x"C" then
-                f1_s := to_float(f1_reg(31 downto 0), 8, 23);
-                f2_s := to_float(f2_reg(31 downto 0), 8, 23);
+                fd_s := to_float(fd_reg(31 downto 0), 8, 23);
+                fs_s := to_float(fs_reg(31 downto 0), 8, 23);
                 case IR_EXT is
-                    when x"C0" => s_res := f1_s + f2_s;
-                    when x"C1" => s_res := f1_s - f2_s;
-                    when x"C2" => s_res := f1_s * f2_s;
-                    when x"C3" => s_res := f1_s / f2_s;
-                    when x"C4" => s_res := -f1_s;
-                    when x"C5" => s_res := abs(f1_s);
-                    when x"C6" =>
+                    when x"C0" => s_res := fd_s + fs_s;  -- FADD.S Fd, Fs
+                    when x"C1" => s_res := fd_s - fs_s;  -- FSUB.S Fd, Fs
+                    when x"C2" => s_res := fd_s * fs_s;  -- FMUL.S Fd, Fs
+                    when x"C3" => s_res := fd_s / fs_s;  -- FDIV.S Fd, Fs
+                    when x"C4" => s_res := -fs_s;        -- FNEG.S Fd, Fs
+                    when x"C5" => s_res := abs(fs_s);    -- FABS.S Fd, Fs
+                    when x"C6" =>                        -- FCMP.S Fd, Fs
                         fpu_flag_load <= '1';
                         fpu_flag_c_load <= '1';
-                        if f1_s = f2_s then
+                        if fd_s = fs_s then
                             fpu_flag_z <= '1';
                             fpu_flag_c <= '1';
                             fpu_flag_n <= '0';
-                        elsif f1_s < f2_s then
+                        elsif fd_s < fs_s then
                             fpu_flag_z <= '0';
                             fpu_flag_c <= '0';
                             fpu_flag_n <= '1';
@@ -3057,8 +3085,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             fpu_flag_c <= '1';
                             fpu_flag_n <= '0';
                         end if;
-                    when x"C7" =>
-                        int32_res := to_signed(to_integer(f1_s, IEEE.fixed_float_types.round_zero), 32);
+                    when x"C7" =>                        -- F2I.S Fd
+                        int32_res := to_signed(to_integer(fd_s, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
                         fpu_flag_load <= '1';
@@ -3066,16 +3094,18 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             fpu_flag_z <= '1';
                         end if;
                         fpu_flag_n <= int32_res(31);
-                    when x"C8" =>
+                    when x"C8" =>                        -- I2F.S Fd
                         a_int := to_integer(signed(A_reg));
                         s_res := to_float(a_int, 8, 23);
+                    when x"C9" => s_res := fs_s;         -- FMOV.S Fd, Fs
+                    when x"CA" => s_res := sqrt(fs_s);   -- FSQRT.S Fd, Fs
                     when others => null;
                 end case;
 
                 if IR_EXT /= x"C6" and IR_EXT /= x"C7" then
                     s_bits := to_slv(s_res);
                     fpu_result(31 downto 0) <= s_bits;
-                    fpu_write_f0 <= '1';
+                    fpu_write_fd <= '1';
                     fpu_flag_load <= '1';
                     if s_bits = x"00000000" then
                         fpu_flag_z <= '1';
@@ -3083,24 +3113,25 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     fpu_flag_n <= s_bits(31);
                 end if;
 
+            -- Double-precision operations ($D0-$DA)
             elsif IR_EXT(7 downto 4) = x"D" then
-                f1_d := to_float(f1_reg, 11, 52);
-                f2_d := to_float(f2_reg, 11, 52);
+                fd_d := to_float(fd_reg, 11, 52);
+                fs_d := to_float(fs_reg, 11, 52);
                 case IR_EXT is
-                    when x"D0" => d_res := f1_d + f2_d;
-                    when x"D1" => d_res := f1_d - f2_d;
-                    when x"D2" => d_res := f1_d * f2_d;
-                    when x"D3" => d_res := f1_d / f2_d;
-                    when x"D4" => d_res := -f1_d;
-                    when x"D5" => d_res := abs(f1_d);
-                    when x"D6" =>
+                    when x"D0" => d_res := fd_d + fs_d;  -- FADD.D Fd, Fs
+                    when x"D1" => d_res := fd_d - fs_d;  -- FSUB.D Fd, Fs
+                    when x"D2" => d_res := fd_d * fs_d;  -- FMUL.D Fd, Fs
+                    when x"D3" => d_res := fd_d / fs_d;  -- FDIV.D Fd, Fs
+                    when x"D4" => d_res := -fs_d;        -- FNEG.D Fd, Fs
+                    when x"D5" => d_res := abs(fs_d);    -- FABS.D Fd, Fs
+                    when x"D6" =>                        -- FCMP.D Fd, Fs
                         fpu_flag_load <= '1';
                         fpu_flag_c_load <= '1';
-                        if f1_d = f2_d then
+                        if fd_d = fs_d then
                             fpu_flag_z <= '1';
                             fpu_flag_c <= '1';
                             fpu_flag_n <= '0';
-                        elsif f1_d < f2_d then
+                        elsif fd_d < fs_d then
                             fpu_flag_z <= '0';
                             fpu_flag_c <= '0';
                             fpu_flag_n <= '1';
@@ -3109,8 +3140,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             fpu_flag_c <= '1';
                             fpu_flag_n <= '0';
                         end if;
-                    when x"D7" =>
-                        int32_res := to_signed(to_integer(f1_d, IEEE.fixed_float_types.round_zero), 32);
+                    when x"D7" =>                        -- F2I.D Fd
+                        int32_res := to_signed(to_integer(fd_d, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
                         fpu_flag_load <= '1';
@@ -3118,16 +3149,18 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                             fpu_flag_z <= '1';
                         end if;
                         fpu_flag_n <= int32_res(31);
-                    when x"D8" =>
+                    when x"D8" =>                        -- I2F.D Fd
                         a_int := to_integer(signed(A_reg));
                         d_res := to_float(a_int, 11, 52);
+                    when x"D9" => d_res := fs_d;         -- FMOV.D Fd, Fs
+                    when x"DA" => d_res := sqrt(fs_d);   -- FSQRT.D Fd, Fs
                     when others => null;
                 end case;
 
                 if IR_EXT /= x"D6" and IR_EXT /= x"D7" then
                     d_bits := to_slv(d_res);
                     fpu_result <= d_bits;
-                    fpu_write_f0 <= '1';
+                    fpu_write_fd <= '1';
                     fpu_flag_load <= '1';
                     if d_bits = x"0000000000000000" then
                         fpu_flag_z <= '1';
@@ -3135,26 +3168,54 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     fpu_flag_n <= d_bits(63);
                 end if;
             end if;
+        elsif ext_fpu_xfer = '1' then
+            -- FPU register transfer operations ($E0-$E5)
+            case IR_EXT is
+                when x"E0" =>                            -- FTOA Fd: A = Fd[31:0]
+                    fpu_int_result <= fd_reg(31 downto 0);
+                    fpu_write_a <= '1';
+                when x"E1" =>                            -- FTOT Fd: T = Fd[63:32]
+                    -- T register write handled separately
+                    null;
+                when x"E2" =>                            -- ATOF Fd: Fd[31:0] = A
+                    fpu_result(31 downto 0) <= A_reg;
+                    fpu_result(63 downto 32) <= fd_reg(63 downto 32);
+                    fpu_write_fd <= '1';
+                when x"E3" =>                            -- TTOF Fd: Fd[63:32] = T
+                    fpu_result(31 downto 0) <= fd_reg(31 downto 0);
+                    fpu_result(63 downto 32) <= T_reg;
+                    fpu_write_fd <= '1';
+                when x"E4" =>                            -- FCVT.DS Fd, Fs: double = (double)single
+                    fs_s := to_float(fs_reg(31 downto 0), 8, 23);
+                    d_res := resize(fs_s, 11, 52);
+                    fpu_result <= to_slv(d_res);
+                    fpu_write_fd <= '1';
+                when x"E5" =>                            -- FCVT.SD Fd, Fs: single = (single)double
+                    fs_d := to_float(fs_reg, 11, 52);
+                    s_res := resize(fs_d, 8, 23);
+                    fpu_result(31 downto 0) <= to_slv(s_res);
+                    fpu_write_fd <= '1';
+                when others => null;
+            end case;
         end if;
     end process;
 
     process(CLK, RST_N)
     begin
         if RST_N = '0' then
-            f0_reg <= (others => '0');
-            f1_reg <= (others => '0');
-            f2_reg <= (others => '0');
+            -- Reset all 16 FP registers
+            for i in 0 to 15 loop
+                fp_regs(i) <= (others => '0');
+            end loop;
         elsif rising_edge(CLK) then
             if CE = '1' and mem_ready = '1' then
                 if state = ST_EXECUTE then
                     if ext_ldf = '1' then
-                        case f_reg_sel is
-                            when "00" => f0_reg <= ldq_high_buffer & ldq_low_buffer;
-                            when "01" => f1_reg <= ldq_high_buffer & ldq_low_buffer;
-                            when others => f2_reg <= ldq_high_buffer & ldq_low_buffer;
-                        end case;
-                    elsif fpu_write_f0 = '1' then
-                        f0_reg <= fpu_result;
+                        -- Load to register specified in fpu_reg_byte (low nibble for LDF)
+                        fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0)))) <= ldq_high_buffer & ldq_low_buffer;
+                    elsif fpu_write_fd = '1' then
+                        -- Write result to destination register
+                        fp_regs(to_integer(fpu_dest)) <= fpu_result;
                     end if;
                 end if;
             end if;
@@ -3486,15 +3547,12 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                    else "00";
     
     process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
-            f_stq_high_reg, ext_stf, f_reg_sel, f0_reg, f1_reg, f2_reg, IS_REGALU, regalu_result,
+            f_stq_high_reg, ext_stf, fp_regs, fpu_reg_byte, IS_REGALU, regalu_result,
             IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable f_reg : std_logic_vector(63 downto 0);
     begin
-        case f_reg_sel is
-            when "00" => f_reg := f0_reg;
-            when "01" => f_reg := f1_reg;
-            when others => f_reg := f2_reg;
-        end case;
+        -- For STF, register is in low nibble of fpu_reg_byte
+        f_reg := fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0))));
 
         if f_stq_high_reg = '1' then
             rw_wdata <= f_reg(63 downto 32);
@@ -3737,17 +3795,14 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     ext_fence   <= '1' when (is_extended = '1' and IR_EXT = x"50") else '0';
     ext_fencer  <= '1' when (is_extended = '1' and IR_EXT = x"51") else '0';
     ext_fencew  <= '1' when (is_extended = '1' and IR_EXT = x"52") else '0';
+    -- FPU arithmetic: $C0-$CA (single), $D0-$DA (double)
     ext_fpu <= '1' when (is_extended = '1' and
-                         (IR_EXT = x"C0" or IR_EXT = x"C1" or IR_EXT = x"C2" or IR_EXT = x"C3" or
-                          IR_EXT = x"C4" or IR_EXT = x"C5" or IR_EXT = x"C6" or IR_EXT = x"C7" or
-                          IR_EXT = x"C8" or IR_EXT = x"D0" or IR_EXT = x"D1" or IR_EXT = x"D2" or
-                          IR_EXT = x"D3" or IR_EXT = x"D4" or IR_EXT = x"D5" or IR_EXT = x"D6" or
-                          IR_EXT = x"D7" or IR_EXT = x"D8")) else '0';
+                         ((IR_EXT >= x"C0" and IR_EXT <= x"CA") or
+                          (IR_EXT >= x"D0" and IR_EXT <= x"DA"))) else '0';
+    -- Reserved FPU opcodes trap: $CB-$CF, $DB-$DF
     ext_fpu_trap <= '1' when (is_extended = '1' and
-                              (IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
-                               IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
-                               IR_EXT = x"E1" or IR_EXT = x"E2" or IR_EXT = x"E3" or IR_EXT = x"E4" or
-                               IR_EXT = x"E5" or IR_EXT = x"E6")) else '0';
+                              ((IR_EXT >= x"CB" and IR_EXT <= x"CF") or
+                               (IR_EXT >= x"DB" and IR_EXT <= x"DF"))) else '0';
     
     ext_repe <= '1' when (is_extended = '1' and IR_EXT = x"60") else '0';
     ext_sepe <= '1' when (is_extended = '1' and IR_EXT = x"61") else '0';
@@ -3761,14 +3816,14 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"9C" or IR_EXT = x"9D")) else '0';
     ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"9E" or IR_EXT = x"9F")) else '0';
-    ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or
-                                         IR_EXT = x"B5" or IR_EXT = x"B8" or IR_EXT = x"B9")) else '0';
-    ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3" or IR_EXT = x"B6" or
-                                         IR_EXT = x"B7" or IR_EXT = x"BA" or IR_EXT = x"BB")) else '0';
-    f_reg_sel <= "00" when (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B2" or IR_EXT = x"B3") else
-                 "01" when (IR_EXT = x"B4" or IR_EXT = x"B5" or IR_EXT = x"B6" or IR_EXT = x"B7") else
-                 "10" when (IR_EXT = x"B8" or IR_EXT = x"B9" or IR_EXT = x"BA" or IR_EXT = x"BB") else
-                 "00";
+    -- FPU load/store: $B0 = LDF dp, $B1 = LDF abs, $B2 = STF dp, $B3 = STF abs
+    ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1")) else '0';
+    ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3")) else '0';
+    -- FPU register transfers: $E0-$E5
+    ext_fpu_xfer <= '1' when (is_extended = '1' and IR_EXT >= x"E0" and IR_EXT <= x"E5") else '0';
+    -- FPU register selection from fpu_reg_byte
+    fpu_dest <= unsigned(fpu_reg_byte(7 downto 4));  -- High nibble = destination
+    fpu_src  <= unsigned(fpu_reg_byte(3 downto 0));  -- Low nibble = source
     
     stack_is_pull <= '1' when (IS_STACK = '1' and
                                (IR = x"28" or IR = x"68" or IR = x"FA" or IR = x"7A" or
@@ -3814,6 +3869,14 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                            ((state = ST_DECODE) and is_extended = '1' and
                             ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
                             is_regalu_ext = '0') or
+                           ((state = ST_DECODE) and is_extended = '1' and
+                            ((IR_EXT >= x"B0" and IR_EXT <= x"B3") or
+                             (IR_EXT >= x"C0" and IR_EXT <= x"CA") or
+                             (IR_EXT >= x"D0" and IR_EXT <= x"DA") or
+                             (IR_EXT >= x"E0" and IR_EXT <= x"E5") or
+                             (IR_EXT >= x"CB" and IR_EXT <= x"CF") or
+                             (IR_EXT >= x"DB" and IR_EXT <= x"DF")) and
+                            is_fpu_ext = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
                else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSL = '1'))

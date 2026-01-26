@@ -679,57 +679,53 @@ All extended instructions are prefixed with opcode $02.
 ### FPU Load/Store
 
 ```asm
-    LDF0 $20            ; Load F0 from DP
-    LDF0 $1234          ; Load F0 from absolute
-    STF0 $20            ; Store F0 to DP
-    STF0 $1234          ; Store F0 to absolute
-    LDF1 $20            ; Load F1
-    STF1 $1234          ; Store F1
-    LDF2 $20            ; Load F2
-    STF2 $1234          ; Store F2
+    LDF F0, $20         ; Load F0 from DP
+    LDF F5, $1234       ; Load F5 from absolute
+    STF F0, $20         ; Store F0 to DP
+    STF F12, $1234      ; Store F12 to absolute
 ```
 
 ### FPU Arithmetic (Single Precision)
 
 ```asm
-    FADD.S              ; F0 = F1 + F2
-    FSUB.S              ; F0 = F1 - F2
-    FMUL.S              ; F0 = F1 * F2
-    FDIV.S              ; F0 = F1 / F2
-    FNEG.S              ; F0 = -F1
-    FABS.S              ; F0 = |F1|
-    FSQRT.S             ; F0 = sqrt(F1)
-    FSIN.S              ; F0 = sin(F1)
-    FCOS.S              ; F0 = cos(F1)
-    FTAN.S              ; F0 = tan(F1)
-    FLOG.S              ; F0 = log(F1)
-    FEXP.S              ; F0 = exp(F1)
-    FCMP.S              ; Compare F1 to F2, set flags
-    F2I.S               ; A = (int)F1
-    I2F.S               ; F0 = (float)A
+    FADD.S F0, F1       ; F0 = F0 + F1
+    FSUB.S F0, F1       ; F0 = F0 - F1
+    FMUL.S F0, F1       ; F0 = F0 * F1
+    FDIV.S F0, F1       ; F0 = F0 / F1
+    FNEG.S F2, F2       ; F2 = -F2
+    FABS.S F2, F2       ; F2 = |F2|
+    FSQRT.S F3, F3      ; F3 = sqrt(F3)
+    FMOV.S F4, F5       ; F4 = F5
+    FCMP.S F6, F7       ; Compare F6 to F7, set flags
+    F2I.S F8            ; A = (int32)F8
+    I2F.S F9            ; F9 = (float32)A
 ```
 
 ### FPU Arithmetic (Double Precision)
 
 ```asm
-    FADD.D              ; F0 = F1 + F2
-    FSUB.D              ; F0 = F1 - F2
-    FMUL.D              ; F0 = F1 * F2
-    FDIV.D              ; F0 = F1 / F2
-    ; ... (same operations as single precision)
+    FADD.D F0, F1       ; F0 = F0 + F1
+    FSUB.D F0, F1       ; F0 = F0 - F1
+    FMUL.D F0, F1       ; F0 = F0 * F1
+    FDIV.D F0, F1       ; F0 = F0 / F1
+    FNEG.D F2, F2       ; F2 = -F2
+    FABS.D F2, F2       ; F2 = |F2|
+    FSQRT.D F3, F3      ; F3 = sqrt(F3)
+    FMOV.D F4, F5       ; F4 = F5
+    FCMP.D F6, F7       ; Compare F6 to F7, set flags
+    F2I.D F8            ; A = (int32)F8
+    I2F.D F9            ; F9 = (float64)A
 ```
 
-### FPU Register Moves
+### FPU Register Transfers
 
 ```asm
-    FMV01               ; F0 = F1
-    FMV10               ; F1 = F0
-    FMV02               ; F0 = F2
-    FMV20               ; F2 = F0
-    FMV12               ; F1 = F2
-    FMV21               ; F2 = F1
-    S2D                 ; Convert single to double
-    D2S                 ; Convert double to single
+    FTOA F3             ; A = F3[31:0]
+    FTOT F3             ; T = F3[63:32]
+    ATOF F3             ; F3[31:0] = A
+    TTOF F3             ; F3[63:32] = T
+    FCVT.DS F0, F1      ; F0 = (double)F1
+    FCVT.SD F2, F3      ; F2 = (single)F3
 ```
 
 ### Extended ALU Instructions ($80-$97)

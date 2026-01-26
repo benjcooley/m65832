@@ -303,11 +303,12 @@ begin
                 when x"9E" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
                 when x"9F" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
                 
-                -- FPU load/store (64-bit)
-                when x"B0" | x"B2" | x"B4" | x"B6" | x"B8" | x"BA" =>
-                    ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDF/STF dp
-                when x"B1" | x"B3" | x"B5" | x"B7" | x"B9" | x"BB" =>
-                    ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDF/STF abs
+                -- FPU load/store (64-bit) with register byte
+                -- Format: $02 $Bx $rr [operand] where rr is register byte
+                when x"B0" | x"B2" =>
+                    ADDR_MODE <= "0010"; INSTR_LEN <= "100";  -- LDF/STF Fn, dp (4 bytes)
+                when x"B1" | x"B3" =>
+                    ADDR_MODE <= "0101"; INSTR_LEN <= "101";  -- LDF/STF Fn, abs (5 bytes)
                 
                 -- LEA
                 when x"A0" =>
@@ -319,10 +320,12 @@ begin
                 when x"A3" =>
                     ADDR_MODE <= "0110"; INSTR_LEN <= "100";  -- LEA abs,X
                 
-                -- FPU coprocessor ops (implied)
-                when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" |
-                     x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" =>
-                    INSTR_LEN <= "010";
+                -- FPU arithmetic ops with register byte (3 bytes total)
+                -- Format: $02 $Cx/$Dx $rr where rr = dest<<4 | src
+                when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" | x"C9" | x"CA" |
+                     x"D0" | x"D1" | x"D2" | x"D3" | x"D4" | x"D5" | x"D6" | x"D7" | x"D8" | x"D9" | x"DA" |
+                     x"E0" | x"E1" | x"E2" | x"E3" | x"E4" | x"E5" =>
+                    INSTR_LEN <= "011";  -- 3 bytes: $02 opcode reg-byte
                 
                 -- Extended ALU ($02 $80-$97) with mode byte
                 when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | x"86" | x"87" |
@@ -456,12 +459,10 @@ begin
                     end if;
                 
                 when others =>
-                    if IR_EXT = x"D9" or IR_EXT = x"DA" or IR_EXT = x"DB" or IR_EXT = x"DC" or
-                       IR_EXT = x"DD" or IR_EXT = x"DE" or IR_EXT = x"DF" or IR_EXT = x"E0" or
-                       IR_EXT = x"E1" or IR_EXT = x"E2" or IR_EXT = x"E3" or IR_EXT = x"E4" or
-                       IR_EXT = x"E5" or IR_EXT = x"E6" then
-                        -- Reserved FP opcodes trap via TRAP vector
-                        INSTR_LEN <= "010";
+                    if (IR_EXT >= x"CB" and IR_EXT <= x"CF") or
+                       (IR_EXT >= x"DB" and IR_EXT <= x"DF") then
+                        -- Reserved FP opcodes trap via TRAP vector (still consume reg byte)
+                        INSTR_LEN <= "011";
                     elsif COMPAT_MODE = '1' then
                         IS_CONTROL <= '1';  -- Unknown extended op = NOP in compat
                         INSTR_LEN <= "010";

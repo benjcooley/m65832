@@ -18,7 +18,7 @@ A concise reference for M65832 programming. For detailed information, see the [I
 | VBR | 32 | Virtual 6502 Base (supervisor) |
 | T | 32 | Temp (MUL high / DIV remainder) |
 | R0-R63 | 32 | Register Window (via DP when R=1) |
-| F0-F2 | 64 | FPU Registers (optional) |
+| F0-F15 | 64 | FPU Registers (optional, 16 regs) |
 
 ---
 
@@ -411,31 +411,47 @@ Bits 4-0: count (0-31), or $1F for shift by A.
 | PHVBR | $02 $74 | Push VBR |
 | PLVBR | $02 $75 | Pull VBR |
 
-### Floating Point
+### Floating Point (16 registers: F0-F15)
+
+All FPU instructions: `$02 [opcode] [reg-byte] [operand...]`
+Register byte: `DDDD SSSS` (dest << 4 | src)
+
 | Instruction | Encoding | Description |
 |-------------|----------|-------------|
-| LDF0 dp/abs | $02 $B0/$B1 | F0 = [mem] (64-bit) |
-| STF0 dp/abs | $02 $B2/$B3 | [mem] = F0 |
-| LDF1 dp/abs | $02 $B4/$B5 | F1 = [mem] |
-| STF1 dp/abs | $02 $B6/$B7 | [mem] = F1 |
-| LDF2 dp/abs | $02 $B8/$B9 | F2 = [mem] |
-| STF2 dp/abs | $02 $BA/$BB | [mem] = F2 |
+| LDF Fn, dp | $02 $B0 $0n dp | Fn = [D+dp] (64-bit) |
+| LDF Fn, abs | $02 $B1 $0n abs | Fn = [B+abs] (64-bit) |
+| STF Fn, dp | $02 $B2 $0n dp | [D+dp] = Fn |
+| STF Fn, abs | $02 $B3 $0n abs | [B+abs] = Fn |
 
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
-| FADD.S | $02 $C0 | F0 = F1 + F2 (single) |
-| FSUB.S | $02 $C1 | F0 = F1 - F2 |
-| FMUL.S | $02 $C2 | F0 = F1 × F2 |
-| FDIV.S | $02 $C3 | F0 = F1 / F2 |
-| FNEG.S | $02 $C4 | F0 = -F1 |
-| FABS.S | $02 $C5 | F0 = \|F1\| |
-| FCMP.S | $02 $C6 | Compare F1, F2 |
-| F2I.S | $02 $C7 | A = (int)F1 |
-| I2F.S | $02 $C8 | F0 = (float)A |
-| FADD.D | $02 $D0 | (double-precision) |
-| ... | $D1-$D8 | (same pattern) |
+| FADD.S Fd, Fs | $02 $C0 $ds | Fd = Fd + Fs (single) |
+| FSUB.S Fd, Fs | $02 $C1 $ds | Fd = Fd - Fs |
+| FMUL.S Fd, Fs | $02 $C2 $ds | Fd = Fd × Fs |
+| FDIV.S Fd, Fs | $02 $C3 $ds | Fd = Fd / Fs |
+| FNEG.S Fd, Fs | $02 $C4 $ds | Fd = -Fs |
+| FABS.S Fd, Fs | $02 $C5 $ds | Fd = \|Fs\| |
+| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd, Fs |
+| F2I.S Fd | $02 $C7 $d0 | A = (int32)Fd |
+| I2F.S Fd | $02 $C8 $d0 | Fd = (float32)A |
+| FMOV.S Fd, Fs | $02 $C9 $ds | Fd = Fs (copy) |
+| FSQRT.S Fd, Fs | $02 $CA $ds | Fd = √Fs |
+| FADD.D ... | $02 $D0-$DA | (same pattern, double) |
 
-**FCMP flags:** Z=1 if equal, C=1 if F1≥F2, N=1 if F1<F2
+**Example:** `FADD.S F3, F7` → `$02 $C0 $37` (F3 = F3 + F7)
+
+| Transfers | Encoding | Operation |
+|-----------|----------|-----------|
+| FTOA Fd | $02 $E0 $d0 | A = Fd[31:0] |
+| FTOT Fd | $02 $E1 $d0 | T = Fd[63:32] |
+| ATOF Fd | $02 $E2 $d0 | Fd[31:0] = A |
+| TTOF Fd | $02 $E3 $d0 | Fd[63:32] = T |
+| FCVT.DS Fd, Fs | $02 $E4 $ds | Fd = (double)Fs |
+| FCVT.SD Fd, Fs | $02 $E5 $ds | Fd = (single)Fs |
+
+**FCMP flags:** Z=1 if equal, C=1 if Fd≥Fs, N=1 if Fd<Fs
+
+Reserved FPU opcodes $CB-$CF and $DB-$DF trap to software emulation; $E6-$FF are illegal.
 
 ---
 

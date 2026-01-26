@@ -192,10 +192,6 @@ begin
             VBRr <= (others => '0');
             Tr   <= (others => '0');
             Pr   <= "00110000001100";  -- K=0, E=1, S=1, R=0, M1:M0=00, X1:X0=00, D=1, I=1, Z=0, C=0
-            for i in 0 to 63 loop
-                RegWindow(i) <= (others => '0');
-            end loop;
-            
         elsif rising_edge(CLK) then
             if EN = '1' then
                 -- Accumulator
@@ -278,9 +274,13 @@ begin
     -- Register Window Updates
     ---------------------------------------------------------------------------
     
-    process(CLK)
+    process(CLK, RST_N)
     begin
-        if rising_edge(CLK) then
+        if RST_N = '0' then
+            for i in 0 to 63 loop
+                RegWindow(i) <= (others => '0');
+            end loop;
+        elsif rising_edge(CLK) then
             if EN = '1' and RW_WE = '1' and REG_WIN_EN = '1' then
                 case RW_WIDTH is
                     when WIDTH_8 =>

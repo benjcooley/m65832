@@ -235,12 +235,10 @@ After the `$02` prefix byte:
 | $A2 [abs16] | LEA abs | A = B + abs |
 | $A3 [abs16] | LEA abs,X | A = B + abs + X |
 | **FPU Load/Store** | | |
-| $B0 [dp] | LDF0 dp | Load F0 from dp (64-bit) |
-| $B1 [abs16] | LDF0 abs | Load F0 from abs |
-| $B2 [dp] | STF0 dp | Store F0 to dp |
-| $B3 [abs16] | STF0 abs | Store F0 to abs |
-| $B4-$B7 | LDF1/STF1 | F1 load/store (same pattern) |
-| $B8-$BB | LDF2/STF2 | F2 load/store (same pattern) |
+| $B0 [reg] [dp] | LDF Fn, dp | Load Fn from dp (64-bit) |
+| $B1 [reg] [abs16] | LDF Fn, abs | Load Fn from abs |
+| $B2 [reg] [dp] | STF Fn, dp | Store Fn to dp |
+| $B3 [reg] [abs16] | STF Fn, abs | Store Fn to abs |
 | **FPU Single-Precision** | | |
 | $C0 | FADD.S | F0 = F1 + F2 |
 | $C1 | FSUB.S | F0 = F1 - F2 |
@@ -254,8 +252,9 @@ After the `$02` prefix byte:
 | **FPU Double-Precision** | | |
 | $D0-$D8 | (same as above with .D suffix) | Double-precision operations |
 | **Reserved FPU** | | |
-| $D9-$DF | (reserved) | Trap to software emulation |
-| $E0-$FF | (reserved) | Future expansion |
+| $CB-$CF | (reserved) | Trap to software emulation |
+| $DB-$DF | (reserved) | Trap to software emulation |
+| $E6-$FF | (illegal) | Illegal opcode trap |
 
 ### Extended ALU Instructions ($02 $80-$97)
 
@@ -1512,61 +1511,133 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 
 ### Floating-Point Instructions
 
-The M65832 includes optional FPU support with three 64-bit registers (F0, F1, F2).
+The M65832 includes optional FPU support with **sixteen 64-bit registers (F0-F15)**, providing compiler-friendly two-operand destructive operations.
+
+#### FPU Register File
+
+| Registers | Width | Description |
+|-----------|-------|-------------|
+| F0-F15 | 64-bit | Floating-point registers |
+
+Each register can hold either:
+- **Double-precision** (IEEE 754 binary64): full 64 bits
+- **Single-precision** (IEEE 754 binary32): low 32 bits (high 32 bits undefined after single-precision ops)
+
+#### FPU Instruction Encoding
+
+All FPU instructions use the extended opcode page ($02) with a **register byte** following the opcode:
+
+```
+Format: $02 [opcode] [reg-byte] [operand...]
+
+Register byte format: DDDD SSSS
+  - DDDD (bits 7-4): destination register (0-15)
+  - SSSS (bits 3-0): source register (0-15)
+```
+
+For binary operations (FADD, FSUB, etc.): `Fd = Fd op Fs`
+For unary operations (FNEG, FABS, etc.): `Fd = op(Fs)`
+For conversions: destination only (source field unused or specifies source)
 
 #### FPU Load/Store
 
-| Instruction | Opcode | Description |
-|-------------|--------|-------------|
-| LDF0 dp | $02 $B0 | F0 = [dp..dp+7] |
-| LDF0 abs | $02 $B1 | F0 = [abs..abs+7] |
-| STF0 dp | $02 $B2 | [dp..dp+7] = F0 |
-| STF0 abs | $02 $B3 | [abs..abs+7] = F0 |
-| LDF1 dp | $02 $B4 | F1 = [dp..dp+7] |
-| LDF1 abs | $02 $B5 | F1 = [abs..abs+7] |
-| STF1 dp | $02 $B6 | [dp..dp+7] = F1 |
-| STF1 abs | $02 $B7 | [abs..abs+7] = F1 |
-| LDF2 dp | $02 $B8 | F2 = [dp..dp+7] |
-| LDF2 abs | $02 $B9 | F2 = [abs..abs+7] |
-| STF2 dp | $02 $BA | [dp..dp+7] = F2 |
-| STF2 abs | $02 $BB | [abs..abs+7] = F2 |
+| Instruction | Encoding | Description |
+|-------------|----------|-------------|
+| LDF Fn, dp | $02 $B0 $0n dp | Fn = [D+dp..D+dp+7] (64-bit load) |
+| LDF Fn, abs | $02 $B1 $0n abs | Fn = [B+abs..B+abs+7] (64-bit load) |
+| STF Fn, dp | $02 $B2 $0n dp | [D+dp..D+dp+7] = Fn (64-bit store) |
+| STF Fn, abs | $02 $B3 $0n abs | [B+abs..B+abs+7] = Fn (64-bit store) |
 
-#### FPU Arithmetic
+Where `n` is the register number (0-15, encoded in low nibble of reg-byte).
 
-Single-precision operations (use low 32 bits):
+**Examples:**
+```asm
+LDF F5, $100       ; $02 $B1 $05 $00 $01 - Load F5 from absolute address $0100
+STF F12, $20       ; $02 $B2 $0C $20 - Store F12 to direct page offset $20
+```
 
-| Instruction | Opcode | Operation |
-|-------------|--------|-----------|
-| FADD.S | $02 $C0 | F0 = F1 + F2 |
-| FSUB.S | $02 $C1 | F0 = F1 - F2 |
-| FMUL.S | $02 $C2 | F0 = F1 × F2 |
-| FDIV.S | $02 $C3 | F0 = F1 / F2 |
-| FNEG.S | $02 $C4 | F0 = -F1 |
-| FABS.S | $02 $C5 | F0 = |F1| |
-| FCMP.S | $02 $C6 | Compare F1 to F2 |
-| F2I.S | $02 $C7 | A = (int32)F1 |
-| I2F.S | $02 $C8 | F0 = (float32)A |
+#### FPU Arithmetic - Single Precision
 
-Double-precision operations (use full 64 bits):
+Two-operand destructive format: `Fd = Fd op Fs` (binary) or `Fd = op(Fs)` (unary)
 
-| Instruction | Opcode | Operation |
-|-------------|--------|-----------|
-| FADD.D | $02 $D0 | F0 = F1 + F2 |
-| FSUB.D | $02 $D1 | F0 = F1 - F2 |
-| FMUL.D | $02 $D2 | F0 = F1 × F2 |
-| FDIV.D | $02 $D3 | F0 = F1 / F2 |
-| FNEG.D | $02 $D4 | F0 = -F1 |
-| FABS.D | $02 $D5 | F0 = |F1| |
-| FCMP.D | $02 $D6 | Compare F1 to F2 |
-| F2I.D | $02 $D7 | A = (int64)F1 |
-| I2F.D | $02 $D8 | F0 = (float64)A |
+| Instruction | Encoding | Operation |
+|-------------|----------|-----------|
+| FADD.S Fd, Fs | $02 $C0 $ds | Fd = Fd + Fs |
+| FSUB.S Fd, Fs | $02 $C1 $ds | Fd = Fd - Fs |
+| FMUL.S Fd, Fs | $02 $C2 $ds | Fd = Fd × Fs |
+| FDIV.S Fd, Fs | $02 $C3 $ds | Fd = Fd / Fs |
+| FNEG.S Fd, Fs | $02 $C4 $ds | Fd = -Fs |
+| FABS.S Fd, Fs | $02 $C5 $ds | Fd = \|Fs\| |
+| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd to Fs (sets flags) |
+| F2I.S Fd | $02 $C7 $d0 | A = (int32)Fd |
+| I2F.S Fd | $02 $C8 $d0 | Fd = (float32)A |
+| FMOV.S Fd, Fs | $02 $C9 $ds | Fd = Fs (copy) |
+| FSQRT.S Fd, Fs | $02 $CA $ds | Fd = √Fs |
 
-**FCMP Flags:**
-- Z = 1 if F1 == F2
-- C = 1 if F1 >= F2
-- N = 1 if F1 < F2
+Where `$ds` = (dest << 4) | src (e.g., F3 op F5 → $35).
 
-**Reserved FPU opcodes** ($D9-$DF, $E0-$E6) trap to software emulation via the TRAP mechanism.
+**Examples:**
+```asm
+FADD.S F0, F1      ; $02 $C0 $01 - F0 = F0 + F1
+FMUL.S F3, F7      ; $02 $C2 $37 - F3 = F3 * F7
+FNEG.S F2, F2      ; $02 $C4 $22 - F2 = -F2 (in place)
+FMOV.S F5, F0      ; $02 $C9 $50 - F5 = F0
+F2I.S F8           ; $02 $C7 $80 - A = (int32)F8
+```
+
+#### FPU Arithmetic - Double Precision
+
+Same format as single-precision, using $D0-$DA opcodes:
+
+| Instruction | Encoding | Operation |
+|-------------|----------|-----------|
+| FADD.D Fd, Fs | $02 $D0 $ds | Fd = Fd + Fs |
+| FSUB.D Fd, Fs | $02 $D1 $ds | Fd = Fd - Fs |
+| FMUL.D Fd, Fs | $02 $D2 $ds | Fd = Fd × Fs |
+| FDIV.D Fd, Fs | $02 $D3 $ds | Fd = Fd / Fs |
+| FNEG.D Fd, Fs | $02 $D4 $ds | Fd = -Fs |
+| FABS.D Fd, Fs | $02 $D5 $ds | Fd = \|Fs\| |
+| FCMP.D Fd, Fs | $02 $D6 $ds | Compare Fd to Fs (sets flags) |
+| F2I.D Fd | $02 $D7 $d0 | A = (int64)Fd (low 32 bits) |
+| I2F.D Fd | $02 $D8 $d0 | Fd = (float64)A |
+| FMOV.D Fd, Fs | $02 $D9 $ds | Fd = Fs (copy) |
+| FSQRT.D Fd, Fs | $02 $DA $ds | Fd = √Fs |
+
+**Examples:**
+```asm
+FADD.D F0, F1      ; $02 $D0 $01 - F0 = F0 + F1 (double)
+FDIV.D F15, F8     ; $02 $D3 $F8 - F15 = F15 / F8
+FSQRT.D F4, F4     ; $02 $DA $44 - F4 = √F4 (in place)
+```
+
+#### FCMP Flags
+
+Both FCMP.S and FCMP.D set processor flags:
+- **Z = 1** if Fd == Fs
+- **C = 1** if Fd >= Fs (unsigned comparison sense)
+- **N = 1** if Fd < Fs
+
+NaN comparisons: Z=0, C=0, N=0 (unordered).
+
+#### FPU Register Transfers
+
+| Instruction | Encoding | Operation |
+|-------------|----------|-----------|
+| FTOA Fd | $02 $E0 $d0 | A = low 32 bits of Fd |
+| FTOT Fd | $02 $E1 $d0 | T = high 32 bits of Fd |
+| ATOF Fd | $02 $E2 $d0 | Low 32 bits of Fd = A |
+| TTOF Fd | $02 $E3 $d0 | High 32 bits of Fd = T |
+| FCVT.DS Fd, Fs | $02 $E4 $ds | Fd = (double)Fs (single→double) |
+| FCVT.SD Fd, Fs | $02 $E5 $ds | Fd = (single)Fs (double→single) |
+
+**Examples:**
+```asm
+FTOA F3            ; $02 $E0 $30 - A = F3[31:0]
+ATOF F3            ; $02 $E2 $30 - F3[31:0] = A
+FCVT.DS F0, F1     ; $02 $E4 $01 - F0 = (double)F1
+```
+
+**Reserved FPU opcodes** ($CB-$CF, $DB-$DF) trap to software emulation via the TRAP mechanism. Opcodes $E6-$FF are illegal.
 
 ---
 
