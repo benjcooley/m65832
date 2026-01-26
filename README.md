@@ -87,17 +87,19 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - [ ] C compiler optimization and standard library
 - [ ] Linux boot and userland enablement
 
-## Tests
+## Running Tests
 
-GHDL testbenches:
+```bash
+# RTL testbenches (requires GHDL)
+tb/run_core_tests.sh          # Core and MMU tests
+tb/run_coprocessor_tests.sh   # 6502 coprocessor tests
 
-- Core/MMU suite (fast iteration): `tb/run_core_tests.sh`
-- Coprocessor suite (fast iteration): `tb/run_coprocessor_tests.sh`
-- 6502 illegal/65C02 cycle-accuracy test: `tb/tb_mx65_illegal.vhd` (included in coprocessor suite)
-- Manual core testbench:
-  `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_core.vhd && ghdl -e --std=08 tb_M65832_Core && ghdl -r --std=08 tb_M65832_Core --stop-time=1ms`
-- Manual MMU-only testbench:
-  `ghdl -a --std=08 rtl/m65832_pkg.vhd rtl/m65832_alu.vhd rtl/m65832_regfile.vhd rtl/m65832_addrgen.vhd rtl/m65832_decoder.vhd rtl/m65832_mmu.vhd rtl/m65832_core.vhd tb/tb_m65832_mmu.vhd && ghdl -e --std=08 tb_M65832_MMU && ghdl -r --std=08 tb_M65832_MMU --stop-time=1ms`
+# Assembler/disassembler tests
+cd as && make && ./run_tests.sh
+
+# Emulator tests
+cd emu && make && ./run_tests.sh
+```
 
 ## Architecture Highlights
 
@@ -289,46 +291,13 @@ See [Classic Coprocessor](docs/M65832_Classic_Coprocessor.md) for complete detai
 
 ```
 m65832/
-├── README.md
-├── docs/
-│   ├── M65832_Architecture_Reference.md
-│   ├── M65832_Instruction_Set.md
-│   ├── M65832_Assembler_Reference.md
-│   ├── M65832_Disassembler_Reference.md
-│   ├── M65832_Linux_Porting_Guide.md
-│   ├── M65832_System_Programming_Guide.md
-│   ├── M65832_Classic_Coprocessor.md
-│   └── M65832_Quick_Reference.md
-├── as/                     # Assembler and Disassembler
-│   ├── m65832as.c          # Two-pass assembler
-│   ├── m65832dis.c         # Disassembler (standalone + library)
-│   ├── Makefile
-│   ├── README.md
-│   └── test/               # Test suite
-├── emu/                    # Emulator
-│   ├── m65832emu.c         # CPU emulator core
-│   ├── m65832emu.h         # Emulator API
-│   ├── main.c              # Standalone emulator with debugger
-│   ├── Makefile
-│   ├── README.md
-│   └── test/               # Test programs
-├── cores/                  # Reference VHDL cores
-│   ├── 6502-mx65/          # MIT-licensed 6502 (for dedicated core)
-│   │   └── mx65.vhd        # ~1000 lines, cycle-accurate
-│   └── 65816-mister/       # GPL-3 65816 (reference for M65832)
-│       └── rtl/65C816/     # Modular: ALU, AddrGen, MCode, etc.
-├── rtl/                    # M65832 VHDL implementation
-│   ├── m65832_pkg.vhd
-│   ├── m65832_core.vhd
-│   ├── m65832_alu.vhd
-│   ├── m65832_regfile.vhd
-│   ├── m65832_decoder.vhd
-│   └── m65832_mmu.vhd
-├── tb/                     # GHDL testbenches
-│   ├── run_core_tests.sh
-│   ├── run_coprocessor_tests.sh
-│   └── tb_*.vhd
-└── software/               # Example code (planned)
+├── docs/           # Architecture and tool documentation
+├── as/             # Assembler and disassembler (run: make && ./run_tests.sh)
+├── emu/            # Emulator with debugger (run: make && ./run_tests.sh)
+├── rtl/            # M65832 VHDL implementation
+├── tb/             # GHDL testbenches (run: ./run_core_tests.sh)
+├── cores/          # Reference cores (MX65 6502, MiSTer 65816)
+└── software/       # Example code (planned)
 ```
 
 ## Target FPGA
