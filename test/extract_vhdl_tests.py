@@ -308,6 +308,11 @@ def run_emulator_test_v2(test, verbose=False):
     # Write all memory locations (pokes)
     for addr, data in test.pokes:
         script_lines.append(f'w {addr:x} {data:x}')
+        # Mirror writes to 64KB-wrapped addresses for privilege trap vectors
+        # (VHDL testbench memory wraps at 64KB, so $103D0 is seen as $03D0)
+        if addr < 0x10000:
+            mirrored_addr = addr + 0x10000
+            script_lines.append(f'w {mirrored_addr:x} {data:x}')
     
     # Reset to apply vectors
     script_lines.append('reset')
@@ -343,7 +348,7 @@ def run_emulator_test_v2(test, verbose=False):
         cmd = [
             EMULATOR,
             '--emulation',  # Start in emulation mode (16-bit vectors)
-            '-m', '64',     # 64KB memory  
+            '-m', '256',    # 256KB memory (for 32-bit vectors above 64KB)
             '-i',           # Interactive mode
         ]
         

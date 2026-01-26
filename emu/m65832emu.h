@@ -368,6 +368,7 @@ struct m65832_cpu {
     uint32_t y;             /* Y index (8/16/32-bit) */
     uint32_t s;             /* Stack pointer (16/32-bit) */
     uint32_t pc;            /* Program counter (16/32-bit) */
+    uint32_t inst_pc;       /* PC at start of current instruction (for faults) */
     
     /* Base registers */
     uint32_t d;             /* Direct page base */

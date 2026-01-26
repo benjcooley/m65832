@@ -42,7 +42,12 @@
  * ========================================================================= */
 
 static inline bool is_sysreg(uint32_t addr) {
-    return (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
+    /* VHDL: mmu_bypass when mem_addr_virt(15 downto 8) = x"F0"
+     * This means addresses $F000-$F0FF are MMIO (system registers).
+     * Also support the full 32-bit address $FFFFF000-$FFFFF0FF. */
+    uint32_t low16 = addr & 0xFFFF;
+    return (low16 >= 0xF000 && low16 < 0xF100) ||
+           (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
 }
 
 /* Forward declarations for exception handling (defined after stack functions) */
@@ -93,12 +98,14 @@ static void timer_tick(m65832_cpu_t *cpu, int cycles) {
     }
 }
 
+/* Forward declaration for privilege violation */
+static void privilege_violation(m65832_cpu_t *cpu);
+
 /* System register read */
 static uint32_t sysreg_read(m65832_cpu_t *cpu, uint32_t addr) {
     /* System registers require supervisor mode for access */
     if (!FLAG_TST(cpu, P_S)) {
-        cpu->trap = TRAP_PRIVILEGE;
-        cpu->trap_addr = cpu->pc;
+        privilege_violation(cpu);
         return 0;
     }
     
@@ -122,9 +129,7 @@ static uint32_t sysreg_read(m65832_cpu_t *cpu, uint32_t addr) {
 static void sysreg_write(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
     /* System registers require supervisor mode */
     if (!FLAG_TST(cpu, P_S)) {
-        cpu->trap = TRAP_PRIVILEGE;
-        cpu->trap_addr = cpu->pc;
-        cpu->running = false;
+        privilege_violation(cpu);
         return;
     }
     
@@ -403,6 +408,11 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
     
     /* System registers bypass MMU */
     if (is_sysreg(addr)) {
+        /* Check privilege first before doing read-modify-write */
+        if (!FLAG_TST(cpu, P_S)) {
+            privilege_violation(cpu);
+            return;
+        }
         uint32_t reg_addr = addr & ~3;
         uint32_t old = sysreg_read(cpu, reg_addr);
         int shift = (addr & 3) * 8;
@@ -807,6 +817,15 @@ static void page_fault_exception(m65832_cpu_t *cpu, uint32_t fault_addr, uint8_t
 static void illegal_instruction(m65832_cpu_t *cpu) {
     exception_enter(cpu, VEC_ILLEGAL_OP, cpu->pc);
     /* Don't set TRAP_ILLEGAL_OP - let the handler run just like BRK */
+}
+
+/* Privilege violation exception - TRAP code 0xFF per VHDL */
+#define PRIV_TRAP_CODE 0xFF
+static void privilege_violation(m65832_cpu_t *cpu) {
+    uint32_t vector = VEC_SYSCALL + (PRIV_TRAP_CODE * 4);
+    /* Use inst_pc so RTI returns to faulting instruction */
+    exception_enter(cpu, vector, cpu->inst_pc);
+    /* Don't set TRAP_PRIVILEGE - let the handler run */
 }
 
 /* ============================================================================
@@ -3767,6 +3786,9 @@ int m65832_step(m65832_cpu_t *cpu) {
         }
         cpu->trace_fn(cpu, pc, buf, 1, cpu->trace_user);  /* Simplified */
     }
+    
+    /* Save instruction start PC for fault handling */
+    cpu->inst_pc = cpu->pc;
     
     int cycles = execute_instruction(cpu);
     cpu->cycles += cycles;
