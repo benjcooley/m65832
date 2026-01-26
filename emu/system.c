@@ -25,7 +25,9 @@ void system_config_init(system_config_t *config) {
     config->entry_point = 0;
     config->enable_uart = true;
     config->uart_raw_mode = false;
+    config->enable_blkdev = true;
     config->disk_file = NULL;
+    config->disk_readonly = false;
     config->supervisor_mode = true;
     config->native32_mode = true;
     config->verbose = false;
@@ -133,6 +135,29 @@ system_state_t *system_init(const system_config_t *config) {
         }
     }
     
+    /* Initialize block device */
+    if (config->enable_blkdev) {
+        sys->blkdev = blkdev_init(sys->cpu, config->disk_file, config->disk_readonly);
+        if (!sys->blkdev) {
+            fprintf(stderr, "error: cannot initialize block device\n");
+            if (sys->uart) uart_destroy(sys->uart);
+            m65832_emu_close(sys->cpu);
+            free(sys);
+            return NULL;
+        }
+        
+        if (config->verbose) {
+            printf("System: Block device at 0x%08X", BLKDEV_BASE);
+            if (config->disk_file) {
+                printf(" (%s, %llu sectors)\n", 
+                       config->disk_file, 
+                       (unsigned long long)blkdev_get_capacity(sys->blkdev));
+            } else {
+                printf(" (no media)\n");
+            }
+        }
+    }
+    
     /* Initialize boot parameters */
     memset(&sys->boot_params, 0, sizeof(sys->boot_params));
     sys->boot_params.magic = BOOT_PARAMS_MAGIC;
@@ -209,6 +234,9 @@ void system_destroy(system_state_t *sys) {
     if (!sys) return;
     
     /* Destroy devices */
+    if (sys->blkdev) {
+        blkdev_destroy(sys->blkdev);
+    }
     if (sys->uart) {
         uart_destroy(sys->uart);
     }
@@ -271,7 +299,14 @@ uint64_t system_run(system_state_t *sys, uint64_t cycles) {
         }
         
         /* Handle device IRQs */
+        bool irq = false;
         if (sys->uart && uart_irq_pending(sys->uart)) {
+            irq = true;
+        }
+        if (sys->blkdev && blkdev_irq_pending(sys->blkdev)) {
+            irq = true;
+        }
+        if (irq) {
             m65832_irq(sys->cpu, true);
         }
     }
@@ -305,7 +340,8 @@ void system_poll_devices(system_state_t *sys) {
         uart_poll(sys->uart);
     }
     
-    /* Future: poll block device, network, etc. */
+    /* Block device uses synchronous DMA, no polling needed */
+    /* Future: poll network, etc. */
 }
 
 /* ============================================================================
@@ -366,6 +402,14 @@ void system_print_info(system_state_t *sys) {
     printf("  RAM:          %zu MB\n", sys->config.ram_size / (1024 * 1024));
     printf("  UART:         %s at 0x%08X\n", 
            sys->uart ? "enabled" : "disabled", UART_BASE);
+    printf("  Block device: %s at 0x%08X\n",
+           sys->blkdev ? "enabled" : "disabled", BLKDEV_BASE);
+    if (sys->blkdev && blkdev_get_capacity(sys->blkdev) > 0) {
+        uint64_t cap_mb = blkdev_get_capacity_bytes(sys->blkdev) / (1024 * 1024);
+        printf("    Disk:       %llu MB (%llu sectors)\n",
+               (unsigned long long)cap_mb,
+               (unsigned long long)blkdev_get_capacity(sys->blkdev));
+    }
     printf("  Timer:        0x%08X\n", SYSREG_TIMER_CTRL);
     
     if (sys->boot_params.kernel_size > 0) {

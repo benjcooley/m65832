@@ -10,6 +10,7 @@
 
 #include "m65832emu.h"
 #include "uart.h"
+#include "blkdev.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -85,8 +86,10 @@ typedef struct {
     bool enable_uart;           /* Enable UART device (default true) */
     bool uart_raw_mode;         /* Put terminal in raw mode */
     
-    /* Block device (future) */
+    /* Block device */
+    bool enable_blkdev;         /* Enable block device (default true) */
     const char *disk_file;      /* Disk image file (NULL = none) */
+    bool disk_readonly;         /* Open disk read-only */
     
     /* Execution configuration */
     bool supervisor_mode;       /* Start in supervisor mode */
@@ -107,7 +110,7 @@ typedef struct system_state {
     
     /* Devices */
     uart_state_t *uart;
-    /* blkdev_state_t *blkdev;  -- future */
+    blkdev_state_t *blkdev;
     
     /* Boot parameters */
     boot_params_t boot_params;

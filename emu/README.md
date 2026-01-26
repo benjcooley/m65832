@@ -32,6 +32,14 @@ High-performance emulator for the M65832 processor architecture. Supports the fu
   - IRQ generation on count match
   - Count latching at IRQ for precise reading
   - Auto-reset mode
+
+- **Block Device**
+  - Sector-based disk I/O (512-byte sectors)
+  - DMA transfers to/from system memory
+  - Read, write, flush commands
+  - Disk image file backing
+  - IRQ on command completion
+  - Supports disks up to 2^64 sectors
   
 - **6502 Coprocessor**
   - Cycle-accurate 6502/65C02 emulation
@@ -335,6 +343,86 @@ while (m65832_emu_is_running(cpu)) {
     m65832_emu_step(cpu);
     timer_tick(&timer, cpu);  // Update timer
 }
+```
+
+## Block Device
+
+The emulator includes a simple block device for disk I/O. It uses DMA transfers to read/write sectors between the disk image and system memory.
+
+### Block Device Registers (at 0x00FFF120)
+
+| Offset | Name | R/W | Description |
+|--------|------|-----|-------------|
+| 0x00 | STATUS | R | Status register (see bits below) |
+| 0x04 | COMMAND | W | Command register |
+| 0x08 | SECTOR_LO | R/W | Sector number bits 0-31 |
+| 0x0C | SECTOR_HI | R/W | Sector number bits 32-63 |
+| 0x10 | DMA_ADDR | R/W | DMA address in system memory |
+| 0x14 | COUNT | R/W | Number of sectors to transfer |
+| 0x18 | CAPACITY_LO | R | Disk capacity (sectors) bits 0-31 |
+| 0x1C | CAPACITY_HI | R | Disk capacity (sectors) bits 32-63 |
+
+### Status Register Bits
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 0 | READY | Device ready for commands |
+| 1 | BUSY | Operation in progress |
+| 2 | ERROR | Error occurred (error code in high byte) |
+| 3 | DRQ | Data request (PIO mode, not used) |
+| 4 | PRESENT | Media present |
+| 5 | WRITABLE | Media is writable |
+| 6 | IRQ | IRQ pending (operation complete) |
+
+### Commands
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0x00 | NOP | No operation |
+| 0x01 | READ | Read sector(s) via DMA |
+| 0x02 | WRITE | Write sector(s) via DMA |
+| 0x03 | FLUSH | Flush write cache to disk |
+| 0x04 | IDENTIFY | Identify device |
+| 0x05 | RESET | Reset device |
+| 0x06 | ACK_IRQ | Acknowledge interrupt |
+
+### Usage Example (Assembly)
+
+```asm
+BLKDEV_BASE     = $00FFF120
+BLKDEV_STATUS   = BLKDEV_BASE + $00
+BLKDEV_COMMAND  = BLKDEV_BASE + $04
+BLKDEV_SECTOR   = BLKDEV_BASE + $08
+BLKDEV_DMA_ADDR = BLKDEV_BASE + $10
+BLKDEV_COUNT    = BLKDEV_BASE + $14
+
+; Read sector 0 into memory at $10000
+    LDA #0
+    STA BLKDEV_SECTOR       ; Sector 0
+    LDA #$10000
+    STA BLKDEV_DMA_ADDR     ; DMA to $10000
+    LDA #1
+    STA BLKDEV_COUNT        ; Read 1 sector
+    LDA #1
+    STA BLKDEV_COMMAND      ; Issue READ command
+
+.wait:
+    LDA BLKDEV_STATUS
+    AND #$01                ; Check READY bit
+    BEQ .wait               ; Wait until ready
+```
+
+### Command Line
+
+```bash
+# Run with a disk image
+./m65832emu --system --disk rootfs.img kernel.bin
+
+# Create a 10MB disk image
+dd if=/dev/zero of=disk.img bs=512 count=20480
+
+# Run with read-only disk
+./m65832emu --system --disk disk.img --disk-ro kernel.bin
 ```
 
 ## Performance

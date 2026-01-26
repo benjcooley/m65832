@@ -8,6 +8,7 @@
 #include "m65832emu.h"
 #include "system.h"
 #include "uart.h"
+#include "blkdev.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,6 +168,8 @@ static void print_usage(const char *prog) {
     printf("  --kernel FILE        Load kernel at 0x00100000\n");
     printf("  --initrd FILE        Load initrd at 0x01000000\n");
     printf("  --cmdline \"STRING\"   Kernel command line\n");
+    printf("  --disk FILE          Block device disk image file\n");
+    printf("  --disk-ro            Open disk image read-only\n");
     printf("  --raw                Put terminal in raw mode (for UART I/O)\n");
     printf("\n");
     printf("Examples:\n");
@@ -176,6 +179,7 @@ static void print_usage(const char *prog) {
     printf("  %s -m 1024 -x program.hex       Load HEX file with 1MB RAM\n", prog);
     printf("  %s -i program.bin               Interactive debugger\n", prog);
     printf("  %s --system --kernel vmlinux    Boot Linux kernel\n", prog);
+    printf("  %s --system --disk root.img     Run with disk image\n", prog);
     printf("  %s --system --raw test.bin      Run with UART in raw mode\n", prog);
 }
 
@@ -371,6 +375,7 @@ static void interactive_mode(m65832_cpu_t *cpu) {
             printf("  bt, backtrace      Show stack backtrace\n");
             printf("  coproc             Show 6502 coprocessor state\n");
             printf("  mmio               Show MMIO regions\n");
+            printf("  blk, disk          Show block device state\n");
             printf("Control:\n");
             printf("  reset              Reset CPU\n");
             printf("  irq [0|1]          Assert/deassert IRQ (default: assert)\n");
@@ -543,6 +548,32 @@ static void interactive_mode(m65832_cpu_t *cpu) {
         else if (strcmp(cmd, "mmio") == 0) {
             m65832_mmio_print(cpu);
         }
+        else if (strcmp(cmd, "blk") == 0 || strcmp(cmd, "disk") == 0) {
+            if (g_system && g_system->blkdev) {
+                blkdev_state_t *blk = g_system->blkdev;
+                printf("Block Device:\n");
+                printf("  Status:   %02X  (READY=%d BUSY=%d ERR=%d DRQ=%d PRESENT=%d WR=%d IRQ=%d)\n",
+                       blk->status & 0xFF,
+                       (blk->status & BLKDEV_STATUS_READY) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_BUSY) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_ERROR) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_DRQ) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_PRESENT) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_WRITABLE) ? 1 : 0,
+                       (blk->status & BLKDEV_STATUS_IRQ) ? 1 : 0);
+                if (blk->error != BLKDEV_ERR_NONE) {
+                    printf("  Error:    %02X\n", blk->error);
+                }
+                printf("  Sector:   %llu\n", (unsigned long long)blk->sector);
+                printf("  DMA Addr: %08X\n", blk->dma_addr);
+                printf("  Count:    %u\n", blk->count);
+                printf("  Capacity: %llu sectors (%llu MB)\n",
+                       (unsigned long long)blkdev_get_capacity(blk),
+                       (unsigned long long)blkdev_get_capacity_bytes(blk) / (1024 * 1024));
+            } else {
+                printf("Block device not available (use --system mode)\n");
+            }
+        }
         else if (strcmp(cmd, "sys") == 0 || strcmp(cmd, "sysregs") == 0) {
             /* Display system registers */
             printf("System Registers:\n");
@@ -694,6 +725,8 @@ int main(int argc, char *argv[]) {
     const char *kernel_file = NULL;
     const char *initrd_file = NULL;
     const char *cmdline = NULL;
+    const char *disk_file = NULL;
+    int disk_readonly = 0;
     size_t sys_ram_size = 256 * 1024 * 1024;  /* Default 256 MB */
     int raw_mode = 0;
     
@@ -774,6 +807,14 @@ int main(int argc, char *argv[]) {
             raw_mode = 1;
             g_system_mode = 1;
         }
+        else if (strcmp(argv[i], "--disk") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            disk_file = argv[i];
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--disk-ro") == 0) {
+            disk_readonly = 1;
+        }
         else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;
@@ -805,6 +846,9 @@ int main(int argc, char *argv[]) {
         config.entry_point = entry_specified ? entry_addr : 0;
         config.enable_uart = true;
         config.uart_raw_mode = raw_mode;
+        config.enable_blkdev = true;
+        config.disk_file = disk_file;
+        config.disk_readonly = disk_readonly;
         config.supervisor_mode = true;
         config.native32_mode = !emulation_mode;
         config.verbose = g_verbose;
