@@ -53,6 +53,7 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 ### Tools
 - **[Assembler Reference](docs/M65832_Assembler_Reference.md)** - Assembler usage, syntax, and directives
 - **[Disassembler Reference](docs/M65832_Disassembler_Reference.md)** - Disassembler usage and library API
+- **[Emulator](emu/README.md)** - High-performance emulator with debugger, FPU, MMU, and 6502 coprocessor support
 
 ### System Programming
 - **[System Programming Guide](docs/M65832_System_Programming_Guide.md)** - Supervisor mode, MMU, interrupts, and multitasking
@@ -61,6 +62,15 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 
 ## STATUS
 
+### Toolchain - Complete and Working
+
+- [x] **Assembler** - Full two-pass assembler with macros, includes, sections, and complete instruction set support
+- [x] **Disassembler** - Standalone tool and library API for binary analysis
+- [x] **Emulator** - High-performance emulator with FPU, MMU, timer, and 100% VHDL test compatibility (366/366 tests passing)
+- [x] **Experimental C Compiler** - LCC-based backend for C compilation (experimental)
+
+### RTL Implementation
+
 - [x] Feature complete for the current RTL milestone
 - [x] Integer core (ALU, decode, wide data paths)
 - [x] 32-bit architectural extensions (addressing, width controls)
@@ -68,12 +78,13 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - [x] MMU with page-table walk + TLB
 - [x] Cycle-accurate 6502 coprocessor and interleaving
 - [x] Privilege model, exceptions, and interrupt entry/exit
-- [x] Assembler (two-pass, includes, sections, full instruction set)
-- [x] Disassembler (standalone and library)
+
+### In Progress
+
 - [ ] Expanded regression and corner-case validation
 - [ ] Hardware bring-up on target FPGA
 - [ ] Performance characterization and tuning
-- [ ] C compiler support (runtime, ABI, and toolchain)
+- [ ] C compiler optimization and standard library
 - [ ] Linux boot and userland enablement
 
 ## Tests
@@ -214,6 +225,13 @@ m65832/
 │   ├── Makefile
 │   ├── README.md
 │   └── test/               # Test suite
+├── emu/                    # Emulator
+│   ├── m65832emu.c         # CPU emulator core
+│   ├── m65832emu.h         # Emulator API
+│   ├── main.c              # Standalone emulator with debugger
+│   ├── Makefile
+│   ├── README.md
+│   └── test/               # Test programs
 ├── cores/                  # Reference VHDL cores
 │   ├── 6502-mx65/          # MIT-licensed 6502 (for dedicated core)
 │   │   └── mx65.vhd        # ~1000 lines, cycle-accurate
