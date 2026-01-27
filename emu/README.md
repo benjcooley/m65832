@@ -7,10 +7,11 @@ High-performance emulator for the M65832 processor architecture. Supports the fu
 - **Complete M65832 CPU emulation**
   - All 6502/65816 instructions
   - M65832 extended instructions ($02 prefix)
-  - Extended ALU sizing via $02 prefix (WID removed)
+  - Extended ALU instructions via $02 prefix
   - Variable register widths (8/16/32-bit)
   - Default: 32-bit native mode (for new code)
-  - Optional: 6502 emulation mode (for legacy code)
+  - 16 and 8 bit modes (non-coprocessor compatibility processes)
+  - ONE 6502 cycle accurate coprocessor process (for legacy code)
   
 - **Floating Point Unit (FPU)**
   - Sixteen 64-bit FPU registers (F0-F15)
