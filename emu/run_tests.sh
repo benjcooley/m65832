@@ -51,6 +51,35 @@ run_test() {
     fi
 }
 
+# Helper function to run a test and verify flags
+run_test_flag() {
+    local name="$1"
+    local asm_file="$2"
+    local flag_regex="$3"
+    local cycles="$4"
+    
+    echo -n "Test: $name... "
+    
+    # Assemble
+    if ! $ASSEMBLER "$asm_file" -o "${asm_file%.asm}.bin" > /dev/null 2>&1; then
+        echo "FAIL (assembly failed)"
+        FAIL=$((FAIL + 1))
+        return
+    fi
+    
+    # Run emulator and capture output (defaults to 32-bit native mode)
+    output=$($EMULATOR -c "$cycles" -s "${asm_file%.asm}.bin" 2>&1)
+    
+    if echo "$output" | grep -Eq "P:.*\\[.*${flag_regex}"; then
+        echo "PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL (expected flag ${flag_regex})"
+        echo "$output" | grep "P:"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 # Test basic emulator functions
 echo "--- Basic Emulator Tests ---"
 
@@ -282,6 +311,79 @@ cat > test/test_fp_mov.asm << 'EOF'
 EOF
 
 run_test "FPU FMOV.S/FSUB.S" "test/test_fp_mov.asm" "00000007" 200
+ 
+# Test 16: FPU ops should not update flags
+cat > test/test_fp_flags_z.asm << 'EOF'
+; Test FPU ops preserve Z flag
+    .org $1000
+    .M32
+    
+    LDA #$00000000
+    CMP #$00000000    ; sets Z=1
+    I2F.S F0          ; F0 = 0.0
+    FADD.S F0, F0     ; F0 = 0.0
+    STP
+EOF
+
+run_test_flag "FPU preserves Z flag" "test/test_fp_flags_z.asm" "Z" 200
+
+# Test 17: FCMP should not update flags
+cat > test/test_fp_flags_cmp.asm << 'EOF'
+; Test FCMP does not update flags
+    .org $1000
+    .M32
+    
+    LDA #$00000000
+    CMP #$00000000    ; sets Z=1
+    I2F.S F0          ; F0 = 0.0
+    I2F.S F1          ; F1 = 0.0
+    FCMP.S F0, F1     ; should not modify flags
+    STP
+EOF
+
+run_test_flag "FCMP preserves Z flag" "test/test_fp_flags_cmp.asm" "Z" 200
+
+# Test 13: 32-bit LDA should not update flags
+cat > test/test_lda_flags_z.asm << 'EOF'
+; Test LDA flags in 32-bit mode (Z should remain set)
+    .org $1000
+    .M32
+    
+    LDA #$00000000
+    CMP #$00000000    ; sets Z=1
+    LDA #$00000001    ; should not clear Z in 32-bit mode
+    STP
+EOF
+
+run_test_flag "LDA preserves Z in 32-bit" "test/test_lda_flags_z.asm" "Z" 200
+
+# Test 14: 32-bit LDA should not update flags (N)
+cat > test/test_lda_flags_n.asm << 'EOF'
+; Test LDA flags in 32-bit mode (N should remain set)
+    .org $1000
+    .M32
+    
+    LDA #$00000000
+    CMP #$00000001    ; sets N=1 (A - 1 = 0xFFFFFFFF)
+    LDA #$00000000    ; should not clear N in 32-bit mode
+    STP
+EOF
+
+run_test_flag "LDA preserves N in 32-bit" "test/test_lda_flags_n.asm" "N" 200
+
+# Test 15: Extended LD should not update flags
+cat > test/test_ld_flags.asm << 'EOF'
+; Test extended LD flags in 32-bit mode (Z should remain set)
+    .org $1000
+    .M32
+    
+    LDA #$00000000
+    CMP #$00000000    ; sets Z=1
+    LD R0, #$00000001 ; extended load should not clear Z
+    STP
+EOF
+
+run_test_flag "Extended LD preserves Z" "test/test_ld_flags.asm" "Z" 200
 
 # Summary
 echo

@@ -15,7 +15,9 @@ base_sources="\
 
 compile_sources() {
   sources="$1"
-  ghdl -a --std=08 ${sources}
+  for src in ${sources}; do
+    ghdl -a --std=08 "${src}"
+  done
 }
 
 run_tb() {

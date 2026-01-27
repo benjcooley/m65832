@@ -5946,6 +5946,264 @@ begin
         
         check_mem(16#0600#, x"5A", "Timer IRQ handler ran");
         check_mem(16#0601#, x"10", "Timer count latched");
+
+        -----------------------------------------------------------------------
+        -- TEST 129: 32-bit LDA preserves Z flag
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 129: 32-bit LDA preserves Z flag";
+        
+        -- Program: set 32-bit M, set Z via CMP, LDA nonzero (no flags), BEQ -> store $5A
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        
+        poke(16#8004#, x"A9");  -- LDA #$00000000
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        
+        poke(16#8009#, x"C9");  -- CMP #$00000000 (sets Z)
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"00");
+        
+        poke(16#800E#, x"A9");  -- LDA #$00000001 (should not clear Z)
+        poke(16#800F#, x"01");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"00");
+        
+        poke(16#8013#, x"F0");  -- BEQ +$000B -> $8021
+        poke(16#8014#, x"0B");  -- low
+        poke(16#8015#, x"00");  -- high
+        
+        poke(16#8016#, x"A9");  -- LDA #$00000000 (fail)
+        poke(16#8017#, x"00");
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"00");
+        poke(16#801A#, x"00");
+        poke(16#801B#, x"8D");  -- STA $0610
+        poke(16#801C#, x"10");
+        poke(16#801D#, x"06");
+        
+        poke(16#801E#, x"80");  -- BRA +$0008 -> $8029
+        poke(16#801F#, x"08");
+        poke(16#8020#, x"00");
+        
+        poke(16#8021#, x"A9");  -- LDA #$0000005A (success)
+        poke(16#8022#, x"5A");
+        poke(16#8023#, x"00");
+        poke(16#8024#, x"00");
+        poke(16#8025#, x"00");
+        poke(16#8026#, x"8D");  -- STA $0610
+        poke(16#8027#, x"10");
+        poke(16#8028#, x"06");
+        poke(16#8029#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0610#, x"5A", "32-bit LDA keeps Z");
+        
+        -----------------------------------------------------------------------
+        -- TEST 130: 32-bit LDA preserves N flag
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 130: 32-bit LDA preserves N flag";
+        
+        -- Program: set 32-bit M, set N via CMP, LDA zero (no flags), BMI -> store $A5
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        
+        poke(16#8004#, x"A9");  -- LDA #$00000000
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        
+        poke(16#8009#, x"C9");  -- CMP #$00000001 (sets N)
+        poke(16#800A#, x"01");
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"00");
+        
+        poke(16#800E#, x"A9");  -- LDA #$00000000 (should not clear N)
+        poke(16#800F#, x"00");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"00");
+        
+        poke(16#8013#, x"30");  -- BMI +$000B -> $8021
+        poke(16#8014#, x"0B");  -- low
+        poke(16#8015#, x"00");  -- high
+        
+        poke(16#8016#, x"A9");  -- LDA #$00000000 (fail)
+        poke(16#8017#, x"00");
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"00");
+        poke(16#801A#, x"00");
+        poke(16#801B#, x"8D");  -- STA $0611
+        poke(16#801C#, x"11");
+        poke(16#801D#, x"06");
+        
+        poke(16#801E#, x"80");  -- BRA +$0008 -> $8029
+        poke(16#801F#, x"08");
+        poke(16#8020#, x"00");
+        
+        poke(16#8021#, x"A9");  -- LDA #$000000A5 (success)
+        poke(16#8022#, x"A5");
+        poke(16#8023#, x"00");
+        poke(16#8024#, x"00");
+        poke(16#8025#, x"00");
+        poke(16#8026#, x"8D");  -- STA $0611
+        poke(16#8027#, x"11");
+        poke(16#8028#, x"06");
+        poke(16#8029#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(220);
+        
+        check_mem(16#0611#, x"A5", "32-bit LDA keeps N");
+
+        -----------------------------------------------------------------------
+        -- TEST 131: FPU ops preserve Z flag
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 131: FPU ops preserve Z flag";
+        
+        -- Program: set Z, run FPU op, BEQ -> store $5A
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        
+        poke(16#8004#, x"A9");  -- LDA #$00000000
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        
+        poke(16#8009#, x"C9");  -- CMP #$00000000 (sets Z)
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"00");
+        
+        poke(16#800E#, x"02");  -- I2F.S F0
+        poke(16#800F#, x"C8");
+        poke(16#8010#, x"00");
+        
+        poke(16#8011#, x"02");  -- FADD.S F0, F0
+        poke(16#8012#, x"C0");
+        poke(16#8013#, x"00");
+        
+        poke(16#8014#, x"F0");  -- BEQ +$0009 -> $801F
+        poke(16#8015#, x"09");  -- low
+        poke(16#8016#, x"00");  -- high
+        
+        poke(16#8017#, x"A9");  -- LDA #$00000000 (fail)
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"00");
+        poke(16#801A#, x"00");
+        poke(16#801B#, x"00");
+        poke(16#801C#, x"8D");  -- STA $0612
+        poke(16#801D#, x"12");
+        poke(16#801E#, x"06");
+        poke(16#801F#, x"DB");  -- STP
+        
+        poke(16#8020#, x"A9");  -- LDA #$0000005A (success)
+        poke(16#8021#, x"5A");
+        poke(16#8022#, x"00");
+        poke(16#8023#, x"00");
+        poke(16#8024#, x"00");
+        poke(16#8025#, x"8D");  -- STA $0612
+        poke(16#8026#, x"12");
+        poke(16#8027#, x"06");
+        poke(16#8028#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(240);
+        
+        check_mem(16#0612#, x"5A", "FPU preserves Z flag");
+        
+        -----------------------------------------------------------------------
+        -- TEST 132: FCMP preserves Z flag
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 132: FCMP preserves Z flag";
+        
+        -- Program: set Z, run FCMP, BEQ -> store $A5
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        
+        poke(16#8004#, x"A9");  -- LDA #$00000000
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"00");
+        
+        poke(16#8009#, x"C9");  -- CMP #$00000000 (sets Z)
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"00");
+        
+        poke(16#800E#, x"02");  -- I2F.S F0
+        poke(16#800F#, x"C8");
+        poke(16#8010#, x"00");
+        
+        poke(16#8011#, x"02");  -- I2F.S F1
+        poke(16#8012#, x"C8");
+        poke(16#8013#, x"10");
+        
+        poke(16#8014#, x"02");  -- FCMP.S F0, F1
+        poke(16#8015#, x"C6");
+        poke(16#8016#, x"01");
+        
+        poke(16#8017#, x"F0");  -- BEQ +$0009 -> $8022
+        poke(16#8018#, x"09");  -- low
+        poke(16#8019#, x"00");  -- high
+        
+        poke(16#801A#, x"A9");  -- LDA #$00000000 (fail)
+        poke(16#801B#, x"00");
+        poke(16#801C#, x"00");
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"00");
+        poke(16#801F#, x"8D");  -- STA $0613
+        poke(16#8020#, x"13");
+        poke(16#8021#, x"06");
+        poke(16#8022#, x"DB");  -- STP
+        
+        poke(16#8023#, x"A9");  -- LDA #$000000A5 (success)
+        poke(16#8024#, x"A5");
+        poke(16#8025#, x"00");
+        poke(16#8026#, x"00");
+        poke(16#8027#, x"00");
+        poke(16#8028#, x"8D");  -- STA $0613
+        poke(16#8029#, x"13");
+        poke(16#802A#, x"06");
+        poke(16#802B#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(260);
+        
+        check_mem(16#0613#, x"A5", "FCMP preserves Z flag");
         
         -----------------------------------------------------------------------
         -- Summary

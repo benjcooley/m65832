@@ -1295,98 +1295,98 @@ static int execute_instruction(m65832_cpu_t *cpu) {
         case 0xA9: /* LDA #imm */
             addr = addr_imm(cpu, width_m);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 2;
             break;
         case 0xA5: /* LDA dp */
             addr = addr_dp(cpu);
             if (cpu->trap == TRAP_ALIGNMENT) { cycles = 7; break; }
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 3;
             break;
         case 0xB5: /* LDA dp,X */
             addr = addr_dpx(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
         case 0xAD: /* LDA abs */
             addr = addr_abs(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
         case 0xBD: /* LDA abs,X */
             addr = addr_absx(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
         case 0xB9: /* LDA abs,Y */
             addr = addr_absy(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
         case 0xA1: /* LDA (dp,X) */
             addr = addr_dpxi(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 6;
             break;
         case 0xB1: /* LDA (dp),Y */
             addr = addr_dpiy(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
         case 0xB2: /* LDA (dp) */
             addr = addr_dpi(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
         case 0xA7: /* LDA [dp] */
             addr = addr_dpil(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 6;
             break;
         case 0xB7: /* LDA [dp],Y (65816 standard) */
             addr = addr_dpily(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 6;
             break;
         case 0xA3: /* LDA sr,S (M65832: cc=11, bbb=000) */
             addr = addr_sr(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
         case 0xB3: /* LDA [dp],Y (M65832: cc=11, bbb=100) */
             addr = addr_dpily(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 6;
             break;
         case 0xAB: /* LDA long (M65832: cc=11, bbb=010) */
             addr = addr_long(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
         case 0xAF: /* LDA (sr,S),Y - M65832 cc=11 bbb=011 */
             addr = addr_sriy(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 7;
             break;
         case 0xBF: /* LDA long,X - M65832 cc=11 bbb=111 */
             addr = addr_longx(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
 
@@ -1394,31 +1394,31 @@ static int execute_instruction(m65832_cpu_t *cpu) {
         case 0xA2: /* LDX #imm */
             addr = addr_imm(cpu, width_x);
             cpu->x = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 2;
             break;
         case 0xA6: /* LDX dp */
             addr = addr_dp(cpu);
             cpu->x = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 3;
             break;
         case 0xB6: /* LDX dp,Y */
             addr = addr_dpy(cpu);
             cpu->x = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 4;
             break;
         case 0xAE: /* LDX abs */
             addr = addr_abs(cpu);
             cpu->x = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 4;
             break;
         case 0xBE: /* LDX abs,Y */
             addr = addr_absy(cpu);
             cpu->x = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 4;
             break;
 
@@ -1426,31 +1426,31 @@ static int execute_instruction(m65832_cpu_t *cpu) {
         case 0xA0: /* LDY #imm */
             addr = addr_imm(cpu, width_x);
             cpu->y = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 2;
             break;
         case 0xA4: /* LDY dp */
             addr = addr_dp(cpu);
             cpu->y = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 3;
             break;
         case 0xB4: /* LDY dp,X */
             addr = addr_dpx(cpu);
             cpu->y = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 4;
             break;
         case 0xAC: /* LDY abs */
             addr = addr_abs(cpu);
             cpu->y = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 4;
             break;
         case 0xBC: /* LDY abs,X */
             addr = addr_absx(cpu);
             cpu->y = read_val(cpu, addr, width_x);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_x != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 4;
             break;
 
@@ -2709,7 +2709,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                                     } else {
                                         cpu->a = src_val;
                                     }
-                                    update_nz(cpu, src_val, ext_width);
                                 }
                                 break;
                             case 0x81: /* ST */
@@ -3557,9 +3556,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         union { uint64_t u; double d; } conv_d, conv_s;
                         conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
                         conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
-                        FLAG_PUT(cpu, P_Z, fd_s.f == fs_s.f);
-                        FLAG_PUT(cpu, P_C, fd_s.f >= fs_s.f);
-                        FLAG_PUT(cpu, P_N, fd_s.f < fs_s.f);
                         cycles = 3;
                         break;
                     }
@@ -3570,7 +3566,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         union { uint64_t u; double d; } conv_d;
                         conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
                         cpu->a = (uint32_t)(int32_t)fd_s.f;
-                        update_nz32(cpu, cpu->a);
                         cycles = 3;
                         break;
                     }
@@ -3664,9 +3659,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        FLAG_PUT(cpu, P_Z, cpu->f[fd] == cpu->f[fs]);
-                        FLAG_PUT(cpu, P_C, cpu->f[fd] >= cpu->f[fs]);
-                        FLAG_PUT(cpu, P_N, cpu->f[fd] < cpu->f[fs]);
                         cycles = 3;
                         break;
                     }
@@ -3676,7 +3668,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         int64_t ival = (int64_t)cpu->f[fd];
                         cpu->a = (uint32_t)ival;
                         cpu->t = (uint32_t)(ival >> 32);
-                        update_nz32(cpu, cpu->a);
                         cycles = 3;
                         break;
                     }

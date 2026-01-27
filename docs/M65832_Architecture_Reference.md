@@ -622,7 +622,7 @@ LDA Rn          Load from register to A
 LDA B+$XXXX     Load from B-relative address to A
 ... (all 6502/65816 addressing modes)
 ```
-Flags affected: N, Z
+Flags affected: N, Z (not in 32-bit mode)
 
 #### LD - Extended Load ($02 $80)
 
@@ -642,7 +642,7 @@ Mode byte: `[size:2][target:1][addr_mode:5]`
 - Size: 00=BYTE, 01=WORD, 10=LONG
 - Target: 0=A (no dest byte), 1=Rn (dest byte follows)
 
-Flags affected: N, Z
+Flags affected: None
 
 #### STA - Store Accumulator (Traditional)
 ```
@@ -661,6 +661,7 @@ ST.B [addr], Rn  Store Rn to memory (8-bit)
 
 #### LDX, LDY, STX, STY
 Traditional index register loads/stores (always 32-bit in 32-bit mode).
+Flags affected for LDX/LDY: N, Z (not in 32-bit mode)
 
 ### 8.2 Arithmetic
 
@@ -1956,7 +1957,7 @@ $02 $C2 $ds      FMUL.S Fd, Fs     ; Fd = Fd × Fs
 $02 $C3 $ds      FDIV.S Fd, Fs     ; Fd = Fd / Fs
 $02 $C4 $ds      FNEG.S Fd, Fs     ; Fd = -Fs
 $02 $C5 $ds      FABS.S Fd, Fs     ; Fd = |Fs|
-$02 $C6 $ds      FCMP.S Fd, Fs     ; Compare, set Z/C/N
+$02 $C6 $ds      FCMP.S Fd, Fs     ; Compare (flags unaffected)
 $02 $C7 $d0      F2I.S Fd          ; A = (int32)Fd
 $02 $C8 $d0      I2F.S Fd          ; Fd = (float32)A
 $02 $C9 $ds      FMOV.S Fd, Fs     ; Fd = Fs (copy)

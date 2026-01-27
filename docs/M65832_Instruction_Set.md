@@ -335,7 +335,7 @@ Bit:   7   6   5   4   3   2   1   0
 
 | Opcode | Mnemonic | Operation | Flags |
 |--------|----------|-----------|-------|
-| $02 $80 | LD | dest = src | N, Z |
+| $02 $80 | LD | dest = src | None |
 | $02 $81 | ST | [addr] = src | — |
 | $02 $82 | ADC | dest = dest + src + C | N, V, Z, C |
 | $02 $83 | SBC | dest = dest - src - !C | N, V, Z, C |
@@ -472,7 +472,7 @@ Extend operations for converting between data sizes.
 | $05 | CTZ | Count trailing zeros |
 | $06 | POPCNT | Population count (count 1 bits) |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 **Assembly Syntax:**
 
@@ -518,7 +518,7 @@ Loads a value into the accumulator.
 | Stack Relative | LDA sr,S | $A3 | 2 | 4 |
 | SR Indirect Indexed | LDA (sr,S),Y | $B3 | 2 | 7 |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 **Notes:**
 - Byte count for immediate depends on M flag: 2 (8-bit), 3 (16-bit), 5 (32-bit)
@@ -557,7 +557,7 @@ Stores the accumulator to memory.
 | Absolute | LDX abs | $AE | 3 |
 | Abs Indexed Y | LDX abs,Y | $BE | 3 |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 #### LDY - Load Y Register
 
@@ -569,7 +569,7 @@ Stores the accumulator to memory.
 | Absolute | LDY abs | $AC | 3 |
 | Abs Indexed X | LDY abs,X | $BC | 3 |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 #### STX - Store X Register
 
@@ -654,7 +654,7 @@ Increments memory or accumulator by one.
 | Absolute | INC abs | $EE | 3 |
 | Abs Indexed X | INC abs,X | $FE | 3 |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 #### DEC - Decrement
 
@@ -668,7 +668,7 @@ Decrements memory or accumulator by one.
 | Absolute | DEC abs | $CE | 3 |
 | Abs Indexed X | DEC abs,X | $DE | 3 |
 
-**Flags Affected:** N, Z
+**Flags Affected:** N, Z (not in 32-bit mode)
 
 #### INX / INY / DEX / DEY - Index Register Inc/Dec
 
@@ -1586,7 +1586,7 @@ Two-operand destructive format: `Fd = Fd op Fs` (binary) or `Fd = op(Fs)` (unary
 | FDIV.S Fd, Fs | $02 $C3 $ds | Fd = Fd / Fs |
 | FNEG.S Fd, Fs | $02 $C4 $ds | Fd = -Fs |
 | FABS.S Fd, Fs | $02 $C5 $ds | Fd = \|Fs\| |
-| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd to Fs (sets flags) |
+| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd to Fs (flags unaffected) |
 | F2I.S Fd | $02 $C7 $d0 | A = (int32)Fd |
 | I2F.S Fd | $02 $C8 $d0 | Fd = (float32)A |
 | FMOV.S Fd, Fs | $02 $C9 $ds | Fd = Fs (copy) |
@@ -1615,7 +1615,7 @@ Same format as single-precision, using $D0-$DA opcodes:
 | FDIV.D Fd, Fs | $02 $D3 $ds | Fd = Fd / Fs |
 | FNEG.D Fd, Fs | $02 $D4 $ds | Fd = -Fs |
 | FABS.D Fd, Fs | $02 $D5 $ds | Fd = \|Fs\| |
-| FCMP.D Fd, Fs | $02 $D6 $ds | Compare Fd to Fs (sets flags) |
+| FCMP.D Fd, Fs | $02 $D6 $ds | Compare Fd to Fs (flags unaffected) |
 | F2I.D Fd | $02 $D7 $d0 | A = (int64)Fd (low 32 bits) |
 | I2F.D Fd | $02 $D8 $d0 | Fd = (float64)A |
 | FMOV.D Fd, Fs | $02 $D9 $ds | Fd = Fs (copy) |
@@ -1630,12 +1630,7 @@ FSQRT.D F4, F4     ; $02 $DA $44 - F4 = √F4 (in place)
 
 #### FCMP Flags
 
-Both FCMP.S and FCMP.D set processor flags:
-- **Z = 1** if Fd == Fs
-- **C = 1** if Fd >= Fs (unsigned comparison sense)
-- **N = 1** if Fd < Fs
-
-NaN comparisons: Z=0, C=0, N=0 (unordered).
+FCMP.S and FCMP.D do not modify processor flags.
 
 #### FPU Register Transfers
 

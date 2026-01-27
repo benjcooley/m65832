@@ -119,9 +119,9 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 ### Load/Store
 | Instruction | Operation | Flags |
 |-------------|-----------|-------|
-| LDA src | A = src | NZ |
-| LDX src | X = src | NZ |
-| LDY src | Y = src | NZ |
+| LDA src | A = src | NZ (not in 32-bit mode) |
+| LDX src | X = src | NZ (not in 32-bit mode) |
+| LDY src | Y = src | NZ (not in 32-bit mode) |
 | STA dst | [dst] = A | — |
 | STX dst | [dst] = X | — |
 | STY dst | [dst] = Y | — |
@@ -439,7 +439,7 @@ except `(Rm)` which uses high nibble for `Fn` and low nibble for `Rm`.
 | FDIV.S Fd, Fs | $02 $C3 $ds | Fd = Fd / Fs |
 | FNEG.S Fd, Fs | $02 $C4 $ds | Fd = -Fs |
 | FABS.S Fd, Fs | $02 $C5 $ds | Fd = \|Fs\| |
-| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd, Fs |
+| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd, Fs (flags unaffected) |
 | F2I.S Fd | $02 $C7 $d0 | A = (int32)Fd |
 | I2F.S Fd | $02 $C8 $d0 | Fd = (float32)A |
 | FMOV.S Fd, Fs | $02 $C9 $ds | Fd = Fs (copy) |
@@ -457,7 +457,7 @@ except `(Rm)` which uses high nibble for `Fn` and low nibble for `Rm`.
 | FCVT.DS Fd, Fs | $02 $E4 $ds | Fd = (double)Fs |
 | FCVT.SD Fd, Fs | $02 $E5 $ds | Fd = (single)Fs |
 
-**FCMP flags:** Z=1 if equal, C=1 if Fd≥Fs, N=1 if Fd<Fs
+**FCMP flags:** none
 
 Reserved FPU opcodes $CB-$CF and $DB-$DF trap to software emulation; $E6-$FF are illegal.
 
