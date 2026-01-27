@@ -2726,21 +2726,28 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                                 break;
                             case 0x89: /* TSB */
                             case 0x8A: /* TRB */
-                            case 0x97: /* STZ */
                                 ok = ok && ext_compute_addr(cpu, addr_mode, &addr_ext);
                                 if (ok) {
-                                    if (ext_op == 0x97) {
-                                        write_val(cpu, addr_ext, 0, ext_width);
+                                    uint32_t old_val = read_val(cpu, addr_ext, ext_width);
+                                    uint32_t src = target ? read_val(cpu, dest_addr, ext_width)
+                                                          : trunc_width(cpu->a, ext_width);
+                                    FLAG_PUT(cpu, P_Z, ((old_val & src) & width_mask(ext_width)) == 0);
+                                    if (ext_op == 0x89) {
+                                        write_val(cpu, addr_ext, old_val | src, ext_width);
                                     } else {
-                                        uint32_t old_val = read_val(cpu, addr_ext, ext_width);
-                                        uint32_t src = target ? read_val(cpu, dest_addr, ext_width)
-                                                              : trunc_width(cpu->a, ext_width);
-                                        FLAG_PUT(cpu, P_Z, ((old_val & src) & width_mask(ext_width)) == 0);
-                                        if (ext_op == 0x89) {
-                                            write_val(cpu, addr_ext, old_val | src, ext_width);
-                                        } else {
-                                            write_val(cpu, addr_ext, old_val & ~src, ext_width);
-                                        }
+                                        write_val(cpu, addr_ext, old_val & ~src, ext_width);
+                                    }
+                                }
+                                break;
+                            case 0x97: /* STZ */
+                                if (target) {
+                                    /* STZ to register: write zero to dest_addr */
+                                    write_val(cpu, dest_addr, 0, ext_width);
+                                } else {
+                                    /* STZ to memory: compute address and write zero */
+                                    ok = ok && ext_compute_addr(cpu, addr_mode, &addr_ext);
+                                    if (ok) {
+                                        write_val(cpu, addr_ext, 0, ext_width);
                                     }
                                 }
                                 break;
@@ -3277,41 +3284,38 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     }
                     
-                    /* === FPU Load/Store ($B0-$BB) === */
-                    case 0xB0: /* LDF0 dp */
-                    case 0xB4: /* LDF1 dp */
-                    case 0xB8: { /* LDF2 dp */
+                    /* === FPU Load/Store ($B0-$B3) with register byte === */
+                    /* Format: $02 $Bx $rr [operand] where rr = 0n (n = register 0-15) */
+                    case 0xB0: { /* LDF Fn, dp */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
                         addr = addr_dp(cpu);
                         uint32_t lo = mem_read32(cpu, addr);
                         uint32_t hi = mem_read32(cpu, addr + 4);
                         uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
-                        int freg = (ext_op - 0xB0) / 4;
-                        /* Store as double-precision bits */
                         union { uint64_t u; double d; } conv;
                         conv.u = val64;
                         cpu->f[freg] = conv.d;
                         cycles = 5;
                         break;
                     }
-                    case 0xB1: /* LDF0 abs */
-                    case 0xB5: /* LDF1 abs */
-                    case 0xB9: { /* LDF2 abs */
+                    case 0xB1: { /* LDF Fn, abs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
                         addr = addr_abs(cpu);
                         uint32_t lo = mem_read32(cpu, addr);
                         uint32_t hi = mem_read32(cpu, addr + 4);
                         uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
-                        int freg = (ext_op - 0xB1) / 4;
                         union { uint64_t u; double d; } conv;
                         conv.u = val64;
                         cpu->f[freg] = conv.d;
                         cycles = 6;
                         break;
                     }
-                    case 0xB2: /* STF0 dp */
-                    case 0xB6: /* STF1 dp */
-                    case 0xBA: { /* STF2 dp */
+                    case 0xB2: { /* STF Fn, dp */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
                         addr = addr_dp(cpu);
-                        int freg = (ext_op - 0xB2) / 4;
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
@@ -3319,175 +3323,395 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cycles = 5;
                         break;
                     }
-                    case 0xB3: /* STF0 abs */
-                    case 0xB7: /* STF1 abs */
-                    case 0xBB: { /* STF2 abs */
+                    case 0xB3: { /* STF Fn, abs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
                         addr = addr_abs(cpu);
-                        int freg = (ext_op - 0xB3) / 4;
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
                         mem_write32(cpu, addr + 4, (uint32_t)(conv.u >> 32));
                         cycles = 6;
+                        break;
+                    }
+                    case 0xB4: { /* LDF Fn, (Rm) - Register Indirect Load */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = (reg_byte >> 4) & 0x0F;
+                        int rm = reg_byte & 0x0F;
+                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
+                        addr = mem_read32(cpu, rm * 4);
+                        uint32_t lo = mem_read32(cpu, addr);
+                        uint32_t hi = mem_read32(cpu, addr + 4);
+                        uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
+                        union { uint64_t u; double d; } conv;
+                        conv.u = val64;
+                        cpu->f[freg] = conv.d;
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xB5: { /* STF Fn, (Rm) - Register Indirect Store */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = (reg_byte >> 4) & 0x0F;
+                        int rm = reg_byte & 0x0F;
+                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
+                        addr = mem_read32(cpu, rm * 4);
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
+                        mem_write32(cpu, addr + 4, (uint32_t)(conv.u >> 32));
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xB6: { /* LDF Fn, abs32 */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
+                        addr = fetch32(cpu);
+                        uint32_t lo = mem_read32(cpu, addr);
+                        uint32_t hi = mem_read32(cpu, addr + 4);
+                        uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
+                        union { uint64_t u; double d; } conv;
+                        conv.u = val64;
+                        cpu->f[freg] = conv.d;
+                        cycles = 7;
+                        break;
+                    }
+                    case 0xB7: { /* STF Fn, abs32 */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = reg_byte & 0x0F;
+                        addr = fetch32(cpu);
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
+                        mem_write32(cpu, addr + 4, (uint32_t)(conv.u >> 32));
+                        cycles = 7;
                         break;
                     }
                     
-                    /* === FPU Single-Precision Arithmetic ($C0-$C8) === */
-                    case 0xC0: { /* FADD.S - F0 = F1 + F2 */
-                        union { uint32_t u; float f; } f1, f2, f0;
-                        union { uint64_t u; double d; } conv1, conv2, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
-                        f0.f = f1.f + f2.f;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    /* === FPU Single-Precision Arithmetic ($C0-$CA) === */
+                    /* Format: $02 $Cx $rr where rr = dest<<4 | src */
+                    /* Two-operand destructive: Fd = Fd op Fs (binary) or Fd = op(Fs) (unary) */
+                    case 0xC0: { /* FADD.S Fd, Fs - Fd = Fd + Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f + fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 4;
                         break;
                     }
-                    case 0xC1: { /* FSUB.S - F0 = F1 - F2 */
-                        union { uint32_t u; float f; } f1, f2, f0;
-                        union { uint64_t u; double d; } conv1, conv2, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
-                        f0.f = f1.f - f2.f;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC1: { /* FSUB.S Fd, Fs - Fd = Fd - Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f - fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 4;
                         break;
                     }
-                    case 0xC2: { /* FMUL.S - F0 = F1 * F2 */
-                        union { uint32_t u; float f; } f1, f2, f0;
-                        union { uint64_t u; double d; } conv1, conv2, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
-                        f0.f = f1.f * f2.f;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC2: { /* FMUL.S Fd, Fs - Fd = Fd * Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f * fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 6;
                         break;
                     }
-                    case 0xC3: { /* FDIV.S - F0 = F1 / F2 */
-                        union { uint32_t u; float f; } f1, f2, f0;
-                        union { uint64_t u; double d; } conv1, conv2, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
-                        f0.f = f1.f / f2.f;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC3: { /* FDIV.S Fd, Fs - Fd = Fd / Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f / fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 10;
                         break;
                     }
-                    case 0xC4: { /* FNEG.S - F0 = -F1 */
-                        union { uint32_t u; float f; } f1, f0;
-                        union { uint64_t u; double d; } conv1, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        f0.f = -f1.f;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC4: { /* FNEG.S Fd, Fs - Fd = -Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = -fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 2;
                         break;
                     }
-                    case 0xC5: { /* FABS.S - F0 = |F1| */
-                        union { uint32_t u; float f; } f1, f0;
-                        union { uint64_t u; double d; } conv1, conv0;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        f0.f = fabsf(f1.f);
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC5: { /* FABS.S Fd, Fs - Fd = |Fs| */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fabsf(fs_s.f);
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 2;
                         break;
                     }
-                    case 0xC6: { /* FCMP.S - Compare F1 to F2 */
-                        union { uint32_t u; float f; } f1, f2;
-                        union { uint64_t u; double d; } conv1, conv2;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        conv2.d = cpu->f[2]; f2.u = (uint32_t)conv2.u;
-                        FLAG_PUT(cpu, P_Z, f1.f == f2.f);
-                        FLAG_PUT(cpu, P_C, f1.f >= f2.f);
-                        FLAG_PUT(cpu, P_N, f1.f < f2.f);
+                    case 0xC6: { /* FCMP.S Fd, Fs - Compare Fd to Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fd_s, fs_s;
+                        union { uint64_t u; double d; } conv_d, conv_s;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        FLAG_PUT(cpu, P_Z, fd_s.f == fs_s.f);
+                        FLAG_PUT(cpu, P_C, fd_s.f >= fs_s.f);
+                        FLAG_PUT(cpu, P_N, fd_s.f < fs_s.f);
                         cycles = 3;
                         break;
                     }
-                    case 0xC7: { /* F2I.S - A = (int32)F1 */
-                        union { uint32_t u; float f; } f1;
-                        union { uint64_t u; double d; } conv1;
-                        conv1.d = cpu->f[1]; f1.u = (uint32_t)conv1.u;
-                        cpu->a = (uint32_t)(int32_t)f1.f;
+                    case 0xC7: { /* F2I.S Fd - A = (int32)Fd */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint32_t u; float f; } fd_s;
+                        union { uint64_t u; double d; } conv_d;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        cpu->a = (uint32_t)(int32_t)fd_s.f;
                         update_nz32(cpu, cpu->a);
                         cycles = 3;
                         break;
                     }
-                    case 0xC8: { /* I2F.S - F0 = (float32)A */
-                        union { uint32_t u; float f; } f0;
-                        union { uint64_t u; double d; } conv0;
-                        f0.f = (float)(int32_t)cpu->a;
-                        conv0.u = (uint64_t)f0.u;
-                        cpu->f[0] = conv0.d;
+                    case 0xC8: { /* I2F.S Fd - Fd = (float32)A */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint32_t u; float f; } res;
+                        union { uint64_t u; double d; } conv_r;
+                        res.f = (float)(int32_t)cpu->a;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 3;
                         break;
                     }
-                    
-                    /* === FPU Double-Precision Arithmetic ($D0-$D8) === */
-                    case 0xD0: { /* FADD.D - F0 = F1 + F2 */
-                        cpu->f[0] = cpu->f[1] + cpu->f[2];
-                        cycles = 5;
+                    case 0xC9: { /* FMOV.S Fd, Fs - Fd = Fs (copy) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fs_s;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        conv_r.u = (uint64_t)fs_s.u;
+                        cpu->f[fd] = conv_r.d;
+                        cycles = 2;
                         break;
                     }
-                    case 0xD1: { /* FSUB.D - F0 = F1 - F2 */
-                        cpu->f[0] = cpu->f[1] - cpu->f[2];
-                        cycles = 5;
-                        break;
-                    }
-                    case 0xD2: { /* FMUL.D - F0 = F1 * F2 */
-                        cpu->f[0] = cpu->f[1] * cpu->f[2];
-                        cycles = 8;
-                        break;
-                    }
-                    case 0xD3: { /* FDIV.D - F0 = F1 / F2 */
-                        cpu->f[0] = cpu->f[1] / cpu->f[2];
+                    case 0xCA: { /* FSQRT.S Fd, Fs - Fd = sqrt(Fs) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = sqrtf(fs_s.f);
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 15;
                         break;
                     }
-                    case 0xD4: { /* FNEG.D - F0 = -F1 */
-                        cpu->f[0] = -cpu->f[1];
+                    
+                    /* === FPU Double-Precision Arithmetic ($D0-$DA) === */
+                    case 0xD0: { /* FADD.D Fd, Fs - Fd = Fd + Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = cpu->f[fd] + cpu->f[fs];
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xD1: { /* FSUB.D Fd, Fs - Fd = Fd - Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = cpu->f[fd] - cpu->f[fs];
+                        cycles = 5;
+                        break;
+                    }
+                    case 0xD2: { /* FMUL.D Fd, Fs - Fd = Fd * Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = cpu->f[fd] * cpu->f[fs];
+                        cycles = 8;
+                        break;
+                    }
+                    case 0xD3: { /* FDIV.D Fd, Fs - Fd = Fd / Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = cpu->f[fd] / cpu->f[fs];
+                        cycles = 15;
+                        break;
+                    }
+                    case 0xD4: { /* FNEG.D Fd, Fs - Fd = -Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = -cpu->f[fs];
                         cycles = 2;
                         break;
                     }
-                    case 0xD5: { /* FABS.D - F0 = |F1| */
-                        cpu->f[0] = fabs(cpu->f[1]);
+                    case 0xD5: { /* FABS.D Fd, Fs - Fd = |Fs| */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = fabs(cpu->f[fs]);
                         cycles = 2;
                         break;
                     }
-                    case 0xD6: { /* FCMP.D - Compare F1 to F2 */
-                        FLAG_PUT(cpu, P_Z, cpu->f[1] == cpu->f[2]);
-                        FLAG_PUT(cpu, P_C, cpu->f[1] >= cpu->f[2]);
-                        FLAG_PUT(cpu, P_N, cpu->f[1] < cpu->f[2]);
+                    case 0xD6: { /* FCMP.D Fd, Fs - Compare Fd to Fs */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        FLAG_PUT(cpu, P_Z, cpu->f[fd] == cpu->f[fs]);
+                        FLAG_PUT(cpu, P_C, cpu->f[fd] >= cpu->f[fs]);
+                        FLAG_PUT(cpu, P_N, cpu->f[fd] < cpu->f[fs]);
                         cycles = 3;
                         break;
                     }
-                    case 0xD7: { /* F2I.D - A = (int64)F1 (low 32 bits) */
-                        int64_t ival = (int64_t)cpu->f[1];
+                    case 0xD7: { /* F2I.D Fd - A = (int64)Fd (low 32 bits) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int64_t ival = (int64_t)cpu->f[fd];
                         cpu->a = (uint32_t)ival;
                         cpu->t = (uint32_t)(ival >> 32);
                         update_nz32(cpu, cpu->a);
                         cycles = 3;
                         break;
                     }
-                    case 0xD8: { /* I2F.D - F0 = (float64)A:T */
+                    case 0xD8: { /* I2F.D Fd - Fd = (float64)A:T */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
                         int64_t ival = (int64_t)((uint64_t)cpu->a | ((uint64_t)cpu->t << 32));
-                        cpu->f[0] = (double)ival;
+                        cpu->f[fd] = (double)ival;
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xD9: { /* FMOV.D Fd, Fs - Fd = Fs (copy) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = cpu->f[fs];
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xDA: { /* FSQRT.D Fd, Fs - Fd = sqrt(Fs) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        cpu->f[fd] = sqrt(cpu->f[fs]);
+                        cycles = 20;
+                        break;
+                    }
+                    
+                    /* === FPU Register Transfers ($E0-$E5) === */
+                    case 0xE0: { /* FTOA Fd - A = Fd[31:0] */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[fd];
+                        cpu->a = (uint32_t)conv.u;
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xE1: { /* FTOT Fd - T = Fd[63:32] */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[fd];
+                        cpu->t = (uint32_t)(conv.u >> 32);
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xE2: { /* ATOF Fd - Fd[31:0] = A */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[fd];
+                        conv.u = (conv.u & 0xFFFFFFFF00000000ULL) | (uint64_t)cpu->a;
+                        cpu->f[fd] = conv.d;
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xE3: { /* TTOF Fd - Fd[63:32] = T */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[fd];
+                        conv.u = (conv.u & 0x00000000FFFFFFFFULL) | ((uint64_t)cpu->t << 32);
+                        cpu->f[fd] = conv.d;
+                        cycles = 2;
+                        break;
+                    }
+                    case 0xE4: { /* FCVT.DS Fd, Fs - Fd = (double)Fs (single to double) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } fs_s;
+                        union { uint64_t u; double d; } conv_s;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        cpu->f[fd] = (double)fs_s.f;
+                        cycles = 3;
+                        break;
+                    }
+                    case 0xE5: { /* FCVT.SD Fd, Fs - Fd = (single)Fs (double to single) */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int fd = (reg_byte >> 4) & 0x0F;
+                        int fs = reg_byte & 0x0F;
+                        union { uint32_t u; float f; } res;
+                        union { uint64_t u; double d; } conv_r;
+                        res.f = (float)cpu->f[fs];
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 3;
                         break;
                     }
                     
-                    /* Reserved FPU opcodes ($D9-$DF) trap to software emulation */
-                    case 0xD9:
-                    case 0xDA:
+                    /* Reserved FPU opcodes ($CB-$CF, $DB-$DF, $E6-$EF) trap to software emulation */
+                    case 0xCB:
+                    case 0xCC:
+                    case 0xCD:
+                    case 0xCE:
+                    case 0xCF:
                     case 0xDB:
                     case 0xDC:
                     case 0xDD:
                     case 0xDE:
-                    case 0xDF: {
+                    case 0xDF:
+                    case 0xE6:
+                    case 0xE7:
+                    case 0xE8:
+                    case 0xE9:
+                    case 0xEA:
+                    case 0xEB:
+                    case 0xEC:
+                    case 0xED:
+                    case 0xEE:
+                    case 0xEF: {
                         /* Trap via SYSCALL vector + opcode * 4 */
                         uint32_t trap_vector = VEC_SYSCALL + (ext_op * 4);
                         exception_enter(cpu, trap_vector, cpu->pc);

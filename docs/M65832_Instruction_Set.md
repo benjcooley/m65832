@@ -239,6 +239,15 @@ After the `$02` prefix byte:
 | $B1 [reg] [abs16] | LDF Fn, abs | Load Fn from abs |
 | $B2 [reg] [dp] | STF Fn, dp | Store Fn to dp |
 | $B3 [reg] [abs16] | STF Fn, abs | Store Fn to abs |
+| $B4 [reg] | LDF Fn, (Rm) | Load Fn from address in Rm |
+| $B5 [reg] | STF Fn, (Rm) | Store Fn to address in Rm |
+| $B6 [reg] [abs32] | LDF Fn, abs32 | Load Fn from 32-bit absolute |
+| $B7 [reg] [abs32] | STF Fn, abs32 | Store Fn to 32-bit absolute |
+
+FPU load/store register byte encoding:
+
+- `LDF`/`STF` with `dp`, `abs16`, or `abs32`: low nibble is `Fn` (F0-F15).
+- `LDF`/`STF` with `(Rm)`: high nibble is `Fn`, low nibble is `Rm` (R0-R15).
 | **FPU Single-Precision** | | |
 | $C0 | FADD.S | F0 = F1 + F2 |
 | $C1 | FSUB.S | F0 = F1 - F2 |
@@ -1547,13 +1556,17 @@ For conversions: destination only (source field unused or specifies source)
 | LDF Fn, abs | $02 $B1 $0n abs | Fn = [B+abs..B+abs+7] (64-bit load) |
 | STF Fn, dp | $02 $B2 $0n dp | [D+dp..D+dp+7] = Fn (64-bit store) |
 | STF Fn, abs | $02 $B3 $0n abs | [B+abs..B+abs+7] = Fn (64-bit store) |
+| LDF Fn, (Rm) | $02 $B4 $nm | Fn = [[Rm]..+7] (register indirect load) |
+| STF Fn, (Rm) | $02 $B5 $nm | [[Rm]..+7] = Fn (register indirect store) |
 
-Where `n` is the register number (0-15, encoded in low nibble of reg-byte).
+Where `n` is the FPU register number (0-15) and `m` is the GPR register number (0-63, encoded in reg-byte low nibble for Rm/16).
 
 **Examples:**
 ```asm
 LDF F5, $100       ; $02 $B1 $05 $00 $01 - Load F5 from absolute address $0100
 STF F12, $20       ; $02 $B2 $0C $20 - Store F12 to direct page offset $20
+LDF F0, (R0)       ; $02 $B4 $00 - Load F0 from address in R0
+STF F3, (R5)       ; $02 $B5 $35 - Store F3 to address in R5
 ```
 
 #### FPU Arithmetic - Single Precision

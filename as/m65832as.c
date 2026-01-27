@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <limits.h>
 
 #define VERSION "1.1.0"
 #define MAX_LINE 1024
@@ -60,6 +61,15 @@ typedef enum {
     /* Extended 32-bit modes (Extended ALU only) */
     AM_IMM32,       /* 32-bit Immediate */
     AM_ABS32,       /* 32-bit Absolute */
+    /* FPU register modes */
+    AM_FPU_REG2,    /* Two FP registers: FADD.S F0, F1 */
+    AM_FPU_REG1,    /* One FP register: I2F.S F0 */
+    AM_FPU_DP,      /* FP register + DP: LDF F0, $xx */
+    AM_FPU_ABS,     /* FP register + Abs: LDF F0, $xxxx */
+    AM_FPU_IND,     /* FP register + Reg Indirect: LDF F0, (R1) */
+    AM_FPU_LONG,    /* FP register + 32-bit Abs: LDF F0, $xxxxxxxx */
+    AM_FPU_IMM_S,   /* FP register + single imm: LDF.S F0, #1.5 */
+    AM_FPU_IMM_D,   /* FP register + double imm: LDF.D F0, #1.5 */
     AM_COUNT
 } AddrMode;
 
@@ -74,6 +84,7 @@ typedef struct {
     uint32_t value;
     int defined;
     int line_defined;
+    int section_index;  /* Which section this symbol is in (-1 = none/absolute) */
 } Symbol;
 
 typedef struct {
@@ -100,6 +111,16 @@ typedef struct {
     int line_num;
 } FileLocation;
 
+/* CFI (Call Frame Information) state for DWARF debug info */
+#define MAX_CFI_SAVED_REGS 128
+#define MAX_CFI_STACK 8
+
+typedef struct {
+    int cfa_reg;                /* CFA register number */
+    int cfa_offset;             /* CFA offset from register */
+    int reg_offsets[MAX_CFI_SAVED_REGS]; /* Saved register offsets (INT_MIN = not saved) */
+} CFIState;
+
 typedef struct {
     FileLocation file_stack[MAX_INCLUDE_DEPTH];
     int file_depth;
@@ -125,6 +146,13 @@ typedef struct {
     int x_flag;     /* 0=8-bit, 1=16-bit, 2=32-bit */
     int verbose;
     int output_hex;
+    
+    /* DWARF CFI state */
+    int cfi_in_proc;            /* Currently inside .cfi_startproc */
+    CFIState cfi_state;         /* Current CFI state */
+    CFIState cfi_stack[MAX_CFI_STACK];  /* Stack for remember/restore */
+    int cfi_stack_depth;
+    int emit_dwarf;             /* Emit DWARF debug info (future) */
 } Assembler;
 
 /* ========================================================================== */
@@ -294,39 +322,48 @@ static const ExtInstruction ext_instructions[] = {
     { "LEA",    0xA1, AM_DPX  },
     { "LEA",    0xA2, AM_ABS  },
     { "LEA",    0xA3, AM_ABSX },
-    /* FPU Load/Store */
-    { "LDF0",   0xB0, AM_DP   },
-    { "LDF0",   0xB1, AM_ABS  },
-    { "STF0",   0xB2, AM_DP   },
-    { "STF0",   0xB3, AM_ABS  },
-    { "LDF1",   0xB4, AM_DP   },
-    { "LDF1",   0xB5, AM_ABS  },
-    { "STF1",   0xB6, AM_DP   },
-    { "STF1",   0xB7, AM_ABS  },
-    { "LDF2",   0xB8, AM_DP   },
-    { "LDF2",   0xB9, AM_ABS  },
-    { "STF2",   0xBA, AM_DP   },
-    { "STF2",   0xBB, AM_ABS  },
-    /* FPU single-precision */
-    { "FADD.S", 0xC0, AM_IMP  },
-    { "FSUB.S", 0xC1, AM_IMP  },
-    { "FMUL.S", 0xC2, AM_IMP  },
-    { "FDIV.S", 0xC3, AM_IMP  },
-    { "FNEG.S", 0xC4, AM_IMP  },
-    { "FABS.S", 0xC5, AM_IMP  },
-    { "FCMP.S", 0xC6, AM_IMP  },
-    { "F2I.S",  0xC7, AM_IMP  },
-    { "I2F.S",  0xC8, AM_IMP  },
-    /* FPU double-precision */
-    { "FADD.D", 0xD0, AM_IMP  },
-    { "FSUB.D", 0xD1, AM_IMP  },
-    { "FMUL.D", 0xD2, AM_IMP  },
-    { "FDIV.D", 0xD3, AM_IMP  },
-    { "FNEG.D", 0xD4, AM_IMP  },
-    { "FABS.D", 0xD5, AM_IMP  },
-    { "FCMP.D", 0xD6, AM_IMP  },
-    { "F2I.D",  0xD7, AM_IMP  },
-    { "I2F.D",  0xD8, AM_IMP  },
+    /* FPU Load/Store (with register byte) */
+    { "LDF",    0xB0, AM_FPU_DP  },
+    { "LDF",    0xB1, AM_FPU_ABS },
+    { "STF",    0xB2, AM_FPU_DP  },
+    { "STF",    0xB3, AM_FPU_ABS },
+    { "LDF",    0xB4, AM_FPU_IND },
+    { "STF",    0xB5, AM_FPU_IND },
+    { "LDF",    0xB6, AM_FPU_LONG },
+    { "STF",    0xB7, AM_FPU_LONG },
+    { "LDF.S",  0xB8, AM_FPU_IMM_S },
+    { "LDF.D",  0xB9, AM_FPU_IMM_D },
+    /* FPU single-precision (two-operand) */
+    { "FADD.S", 0xC0, AM_FPU_REG2 },
+    { "FSUB.S", 0xC1, AM_FPU_REG2 },
+    { "FMUL.S", 0xC2, AM_FPU_REG2 },
+    { "FDIV.S", 0xC3, AM_FPU_REG2 },
+    { "FNEG.S", 0xC4, AM_FPU_REG2 },
+    { "FABS.S", 0xC5, AM_FPU_REG2 },
+    { "FCMP.S", 0xC6, AM_FPU_REG2 },
+    { "F2I.S",  0xC7, AM_FPU_REG1 },
+    { "I2F.S",  0xC8, AM_FPU_REG1 },
+    { "FMOV.S", 0xC9, AM_FPU_REG2 },
+    { "FSQRT.S",0xCA, AM_FPU_REG2 },
+    /* FPU double-precision (two-operand) */
+    { "FADD.D", 0xD0, AM_FPU_REG2 },
+    { "FSUB.D", 0xD1, AM_FPU_REG2 },
+    { "FMUL.D", 0xD2, AM_FPU_REG2 },
+    { "FDIV.D", 0xD3, AM_FPU_REG2 },
+    { "FNEG.D", 0xD4, AM_FPU_REG2 },
+    { "FABS.D", 0xD5, AM_FPU_REG2 },
+    { "FCMP.D", 0xD6, AM_FPU_REG2 },
+    { "F2I.D",  0xD7, AM_FPU_REG1 },
+    { "I2F.D",  0xD8, AM_FPU_REG1 },
+    { "FMOV.D", 0xD9, AM_FPU_REG2 },
+    { "FSQRT.D",0xDA, AM_FPU_REG2 },
+    /* FPU register transfers */
+    { "FTOA",   0xE0, AM_FPU_REG1 },
+    { "FTOT",   0xE1, AM_FPU_REG1 },
+    { "ATOF",   0xE2, AM_FPU_REG1 },
+    { "TTOF",   0xE3, AM_FPU_REG1 },
+    { "FCVT.DS",0xE4, AM_FPU_REG2 },
+    { "FCVT.SD",0xE5, AM_FPU_REG2 },
     { NULL, 0, 0 }
 };
 
@@ -413,6 +450,22 @@ static int parse_register_alias(const char *name) {
         }
         if (*p == '\0' && reg >= 0 && reg <= 63) {
             return reg * 4;  /* R0=$00, R1=$04, R2=$08, etc. */
+        }
+    }
+    return -1;
+}
+
+/* Check if name is a FP register alias (F0-F15) and return register number, or -1 */
+static int parse_fp_register(const char *name) {
+    if ((name[0] == 'F' || name[0] == 'f') && isdigit((unsigned char)name[1])) {
+        int reg = 0;
+        const char *p = name + 1;
+        while (isdigit((unsigned char)*p)) {
+            reg = reg * 10 + (*p - '0');
+            p++;
+        }
+        if (*p == '\0' && reg >= 0 && reg <= 15) {
+            return reg;
         }
     }
     return -1;
@@ -510,7 +563,9 @@ static Symbol *find_symbol(Assembler *as, const char *name) {
 static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int defined) {
     Symbol *sym = find_symbol(as, name);
     if (sym) {
-        if (defined && sym->defined && sym->value != value) {
+        /* Only error on pass 1 for genuine duplicates (same pass, different value) */
+        /* Pass 2 redefinitions are expected in two-pass assembly */
+        if (defined && sym->defined && sym->value != value && as->pass == 1) {
             error(as, "symbol '%s' already defined at line %d", name, sym->line_defined);
             return NULL;
         }
@@ -518,6 +573,7 @@ static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int d
             sym->value = value;
             sym->defined = 1;
             sym->line_defined = current_line(as);
+            sym->section_index = as->current_section;
         }
         return sym;
     }
@@ -531,6 +587,7 @@ static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int d
     sym->value = value;
     sym->defined = defined;
     sym->line_defined = current_line(as);
+    sym->section_index = defined ? as->current_section : -1;
     return sym;
 }
 
@@ -646,28 +703,29 @@ static void output_free(Output *out) {
 }
 
 static void emit_byte(Assembler *as, uint8_t b) {
-    if (as->pass == 2) {
-        Section *sec = current_section(as);
-        if (sec) {
-            uint32_t offset = sec->pc - sec->org;
-            if (offset < sec->capacity) {
-                sec->data[offset] = b;
-                if (offset + 1 > sec->size)
-                    sec->size = offset + 1;
+    Section *sec = current_section(as);
+    if (sec) {
+        uint32_t sec_offset = sec->pc - sec->org;
+        /* Track size in both passes for section linking */
+        if (sec_offset + 1 > sec->size)
+            sec->size = sec_offset + 1;
+        
+        if (as->pass == 2) {
+            /* Write to section data */
+            if (sec_offset < sec->capacity) {
+                sec->data[sec_offset] = b;
             }
-            sec->pc++;
+            /* Write to legacy output buffer using section's absolute PC */
+            uint32_t out_offset = sec->pc - as->output.org;
+            if (out_offset < as->output.capacity) {
+                as->output.data[out_offset] = b;
+                if (out_offset + 1 > as->output.size)
+                    as->output.size = out_offset + 1;
+            }
         }
-        /* Also write to legacy output for compatibility */
-        uint32_t offset = as->output.pc - as->output.org;
-        if (offset < as->output.capacity) {
-            as->output.data[offset] = b;
-            if (offset + 1 > as->output.size)
-                as->output.size = offset + 1;
-        }
+        sec->pc++;
     }
     as->output.pc++;
-    Section *sec = current_section(as);
-    if (sec && as->pass == 1) sec->pc++;
 }
 
 static void emit_word(Assembler *as, uint16_t w) {
@@ -1411,6 +1469,260 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
+    /* FPU instructions with register operands */
+    /* Format: FADD.S Fd, Fs  or  LDF Fn, addr  or  F2I.S Fd  or  LDF.S Fn, #imm */
+    if (strncmp(mnemonic, "FADD", 4) == 0 || strncmp(mnemonic, "FSUB", 4) == 0 ||
+        strncmp(mnemonic, "FMUL", 4) == 0 || strncmp(mnemonic, "FDIV", 4) == 0 ||
+        strncmp(mnemonic, "FNEG", 4) == 0 || strncmp(mnemonic, "FABS", 4) == 0 ||
+        strncmp(mnemonic, "FCMP", 4) == 0 || strncmp(mnemonic, "FMOV", 4) == 0 ||
+        strncmp(mnemonic, "FSQRT", 5) == 0 ||
+        strncmp(mnemonic, "F2I", 3) == 0 || strncmp(mnemonic, "I2F", 3) == 0 ||
+        strncmp(mnemonic, "FTOA", 4) == 0 || strncmp(mnemonic, "FTOT", 4) == 0 ||
+        strncmp(mnemonic, "ATOF", 4) == 0 || strncmp(mnemonic, "TTOF", 4) == 0 ||
+        strncmp(mnemonic, "FCVT", 4) == 0 ||
+        strncmp(mnemonic, "LDF", 3) == 0 || strcmp(mnemonic, "STF") == 0) {
+        
+        /* Look up the instruction in ext_instructions */
+        const ExtInstruction *ext = NULL;
+        for (int i = 0; ext_instructions[i].name; i++) {
+            if (strcmp(ext_instructions[i].name, mnemonic) == 0) {
+                ext = &ext_instructions[i];
+                break;
+            }
+        }
+        
+        if (ext) {
+            char *p = skip_whitespace(operand);
+            int fd = -1, fs = -1;
+            
+            /* Parse first FP register */
+            char token[16];
+            int ti = 0;
+            while (p[ti] && !isspace((unsigned char)p[ti]) && p[ti] != ',' && ti < 15) {
+                token[ti] = p[ti];
+                ti++;
+            }
+            token[ti] = '\0';
+            fd = parse_fp_register(token);
+            
+            if (fd < 0) {
+                error(as, "expected FP register (F0-F15)");
+                return 0;
+            }
+            
+            p += ti;
+            p = skip_whitespace(p);
+            
+            /* Handle based on instruction type */
+            if (strcmp(mnemonic, "LDF") == 0 || strcmp(mnemonic, "STF") == 0) {
+                /* FP register + memory address: Fn, addr */
+                if (*p != ',') {
+                    error(as, "expected ',' after FP register");
+                    return 0;
+                }
+                p++;
+                p = skip_whitespace(p);
+
+                /* Check for register indirect: (Rm) */
+                if (*p == '(') {
+                    p++;
+                    p = skip_whitespace(p);
+                    /* Parse register name */
+                    ti = 0;
+                    while (p[ti] && p[ti] != ')' && !isspace((unsigned char)p[ti]) && ti < 15) {
+                        token[ti] = p[ti];
+                        ti++;
+                    }
+                    token[ti] = '\0';
+
+                    /* Check if it's a register (R0-R15) */
+                    int rm = -1;
+                    if ((token[0] == 'R' || token[0] == 'r') && isdigit((unsigned char)token[1])) {
+                        rm = 0;
+                        const char *rp = token + 1;
+                        while (isdigit((unsigned char)*rp)) {
+                            rm = rm * 10 + (*rp - '0');
+                            rp++;
+                        }
+                        if (*rp != '\0' || rm > 15) {
+                            rm = -1;  /* Only R0-R15 supported in indirect mode */
+                        }
+                    }
+
+                    if (rm >= 0) {
+                        p += ti;
+                        p = skip_whitespace(p);
+                        if (*p != ')') {
+                            error(as, "expected ')' after register");
+                            return 0;
+                        }
+                        /* Use the indirect mode opcode ($B4 for LDF, $B5 for STF) */
+                        uint8_t ind_opcode = (strcmp(mnemonic, "LDF") == 0) ? 0xB4 : 0xB5;
+                        /* Emit: $02 opcode reg_byte (Fn in high nibble, Rm in low nibble) */
+                        emit_byte(as, 0x02);
+                        emit_byte(as, ind_opcode);
+                        emit_byte(as, (uint8_t)((fd << 4) | rm));
+                        return 1;
+                    } else {
+                        error(as, "register indirect mode requires R0-R15");
+                        return 0;
+                    }
+                }
+
+                /* Parse the memory address */
+                uint32_t addr;
+                if (!parse_expression(as, p, &addr, (const char**)&p)) {
+                    error(as, "expected address operand");
+                    return 0;
+                }
+
+                if (addr <= 0xFF) {
+                    /* DP form */
+                    emit_byte(as, 0x02);
+                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB0 : 0xB2);
+                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
+                    emit_byte(as, addr & 0xFF);
+                    return 1;
+                } else if (addr <= 0xFFFF) {
+                    /* ABS form */
+                    emit_byte(as, 0x02);
+                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB1 : 0xB3);
+                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
+                    emit_word(as, addr & 0xFFFF);
+                    return 1;
+                } else {
+                    /* ABS32 form */
+                    emit_byte(as, 0x02);
+                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB6 : 0xB7);
+                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
+                    emit_quad(as, addr);
+                    return 1;
+                }
+            }
+
+            if (ext->mode == AM_FPU_REG2) {
+                /* Two FP registers: Fd, Fs */
+                if (*p != ',') {
+                    error(as, "expected ',' after destination register");
+                    return 0;
+                }
+                p++;
+                p = skip_whitespace(p);
+                
+                ti = 0;
+                while (p[ti] && !isspace((unsigned char)p[ti]) && p[ti] != ',' && ti < 15) {
+                    token[ti] = p[ti];
+                    ti++;
+                }
+                token[ti] = '\0';
+                fs = parse_fp_register(token);
+                
+                if (fs < 0) {
+                    error(as, "expected source FP register (F0-F15)");
+                    return 0;
+                }
+                
+                /* Emit: $02 opcode reg_byte */
+                emit_byte(as, 0x02);
+                emit_byte(as, ext->ext_opcode);
+                emit_byte(as, (uint8_t)((fd << 4) | fs));
+                return 1;
+                
+            } else if (ext->mode == AM_FPU_REG1) {
+                /* Single FP register: Fd */
+                /* Emit: $02 opcode reg_byte (src=0) */
+                emit_byte(as, 0x02);
+                emit_byte(as, ext->ext_opcode);
+                emit_byte(as, (uint8_t)(fd << 4));
+                return 1;
+                
+            } else if (ext->mode == AM_FPU_DP || ext->mode == AM_FPU_ABS) {
+                /* FP register + memory address: Fn, addr */
+                if (*p != ',') {
+                    error(as, "expected ',' after FP register");
+                    return 0;
+                }
+                p++;
+                p = skip_whitespace(p);
+                
+                /* Check for register indirect: (Rm) */
+                if (*p == '(') {
+                    p++;
+                    p = skip_whitespace(p);
+                    /* Parse register name */
+                    ti = 0;
+                    while (p[ti] && p[ti] != ')' && !isspace((unsigned char)p[ti]) && ti < 15) {
+                        token[ti] = p[ti];
+                        ti++;
+                    }
+                    token[ti] = '\0';
+                    
+                    /* Check if it's a register (R0-R15) */
+                    int rm = -1;
+                    if ((token[0] == 'R' || token[0] == 'r') && isdigit((unsigned char)token[1])) {
+                        rm = 0;
+                        const char *rp = token + 1;
+                        while (isdigit((unsigned char)*rp)) {
+                            rm = rm * 10 + (*rp - '0');
+                            rp++;
+                        }
+                        if (*rp != '\0' || rm > 15) {
+                            rm = -1;  /* Only R0-R15 supported in indirect mode */
+                        }
+                    }
+                    
+                    if (rm >= 0) {
+                        p += ti;
+                        p = skip_whitespace(p);
+                        if (*p != ')') {
+                            error(as, "expected ')' after register");
+                            return 0;
+                        }
+                        /* Use the indirect mode opcode ($B4 for LDF, $B5 for STF) */
+                        uint8_t ind_opcode = (strcmp(mnemonic, "LDF") == 0) ? 0xB4 : 0xB5;
+                        /* Emit: $02 opcode reg_byte (Fn in high nibble, Rm in low nibble) */
+                        emit_byte(as, 0x02);
+                        emit_byte(as, ind_opcode);
+                        emit_byte(as, (uint8_t)((fd << 4) | rm));
+                        return 1;
+                    } else {
+                        error(as, "register indirect mode requires R0-R15");
+                        return 0;
+                    }
+                }
+                
+                /* Parse the memory address */
+                uint32_t addr;
+                if (!parse_expression(as, p, &addr, (const char**)&p)) {
+                    error(as, "expected address operand");
+                    return 0;
+                }
+                
+                /* Determine if DP or ABS based on address size */
+                if (addr <= 0xFF && ext->mode == AM_FPU_DP) {
+                    /* DP form */
+                    emit_byte(as, 0x02);
+                    emit_byte(as, ext->ext_opcode);
+                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
+                    emit_byte(as, addr & 0xFF);
+                    return 1;
+                } else {
+                    /* ABS form - need to use the ABS opcode variant */
+                    uint8_t abs_opcode = ext->ext_opcode;
+                    if (ext->mode == AM_FPU_DP) {
+                        /* Switch from DP to ABS opcode (+1) */
+                        abs_opcode++;
+                    }
+                    emit_byte(as, 0x02);
+                    emit_byte(as, abs_opcode);
+                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
+                    emit_word(as, addr & 0xFFFF);
+                    return 1;
+                }
+            }
+        }
+    }
+    
     /* Extended ALU instructions ($02 $80-$97) */
     const ExtALUOp *ext_alu = find_ext_alu_op(mnemonic);
     if (ext_alu) {
@@ -1980,6 +2292,43 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
         return 1;
     }
     
+    /* .ascii / .asciz - emit string (asciz adds null terminator) */
+    if (strcmp(directive, ".ASCII") == 0 || strcmp(directive, ".ASCIZ") == 0 ||
+        strcmp(directive, ".STRING") == 0) {
+        int add_null = (strcmp(directive, ".ASCIZ") == 0 || strcmp(directive, ".STRING") == 0);
+        char *p = skip_whitespace(operand);
+        if (*p != '"') {
+            error(as, "%s requires a quoted string", directive);
+            return 0;
+        }
+        p++;  /* Skip opening quote */
+        while (*p && *p != '"') {
+            if (*p == '\\' && p[1]) {
+                p++;
+                switch (*p) {
+                    case 'n': emit_byte(as, '\n'); break;
+                    case 'r': emit_byte(as, '\r'); break;
+                    case 't': emit_byte(as, '\t'); break;
+                    case '0': emit_byte(as, '\0'); break;
+                    case '\\': emit_byte(as, '\\'); break;
+                    case '"': emit_byte(as, '"'); break;
+                    default: emit_byte(as, *p); break;
+                }
+            } else {
+                emit_byte(as, *p);
+            }
+            p++;
+        }
+        if (*p != '"') {
+            error(as, "unterminated string");
+            return 0;
+        }
+        if (add_null) {
+            emit_byte(as, '\0');
+        }
+        return 1;
+    }
+    
     if (strcmp(directive, ".BYTE") == 0 || strcmp(directive, ".DB") == 0 ||
         strcmp(directive, "DB") == 0 || strcmp(directive, "DCB") == 0 ||
         strcmp(directive, ".DCB") == 0) {
@@ -2053,17 +2402,19 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
     }
     
     if (strcmp(directive, ".LONG") == 0 || strcmp(directive, ".DL") == 0 ||
-        strcmp(directive, ".DCL") == 0 || strcmp(directive, "DCL") == 0) {
+        strcmp(directive, ".DCL") == 0 || strcmp(directive, "DCL") == 0 ||
+        strcmp(directive, ".DWORD") == 0 || strcmp(directive, ".DD") == 0) {
+        /* Emit 32-bit values (4 bytes each) */
         char *p = operand;
         while (*p) {
             p = skip_whitespace(p);
             if (*p && *p != ',' && *p != ';') {
                 uint32_t value;
                 if (!parse_expression(as, p, &value, (const char**)&p)) {
-                    error(as, "invalid long value");
+                    error(as, "invalid 32-bit value");
                     return 0;
                 }
-                emit_long(as, value & 0xFFFFFF);
+                emit_quad(as, value);  /* Full 32-bit value */
             }
             p = skip_whitespace(p);
             if (*p == ',') p++;
@@ -2073,7 +2424,8 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
     }
     
     if (strcmp(directive, ".DWORD") == 0 || strcmp(directive, ".DD") == 0 ||
-        strcmp(directive, ".DCD") == 0 || strcmp(directive, "DCD") == 0) {
+        strcmp(directive, ".DCD") == 0 || strcmp(directive, "DCD") == 0 ||
+        strcmp(directive, ".QUAD") == 0) {
         char *p = operand;
         while (*p) {
             p = skip_whitespace(p);
@@ -2113,7 +2465,8 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
     }
     
     if (strcmp(directive, ".DS") == 0 || strcmp(directive, "DS") == 0 ||
-        strcmp(directive, ".RES") == 0 || strcmp(directive, ".SPACE") == 0) {
+        strcmp(directive, ".RES") == 0 || strcmp(directive, ".SPACE") == 0 ||
+        strcmp(directive, ".ZERO") == 0) {
         uint32_t count;
         const char *end;
         if (!parse_expression(as, operand, &count, &end)) {
@@ -2171,6 +2524,8 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
         char *p = skip_whitespace(operand);
         char name[MAX_LABEL];
         int i = 0;
+        
+        /* Parse section name - may have leading dot or not */
         while (*p && !isspace((unsigned char)*p) && *p != ',' && i < MAX_LABEL - 1)
             name[i++] = *p++;
         name[i] = '\0';
@@ -2178,7 +2533,26 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
             error(as, ".SECTION requires a name");
             return 0;
         }
-        switch_section(as, name);
+        
+        /* Skip any ELF section flags like ,"ax",@progbits */
+        /* We just ignore these for now since we output flat binary */
+        
+        /* Map common ELF section names to our internal names */
+        if (strcmp(name, ".text") == 0 || strcmp(name, ".TEXT") == 0) {
+            switch_section(as, "TEXT");
+        } else if (strcmp(name, ".data") == 0 || strcmp(name, ".DATA") == 0) {
+            switch_section(as, "DATA");
+        } else if (strcmp(name, ".bss") == 0 || strcmp(name, ".BSS") == 0) {
+            switch_section(as, "BSS");
+        } else if (strcmp(name, ".rodata") == 0 || strcmp(name, ".RODATA") == 0) {
+            switch_section(as, "RODATA");
+        } else {
+            /* Use the name as-is (strip leading dot if present) */
+            char *sect_name = name;
+            if (sect_name[0] == '.')
+                sect_name++;
+            switch_section(as, sect_name);
+        }
         return 1;
     }
     
@@ -2187,6 +2561,280 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
     }
     
     /* Include file */
+    /* =========================================================================
+     * ELF/LLVM compatibility directives
+     * ========================================================================= */
+    
+    /* .globl / .global - mark symbol as global (for ELF output) */
+    if (strcmp(directive, ".GLOBL") == 0 || strcmp(directive, ".GLOBAL") == 0) {
+        /* Currently just accept and ignore - could track for ELF output */
+        /* The symbol name follows, but we don't need to do anything with it */
+        return 1;
+    }
+    
+    /* .file - source filename (debug info) */
+    if (strcmp(directive, ".FILE") == 0) {
+        /* Just ignore - this is debug metadata */
+        return 1;
+    }
+    
+    /* .type - symbol type (e.g., @function, @object) */
+    if (strcmp(directive, ".TYPE") == 0) {
+        /* Just ignore - this is ELF metadata */
+        return 1;
+    }
+    
+    /* .size - symbol size */
+    if (strcmp(directive, ".SIZE") == 0) {
+        /* Just ignore - this is ELF metadata */
+        return 1;
+    }
+    
+    /* .p2align - power-of-2 alignment (GNU as style) */
+    if (strcmp(directive, ".P2ALIGN") == 0) {
+        uint32_t power;
+        const char *end;
+        char *p = skip_whitespace(operand);
+        if (!parse_expression(as, p, &power, &end)) {
+            error(as, "invalid alignment power");
+            return 0;
+        }
+        if (power > 16) {
+            error(as, "alignment power too large (max 16)");
+            return 0;
+        }
+        uint32_t align = 1U << power;  /* Convert power-of-2 to bytes */
+        uint32_t pc = get_pc(as);
+        uint32_t pad = (align - (pc & (align - 1))) & (align - 1);
+        for (uint32_t i = 0; i < pad; i++) {
+            emit_byte(as, 0x00);
+        }
+        return 1;
+    }
+    
+    /* .ident - identification string (compiler version etc) */
+    if (strcmp(directive, ".IDENT") == 0) {
+        /* Just ignore - this is debug metadata */
+        return 1;
+    }
+    
+    /* .cfi_startproc - Start of a function's CFI information */
+    if (strcmp(directive, ".CFI_STARTPROC") == 0) {
+        if (as->cfi_in_proc) {
+            error(as, ".cfi_startproc without matching .cfi_endproc");
+            return 0;
+        }
+        as->cfi_in_proc = 1;
+        /* Reset CFI state */
+        as->cfi_state.cfa_reg = 67;  /* Default CFA is SP (register 67) */
+        as->cfi_state.cfa_offset = 0;
+        for (int i = 0; i < MAX_CFI_SAVED_REGS; i++) {
+            as->cfi_state.reg_offsets[i] = INT_MIN;  /* Not saved */
+        }
+        as->cfi_stack_depth = 0;
+        return 1;
+    }
+    
+    /* .cfi_endproc - End of a function's CFI information */
+    if (strcmp(directive, ".CFI_ENDPROC") == 0) {
+        if (!as->cfi_in_proc) {
+            error(as, ".cfi_endproc without matching .cfi_startproc");
+            return 0;
+        }
+        as->cfi_in_proc = 0;
+        return 1;
+    }
+    
+    /* .cfi_def_cfa <reg>, <offset> - Define CFA as register + offset */
+    if (strcmp(directive, ".CFI_DEF_CFA") == 0) {
+        char *p = skip_whitespace(operand);
+        uint32_t reg, offset;
+        const char *end;
+        if (!parse_expression(as, p, &reg, &end)) {
+            error(as, "invalid register in .cfi_def_cfa");
+            return 0;
+        }
+        p = skip_whitespace((char*)end);
+        if (*p == ',') p++;
+        p = skip_whitespace(p);
+        if (!parse_expression(as, p, &offset, &end)) {
+            error(as, "invalid offset in .cfi_def_cfa");
+            return 0;
+        }
+        as->cfi_state.cfa_reg = (int)reg;
+        as->cfi_state.cfa_offset = (int)offset;
+        return 1;
+    }
+    
+    /* .cfi_def_cfa_register <reg> - Change CFA register */
+    if (strcmp(directive, ".CFI_DEF_CFA_REGISTER") == 0) {
+        uint32_t reg;
+        const char *end;
+        if (!parse_expression(as, operand, &reg, &end)) {
+            error(as, "invalid register in .cfi_def_cfa_register");
+            return 0;
+        }
+        as->cfi_state.cfa_reg = (int)reg;
+        return 1;
+    }
+    
+    /* .cfi_def_cfa_offset <offset> - Change CFA offset */
+    if (strcmp(directive, ".CFI_DEF_CFA_OFFSET") == 0) {
+        uint32_t offset;
+        const char *end;
+        if (!parse_expression(as, operand, &offset, &end)) {
+            error(as, "invalid offset in .cfi_def_cfa_offset");
+            return 0;
+        }
+        as->cfi_state.cfa_offset = (int)offset;
+        return 1;
+    }
+    
+    /* .cfi_adjust_cfa_offset <offset> - Adjust CFA offset */
+    if (strcmp(directive, ".CFI_ADJUST_CFA_OFFSET") == 0) {
+        int32_t offset;
+        const char *end;
+        uint32_t uval;
+        char *p = skip_whitespace(operand);
+        int neg = 0;
+        if (*p == '-') {
+            neg = 1;
+            p++;
+        }
+        if (!parse_expression(as, p, &uval, &end)) {
+            error(as, "invalid offset in .cfi_adjust_cfa_offset");
+            return 0;
+        }
+        offset = neg ? -(int32_t)uval : (int32_t)uval;
+        as->cfi_state.cfa_offset += offset;
+        return 1;
+    }
+    
+    /* .cfi_offset <reg>, <offset> - Register saved at CFA + offset */
+    if (strcmp(directive, ".CFI_OFFSET") == 0) {
+        char *p = skip_whitespace(operand);
+        uint32_t reg;
+        int32_t offset;
+        const char *end;
+        if (!parse_expression(as, p, &reg, &end)) {
+            error(as, "invalid register in .cfi_offset");
+            return 0;
+        }
+        p = skip_whitespace((char*)end);
+        if (*p == ',') p++;
+        p = skip_whitespace(p);
+        int neg = 0;
+        if (*p == '-') {
+            neg = 1;
+            p++;
+        }
+        uint32_t uval;
+        if (!parse_expression(as, p, &uval, &end)) {
+            error(as, "invalid offset in .cfi_offset");
+            return 0;
+        }
+        offset = neg ? -(int32_t)uval : (int32_t)uval;
+        if (reg < MAX_CFI_SAVED_REGS) {
+            as->cfi_state.reg_offsets[reg] = offset;
+        }
+        return 1;
+    }
+    
+    /* .cfi_restore <reg> - Register restored */
+    if (strcmp(directive, ".CFI_RESTORE") == 0) {
+        uint32_t reg;
+        const char *end;
+        if (!parse_expression(as, operand, &reg, &end)) {
+            error(as, "invalid register in .cfi_restore");
+            return 0;
+        }
+        if (reg < MAX_CFI_SAVED_REGS) {
+            as->cfi_state.reg_offsets[reg] = INT_MIN;  /* Mark as not saved */
+        }
+        return 1;
+    }
+    
+    /* .cfi_remember_state - Push CFI state */
+    if (strcmp(directive, ".CFI_REMEMBER_STATE") == 0) {
+        if (as->cfi_stack_depth >= MAX_CFI_STACK) {
+            error(as, "CFI state stack overflow");
+            return 0;
+        }
+        as->cfi_stack[as->cfi_stack_depth++] = as->cfi_state;
+        return 1;
+    }
+    
+    /* .cfi_restore_state - Pop CFI state */
+    if (strcmp(directive, ".CFI_RESTORE_STATE") == 0) {
+        if (as->cfi_stack_depth <= 0) {
+            error(as, "CFI state stack underflow");
+            return 0;
+        }
+        as->cfi_state = as->cfi_stack[--as->cfi_stack_depth];
+        return 1;
+    }
+    
+    /* .cfi_undefined <reg> - Register has undefined value */
+    if (strcmp(directive, ".CFI_UNDEFINED") == 0) {
+        /* Just accept, we don't track this specially */
+        return 1;
+    }
+    
+    /* .cfi_same_value <reg> - Register has same value as in caller */
+    if (strcmp(directive, ".CFI_SAME_VALUE") == 0) {
+        /* Just accept, equivalent to not being saved */
+        return 1;
+    }
+    
+    /* .cfi_escape <bytes...> - Raw CFI bytes */
+    if (strcmp(directive, ".CFI_ESCAPE") == 0) {
+        /* Just accept - we'd need to emit these in DWARF output */
+        return 1;
+    }
+    
+    /* .cfi_signal_frame - Mark as signal frame */
+    if (strcmp(directive, ".CFI_SIGNAL_FRAME") == 0) {
+        /* Just accept */
+        return 1;
+    }
+    
+    /* .cfi_return_column <reg> - Set return address column */
+    if (strcmp(directive, ".CFI_RETURN_COLUMN") == 0) {
+        /* Just accept */
+        return 1;
+    }
+    
+    /* .cfi_personality - Personality routine (C++ exceptions) */
+    if (strcmp(directive, ".CFI_PERSONALITY") == 0) {
+        /* Just accept */
+        return 1;
+    }
+    
+    /* .cfi_lsda - Language-specific data area */
+    if (strcmp(directive, ".CFI_LSDA") == 0) {
+        /* Just accept */
+        return 1;
+    }
+    
+    /* Catch any other .cfi_* directives */
+    if (strncmp(directive, ".CFI_", 5) == 0) {
+        /* Accept unknown CFI directives with a warning in verbose mode */
+        if (as->verbose) {
+            warning(as, "unrecognized CFI directive '%s' ignored", directive);
+        }
+        return 1;
+    }
+    
+    /* .addrsig / .addrsig_sym - address-significance directives */
+    if (strcmp(directive, ".ADDRSIG") == 0 || strcmp(directive, ".ADDRSIG_SYM") == 0) {
+        /* Just ignore */
+        return 1;
+    }
+    
+    /* =========================================================================
+     * Include file
+     * ========================================================================= */
+    
     if (strcmp(directive, ".INCLUDE") == 0 || strcmp(directive, "INCLUDE") == 0 ||
         strcmp(directive, ".INC") == 0) {
         char *p = skip_whitespace(operand);
@@ -2297,6 +2945,33 @@ static int process_line(Assembler *as, char *line) {
     /* Skip empty lines and comments */
     if (!*p || *p == ';' || (*p == '*' && p[1] == '\0')) {
         return 1;
+    }
+    
+    /* Check for local labels (.Lxxx:) first - these are LLVM-style local labels */
+    if (*p == '.' && p[1] == 'L') {
+        /* Check if this is a local label (has colon after the name) */
+        char *wp = p;
+        int i = 0;
+        char first_word[MAX_LABEL];
+        wp++;  /* Skip the dot */
+        first_word[i++] = '.';
+        while (is_label_char(*wp) && i < MAX_LABEL - 1)
+            first_word[i++] = *wp++;
+        first_word[i] = '\0';
+        
+        if (*wp == ':') {
+            /* This is a local label like .Lfunc_end0: */
+            strcpy(label, first_word);
+            p = wp + 1;
+            p = skip_whitespace(p);
+            
+            /* Handle label-only lines */
+            if (!*p || *p == ';') {
+                /* Don't uppercase local labels - preserve case */
+                add_symbol(as, label, get_pc(as), 1);
+                return 1;
+            }
+        }
     }
     
     /* Check for label - only if:
@@ -2579,6 +3254,63 @@ static void reset_sections(Assembler *as) {
     as->output.pc = as->output.org;
 }
 
+/* Link sections: place sections without explicit .org after TEXT */
+static void link_sections(Assembler *as) {
+    /* Find TEXT section and its end address */
+    Section *text = find_section(as, "TEXT");
+    if (!text) return;
+    
+    /* Store old org values for symbol adjustment */
+    uint32_t old_orgs[MAX_SECTIONS];
+    for (int i = 0; i < as->num_sections; i++) {
+        old_orgs[i] = as->sections[i].org;
+    }
+    
+    uint32_t next_addr = text->org + text->size;
+    
+    /* Align to 4-byte boundary */
+    next_addr = (next_addr + 3) & ~3;
+    
+    /* Link order: RODATA, DATA, BSS, then any others */
+    const char *link_order[] = { "RODATA", "DATA", "BSS", NULL };
+    
+    for (int i = 0; link_order[i]; i++) {
+        Section *sec = find_section(as, link_order[i]);
+        if (sec && !sec->org_set && sec->size > 0) {
+            sec->org = next_addr;
+            next_addr += sec->size;
+            next_addr = (next_addr + 3) & ~3;  /* Align */
+        }
+    }
+    
+    /* Link any remaining sections */
+    for (int i = 0; i < as->num_sections; i++) {
+        Section *sec = &as->sections[i];
+        if (!sec->org_set && sec->size > 0 &&
+            strcmp(sec->name, "TEXT") != 0 &&
+            strcmp(sec->name, "RODATA") != 0 &&
+            strcmp(sec->name, "DATA") != 0 &&
+            strcmp(sec->name, "BSS") != 0) {
+            sec->org = next_addr;
+            next_addr += sec->size;
+            next_addr = (next_addr + 3) & ~3;
+        }
+    }
+    
+    /* Adjust symbol values for relocated sections */
+    for (int i = 0; i < as->num_symbols; i++) {
+        Symbol *sym = &as->symbols[i];
+        if (sym->defined && sym->section_index >= 0 && sym->section_index < as->num_sections) {
+            Section *sec = &as->sections[sym->section_index];
+            uint32_t old_org = old_orgs[sym->section_index];
+            if (sec->org != old_org) {
+                /* Adjust symbol by the section relocation delta */
+                sym->value = sym->value - old_org + sec->org;
+            }
+        }
+    }
+}
+
 static int assemble_file(Assembler *as, const char *filename) {
     /* Initialize default section if none exist */
     if (as->num_sections == 0) {
@@ -2589,7 +3321,7 @@ static int assemble_file(Assembler *as, const char *filename) {
         as->current_section = 0;
     }
     
-    /* Pass 1: collect symbols */
+    /* Pass 1: collect symbols and determine section sizes */
     as->pass = 1;
     as->file_depth = 0;
     reset_sections(as);
@@ -2598,7 +3330,10 @@ static int assemble_file(Assembler *as, const char *filename) {
         return 0;
     }
     
-    /* Pass 2: generate code */
+    /* Link sections: place DATA/BSS/etc after TEXT */
+    link_sections(as);
+    
+    /* Pass 2: generate code with final addresses */
     as->pass = 2;
     as->file_depth = 0;
     reset_sections(as);

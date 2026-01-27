@@ -233,6 +233,8 @@ architecture rtl of M65832_Core is
     signal ext_fpu                             : std_logic;
     signal ext_ldf, ext_stf                    : std_logic;
     signal ext_fpu_xfer                        : std_logic;      -- FPU register transfer ops (E0-E5)
+    signal fpu_indirect                        : std_logic;      -- FPU register-indirect load/store (B4/B5)
+    signal fpu_mem_reg                         : unsigned(3 downto 0); -- FPU reg for load/store
     signal ext_fpu_trap                        : std_logic;
     
     -- Extended ALU/Shifter/Extend mode/op byte
@@ -1036,7 +1038,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                             IR_EXT2 <= DATA_IN;
                             state <= ST_DECODE;
                         elsif is_extended = '1' and
-                              ((IR_EXT >= x"B0" and IR_EXT <= x"B3") or   -- FPU load/store
+                              ((IR_EXT >= x"B0" and IR_EXT <= x"B7") or   -- FPU load/store
                                (IR_EXT >= x"C0" and IR_EXT <= x"CA") or   -- FPU single-precision
                                (IR_EXT >= x"D0" and IR_EXT <= x"DA") or   -- FPU double-precision
                                (IR_EXT >= x"E0" and IR_EXT <= x"E5") or   -- FPU register transfers
@@ -1101,6 +1103,16 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                             elsif ext_fpu = '1' or ext_fpu_xfer = '1' then
                                 -- FPU arithmetic or register transfer ops
                                 state <= ST_EXECUTE;
+                            elsif fpu_indirect = '1' then
+                                -- FPU register-indirect load/store (address from Rm)
+                                eff_addr <= rw_data1;
+                                data_byte_count <= (others => '0');
+                                ldq_high_phase <= '0';
+                                if ext_ldf = '1' then
+                                    state <= ST_READ;
+                                else
+                                    state <= ST_WRITE;
+                                end if;
                             elsif ADDR_MODE = "0000" then
                                 -- Implied/Accumulator
                                 state <= ST_EXECUTE;
@@ -2285,14 +2297,14 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     
     -- Write data based on byte count and instruction
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
-    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, fp_regs, fpu_reg_byte,
+    process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, fp_regs, fpu_reg_byte, fpu_mem_reg,
             IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff,
             ext_stq, ext_stf)
         variable write_reg : std_logic_vector(31 downto 0);
         variable f_reg     : std_logic_vector(63 downto 0);
     begin
-        -- For STF, register is in low nibble of fpu_reg_byte
-        f_reg := fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0))));
+        -- For STF, select the correct F register based on addressing mode
+        f_reg := fp_regs(to_integer(fpu_mem_reg));
         -- Select source register for stores
         if state = ST_PUSH then
             write_reg := stack_write_reg_eff;
@@ -3211,8 +3223,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
             if CE = '1' and mem_ready = '1' then
                 if state = ST_EXECUTE then
                     if ext_ldf = '1' then
-                        -- Load to register specified in fpu_reg_byte (low nibble for LDF)
-                        fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0)))) <= ldq_high_buffer & ldq_low_buffer;
+                        -- Load to register specified by fpu_reg_byte (mode-dependent)
+                        fp_regs(to_integer(fpu_mem_reg)) <= ldq_high_buffer & ldq_low_buffer;
                     elsif fpu_write_fd = '1' then
                         -- Write result to destination register
                         fp_regs(to_integer(fpu_dest)) <= fpu_result;
@@ -3521,7 +3533,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     
     -- rw_addr1: For IS_REGALU/IS_SHIFTER/IS_EXTEND, use dp from DATA_IN; 
     -- for standard DP modes, use dp_reg_index_next; else use registered dp_reg_index
-    rw_addr1 <= DATA_IN(7 downto 2) when (state = ST_ADDR1 and IS_REGALU = '1' and regalu_phase = "00")
+    rw_addr1 <= "00" & fpu_reg_byte(3 downto 0) when (fpu_indirect = '1' and state = ST_DECODE)
+                else DATA_IN(7 downto 2) when (state = ST_ADDR1 and IS_REGALU = '1' and regalu_phase = "00")
                 else DATA_IN(7 downto 2) when (state = ST_ADDR2 and (IS_SHIFTER = '1' or IS_EXTEND = '1') and regalu_phase = "01")
                 else dp_reg_index_next when (state = ST_ADDR1 and
                                         (ADDR_MODE = "0010" or ADDR_MODE = "0011" or ADDR_MODE = "0100"))
@@ -3547,12 +3560,12 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                    else "00";
     
     process(IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, A_reg, X_reg, Y_reg, T_reg, ALU_RES, stq_high_reg,
-            f_stq_high_reg, ext_stf, fp_regs, fpu_reg_byte, IS_REGALU, regalu_result,
+            f_stq_high_reg, ext_stf, fp_regs, fpu_reg_byte, fpu_mem_reg, IS_REGALU, regalu_result,
             IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable f_reg : std_logic_vector(63 downto 0);
     begin
-        -- For STF, register is in low nibble of fpu_reg_byte
-        f_reg := fp_regs(to_integer(unsigned(fpu_reg_byte(3 downto 0))));
+        -- For STF, select the correct F register based on addressing mode
+        f_reg := fp_regs(to_integer(fpu_mem_reg));
 
         if f_stq_high_reg = '1' then
             rw_wdata <= f_reg(63 downto 32);
@@ -3816,9 +3829,12 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"9C" or IR_EXT = x"9D")) else '0';
     ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"9E" or IR_EXT = x"9F")) else '0';
-    -- FPU load/store: $B0 = LDF dp, $B1 = LDF abs, $B2 = STF dp, $B3 = STF abs
-    ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1")) else '0';
-    ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3")) else '0';
+    -- FPU load/store: $B0-$B7 (dp/abs/(Rm)/abs32)
+    ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or IR_EXT = x"B6")) else '0';
+    ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3" or IR_EXT = x"B5" or IR_EXT = x"B7")) else '0';
+    fpu_indirect <= '1' when (IR = x"02" and (IR_EXT = x"B4" or IR_EXT = x"B5")) else '0';
+    fpu_mem_reg <= unsigned(fpu_reg_byte(7 downto 4)) when (IR_EXT = x"B4" or IR_EXT = x"B5")
+                  else unsigned(fpu_reg_byte(3 downto 0));
     -- FPU register transfers: $E0-$E5
     ext_fpu_xfer <= '1' when (is_extended = '1' and IR_EXT >= x"E0" and IR_EXT <= x"E5") else '0';
     -- FPU register selection from fpu_reg_byte
@@ -3870,7 +3886,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                             ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
                             is_regalu_ext = '0') or
                            ((state = ST_DECODE) and is_extended = '1' and
-                            ((IR_EXT >= x"B0" and IR_EXT <= x"B3") or
+                            ((IR_EXT >= x"B0" and IR_EXT <= x"B7") or
                              (IR_EXT >= x"C0" and IR_EXT <= x"CA") or
                              (IR_EXT >= x"D0" and IR_EXT <= x"DA") or
                              (IR_EXT >= x"E0" and IR_EXT <= x"E5") or

@@ -118,6 +118,12 @@ typedef enum {
     AM_ABSLIND,     /* Abs Long Indirect: JML [$xxxx] */
     AM_IMM_M,       /* Immediate (M flag dependent) */
     AM_IMM_X,       /* Immediate (X flag dependent) */
+    AM_FPU_REG2,    /* Two FP registers: FADD.S F0, F1 */
+    AM_FPU_REG1,    /* One FP register: I2F.S F0 */
+    AM_FPU_DP,      /* FP register + DP: LDF F0, $xx */
+    AM_FPU_ABS,     /* FP register + Abs: LDF F0, $xxxx */
+    AM_FPU_IND,     /* FP register + (Rm): LDF F0, (R1) */
+    AM_FPU_ABS32,   /* FP register + Abs32: LDF F0, $xxxxxxxx */
     AM_UNKNOWN
 } AddrMode;
 
@@ -273,24 +279,24 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    /* 0xB0-0xBF: FPU Load/Store */
-    { "LDF0",   AM_DP   }, { "LDF0",   AM_ABS  }, { "STF0",   AM_DP   }, { "STF0",   AM_ABS  },
-    { "LDF1",   AM_DP   }, { "LDF1",   AM_ABS  }, { "STF1",   AM_DP   }, { "STF1",   AM_ABS  },
-    { "LDF2",   AM_DP   }, { "LDF2",   AM_ABS  }, { "STF2",   AM_DP   }, { "STF2",   AM_ABS  },
+    /* 0xB0-0xBF: FPU Load/Store (with register byte) */
+    { "LDF",    AM_FPU_DP   }, { "LDF",    AM_FPU_ABS }, { "STF",    AM_FPU_DP   }, { "STF",    AM_FPU_ABS },
+    { "LDF",    AM_FPU_IND  }, { "STF",    AM_FPU_IND }, { "LDF",    AM_FPU_ABS32 }, { "STF",    AM_FPU_ABS32 },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
-    /* 0xC0-0xCF: FPU single-precision */
-    { "FADD.S", AM_IMP  }, { "FSUB.S", AM_IMP  }, { "FMUL.S", AM_IMP  }, { "FDIV.S", AM_IMP  },
-    { "FNEG.S", AM_IMP  }, { "FABS.S", AM_IMP  }, { "FSQRT.S",AM_IMP  }, { "FSIN.S", AM_IMP  },
-    { "FCOS.S", AM_IMP  }, { "FTAN.S", AM_IMP  }, { "FLOG.S", AM_IMP  }, { "FEXP.S", AM_IMP  },
-    { "F2I.S",  AM_IMP  }, { "I2F.S",  AM_IMP  }, { "FCMP.S", AM_IMP  }, { NULL,  AM_UNKNOWN },
-    /* 0xD0-0xDF: FPU double-precision */
-    { "FADD.D", AM_IMP  }, { "FSUB.D", AM_IMP  }, { "FMUL.D", AM_IMP  }, { "FDIV.D", AM_IMP  },
-    { "FNEG.D", AM_IMP  }, { "FABS.D", AM_IMP  }, { "FSQRT.D",AM_IMP  }, { "FSIN.D", AM_IMP  },
-    { "FCOS.D", AM_IMP  }, { "FTAN.D", AM_IMP  }, { "FLOG.D", AM_IMP  }, { "FEXP.D", AM_IMP  },
-    { "F2I.D",  AM_IMP  }, { "I2F.D",  AM_IMP  }, { "FCMP.D", AM_IMP  }, { NULL,  AM_UNKNOWN },
-    /* 0xE0-0xEF: FPU conversion/move (reserved for future) */
-    { "FMV01",  AM_IMP  }, { "FMV10",  AM_IMP  }, { "FMV02",  AM_IMP  }, { "FMV20",  AM_IMP  },
-    { "FMV12",  AM_IMP  }, { "FMV21",  AM_IMP  }, { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    /* 0xC0-0xCF: FPU single-precision (with register byte) */
+    { "FADD.S", AM_FPU_REG2 }, { "FSUB.S", AM_FPU_REG2 }, { "FMUL.S", AM_FPU_REG2 }, { "FDIV.S", AM_FPU_REG2 },
+    { "FNEG.S", AM_FPU_REG2 }, { "FABS.S", AM_FPU_REG2 }, { "FCMP.S", AM_FPU_REG2 }, { "F2I.S",  AM_FPU_REG1 },
+    { "I2F.S",  AM_FPU_REG1 }, { "FMOV.S", AM_FPU_REG2 }, { "FSQRT.S",AM_FPU_REG2 }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    /* 0xD0-0xDF: FPU double-precision (with register byte) */
+    { "FADD.D", AM_FPU_REG2 }, { "FSUB.D", AM_FPU_REG2 }, { "FMUL.D", AM_FPU_REG2 }, { "FDIV.D", AM_FPU_REG2 },
+    { "FNEG.D", AM_FPU_REG2 }, { "FABS.D", AM_FPU_REG2 }, { "FCMP.D", AM_FPU_REG2 }, { "F2I.D",  AM_FPU_REG1 },
+    { "I2F.D",  AM_FPU_REG1 }, { "FMOV.D", AM_FPU_REG2 }, { "FSQRT.D",AM_FPU_REG2 }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    /* 0xE0-0xEF: FPU register transfers */
+    { "FTOA",   AM_FPU_REG1 }, { "FTOT",   AM_FPU_REG1 }, { "ATOF",   AM_FPU_REG1 }, { "TTOF",   AM_FPU_REG1 },
+    { "FCVT.DS",AM_FPU_REG2 }, { "FCVT.SD",AM_FPU_REG2 }, { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xF0-0xFF: Reserved */
@@ -364,6 +370,17 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
         case AM_ABSLX:
         case AM_ABSLIND:
             return 3;
+        case AM_FPU_REG2:
+        case AM_FPU_REG1:
+            return 1;   /* Register byte */
+        case AM_FPU_DP:
+            return 2;   /* Register byte + DP */
+        case AM_FPU_ABS:
+            return 3;   /* Register byte + ABS (16-bit) */
+        case AM_FPU_IND:
+            return 1;   /* Register byte (Fn, Rm) */
+        case AM_FPU_ABS32:
+            return 5;   /* Register byte + ABS32 */
         default:
             return 0;
     }
@@ -473,6 +490,34 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             val = operand[0] | (operand[1] << 8);
             if (m_flag == 2) snprintf(out, out_size, "[B+$%04X]", val);
             else snprintf(out, out_size, "[$%04X]", val);
+            break;
+        case AM_FPU_REG2:
+            /* Two FP registers: Fd, Fs */
+            snprintf(out, out_size, "F%d, F%d", 
+                    (operand[0] >> 4) & 0x0F, operand[0] & 0x0F);
+            break;
+        case AM_FPU_REG1:
+            /* Single FP register: Fd */
+            snprintf(out, out_size, "F%d", (operand[0] >> 4) & 0x0F);
+            break;
+        case AM_FPU_DP:
+            /* FP register + DP: Fn, $xx */
+            snprintf(out, out_size, "F%d, $%02X", operand[0] & 0x0F, operand[1]);
+            break;
+        case AM_FPU_ABS:
+            /* FP register + ABS: Fn, $xxxx */
+            val = operand[1] | (operand[2] << 8);
+            snprintf(out, out_size, "F%d, $%04X", operand[0] & 0x0F, val);
+            break;
+        case AM_FPU_IND:
+            /* FP register + (Rm): Fn, (Rm) */
+            snprintf(out, out_size, "F%d, (R%d)",
+                    (operand[0] >> 4) & 0x0F, operand[0] & 0x0F);
+            break;
+        case AM_FPU_ABS32:
+            /* FP register + ABS32: Fn, $xxxxxxxx */
+            val = operand[1] | (operand[2] << 8) | (operand[3] << 16) | (operand[4] << 24);
+            snprintf(out, out_size, "F%d, $%08X", operand[0] & 0x0F, val);
             break;
         default:
             snprintf(out, out_size, "???");
