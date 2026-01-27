@@ -83,6 +83,7 @@ architecture rtl of M65832_Core is
         ST_PULL,
         ST_BRANCH,
         ST_BRANCH2,
+        ST_BRANCH3,
         ST_VECTOR1,
         ST_VECTOR2,
         ST_VECTOR3,
@@ -220,6 +221,7 @@ architecture rtl of M65832_Core is
     signal addr_reg         : std_logic_vector(31 downto 0);
     signal write_data       : std_logic_vector(7 downto 0);
     signal branch_taken     : std_logic;
+    signal branch_wide      : std_logic;
     signal is_indirect_addr : std_logic;
     signal is_long_x        : std_logic;
     signal is_bit_op        : std_logic;
@@ -1944,10 +1946,19 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                         
                     when ST_BRANCH =>
                         DR <= DATA_IN;
-                        -- Evaluate branch condition
-                        state <= ST_BRANCH2;
+                        -- Fetch low offset byte
+                        if branch_wide = '1' then
+                            state <= ST_BRANCH2;
+                        else
+                            state <= ST_BRANCH3;
+                        end if;
                         
                     when ST_BRANCH2 =>
+                        -- Fetch high offset byte
+                        data_buffer(15 downto 8) <= DATA_IN;
+                        state <= ST_BRANCH3;
+                        
+                    when ST_BRANCH3 =>
                         state <= ST_FETCH;
                         
                     when ST_VECTOR1 =>
@@ -2033,7 +2044,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
             block_src_addr, block_dst_addr)
     begin
         case state is
-            when ST_FETCH | ST_DECODE | ST_BRANCH =>
+            when ST_FETCH | ST_DECODE | ST_BRANCH | ST_BRANCH2 =>
                 mem_addr_virt <= PC_reg;
             when ST_ADDR1 | ST_ADDR2 | ST_ADDR3 | ST_ADDR4 =>
                 -- Fetching address bytes from PC or pointer reads for indirect modes
@@ -3787,6 +3798,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                      (BRANCH_COND = "111" and P_reg(P_Z) = '1'))    -- BEQ: Z=1
                     else '0';
     
+    branch_wide <= '1' when (IR = x"82" or W_mode = '1') else '0';
+    
     ---------------------------------------------------------------------------
     -- Address Generator Control
     ---------------------------------------------------------------------------
@@ -3889,13 +3902,15 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                                (ADDR_MODE = "1000" or ADDR_MODE = "1001")) -- JMP indirect
               else "010" when (state = ST_ADDR4 and IS_JMP_d = '1' and
                                ADDR_MODE = "1001") -- JMP (abs,X) indirect
-               else "100" when (state = ST_BRANCH2 and branch_taken = '1') -- Branch taken: add offset
+               else "011" when (state = ST_BRANCH3 and branch_taken = '1' and branch_wide = '1') -- Branch taken: add 16-bit offset
+               else "100" when (state = ST_BRANCH3 and branch_taken = '1') -- Branch taken: add 8-bit offset
                else "001" when (state = ST_FETCH or
                            state = ST_ADDR1 or 
                            (state = ST_ADDR2 and is_indirect_addr = '0') or 
                            (state = ST_ADDR3 and is_indirect_addr = '0') or
                            (state = ST_ADDR4 and is_indirect_addr = '0') or
                            state = ST_BRANCH or  -- Fetch branch offset
+                           (state = ST_BRANCH2 and branch_wide = '1') or  -- Fetch branch offset high
                            ((state = ST_DECODE) and IR = x"02" and is_extended = '0') or
                            ((state = ST_DECODE) and is_extended = '1' and
                             ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and

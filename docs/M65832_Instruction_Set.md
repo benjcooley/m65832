@@ -823,7 +823,8 @@ Uses all LDA addressing modes. **Flags Affected:** N, Z, C
 
 ### Branch Instructions
 
-All branches use 8-bit signed relative addressing (range: -128 to +127 from PC+2).
+In 8-bit and 16-bit modes, branches use 8-bit signed relative addressing (range: -128 to +127 from PC+2).
+In 32-bit mode, branches use 16-bit signed relative addressing (range: -32768 to +32767 from PC+3).
 
 | Mnemonic | Opcode | Condition | Flag Test |
 |----------|--------|-----------|-----------|

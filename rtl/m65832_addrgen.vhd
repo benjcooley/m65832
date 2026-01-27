@@ -216,7 +216,7 @@ begin
             PCOffset <= (others => '0');
         elsif rising_edge(CLK) then
             if EN = '1' then
-                PCOffset(31 downto 16) <= x"0000";
+                PCOffset(31 downto 16) <= (others => D_IN(7));
                 PCOffset(15 downto 8) <= unsigned(D_IN);
                 PCOffset(7 downto 0) <= unsigned(DR);
                 PCr <= NextPC;

@@ -465,6 +465,8 @@ Undefined opcodes are output as `.BYTE $XX` directives:
 | Absolute X | `B+$xxxx,X` | `LDA B+$1234,X` |
 | 32-bit Absolute | `$xxxxxxxx` | `LD R0,$A0001234` (Extended ALU) |
 
+In 32-bit mode, branch instructions use 16-bit relative offsets.
+
 ### Branch Targets
 
 Branch instructions show the computed target address:

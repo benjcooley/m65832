@@ -1,0 +1,6 @@
+// Test: Bitwise OR
+// Expected: 0xFF (0xF0 | 0x0F = 0xFF)
+
+int main(void) {
+    return 0xF0 | 0x0F;
+}

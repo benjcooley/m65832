@@ -162,7 +162,8 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 | CPX src | X - src (discard) | NZC |
 | CPY src | Y - src (discard) | NZC |
 
-### Branches (8-bit relative)
+### Branches (relative)
+8-bit relative in 8/16-bit modes, 16-bit relative in 32-bit mode.
 | Instruction | Condition | Opcode |
 |-------------|-----------|--------|
 | BPL rel | N = 0 | $10 |

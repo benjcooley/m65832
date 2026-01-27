@@ -599,10 +599,11 @@ For traditional instructions, use B-relative addressing with B set to the target
 
 ### 7.9 Relative (Branches)
 
-8-bit signed offset from PC+2 (standard) or 16-bit with BRL.
+8-bit signed offset from PC+2 in 8/16-bit modes. In 32-bit mode, all branches use 16-bit signed offsets from PC+3. BRL always uses a 16-bit signed offset.
 
 ```asm
-BEQ label       ; if Z=1, PC = PC + 2 + offset8
+BEQ label       ; if Z=1, PC = PC + 2 + offset8 (8/16-bit)
+BEQ label       ; if Z=1, PC = PC + 3 + offset16 (32-bit)
 BRL label       ; PC = PC + 3 + offset16
 ```
 

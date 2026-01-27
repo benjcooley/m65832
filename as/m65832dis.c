@@ -351,6 +351,7 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
         case AM_INDL:
         case AM_INDLY:
         case AM_REL:
+            return (m_flag == 2) ? 2 : 1;
         case AM_SR:
         case AM_SRIY:
             return 1;
@@ -458,8 +459,13 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             snprintf(out, out_size, "$%06X,X", val);
             break;
         case AM_REL:
-            rel = (int8_t)operand[0];
-            val = pc + 2 + rel;  /* PC + instruction size + offset */
+            if (opsize == 2) {
+                rel = (int16_t)(operand[0] | (operand[1] << 8));
+                val = pc + 3 + rel;  /* PC + instruction size + offset */
+            } else {
+                rel = (int8_t)operand[0];
+                val = pc + 2 + rel;  /* PC + instruction size + offset */
+            }
             snprintf(out, out_size, "$%04X", val & 0xFFFF);
             break;
         case AM_RELL:

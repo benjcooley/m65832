@@ -2055,7 +2055,20 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     /* Handle branches specially */
     if (op.mode == AM_DP || op.mode == AM_ABS) {
         if (inst->opcodes[AM_REL] != 0xFF) {
-            /* Convert to relative */
+            if (as->m_flag == 2) {
+                /* 32-bit mode: use 16-bit relative offsets */
+                int32_t offset = (int32_t)op.value - (int32_t)(as->output.pc + 3);
+                if (offset < -32768 || offset > 32767) {
+                    if (as->pass == 2) {
+                        error(as, "branch target out of range (%d bytes)", offset);
+                    }
+                    return 0;
+                }
+                emit_byte(as, inst->opcodes[AM_REL]);
+                emit_word(as, offset & 0xFFFF);
+                return 1;
+            }
+            /* Convert to 8-bit relative */
             int32_t offset = (int32_t)op.value - (int32_t)(as->output.pc + 2);
             if (offset < -128 || offset > 127) {
                 if (inst->opcodes[AM_RELL] != 0xFF) {

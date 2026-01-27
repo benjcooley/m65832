@@ -614,15 +614,33 @@ begin
                         when x"DC" => IS_JML <= '1'; IS_JUMP <= '1'; ADDR_MODE <= "1011"; INSTR_LEN <= "011";  -- JML [abs]
                         
                         -- Branches
-                        when x"10" => IS_BRANCH <= '1'; BRANCH_COND <= "000"; INSTR_LEN <= "010";  -- BPL
-                        when x"30" => IS_BRANCH <= '1'; BRANCH_COND <= "001"; INSTR_LEN <= "010";  -- BMI
-                        when x"50" => IS_BRANCH <= '1'; BRANCH_COND <= "010"; INSTR_LEN <= "010";  -- BVC
-                        when x"70" => IS_BRANCH <= '1'; BRANCH_COND <= "011"; INSTR_LEN <= "010";  -- BVS
-                        when x"90" => IS_BRANCH <= '1'; BRANCH_COND <= "100"; INSTR_LEN <= "010";  -- BCC
-                        when x"B0" => IS_BRANCH <= '1'; BRANCH_COND <= "101"; INSTR_LEN <= "010";  -- BCS
-                        when x"D0" => IS_BRANCH <= '1'; BRANCH_COND <= "110"; INSTR_LEN <= "010";  -- BNE
-                        when x"F0" => IS_BRANCH <= '1'; BRANCH_COND <= "111"; INSTR_LEN <= "010";  -- BEQ
-                        when x"80" => IS_BRANCH <= '1'; INSTR_LEN <= "010";  -- BRA
+                        when x"10" =>  -- BPL
+                            IS_BRANCH <= '1'; BRANCH_COND <= "000";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"30" =>  -- BMI
+                            IS_BRANCH <= '1'; BRANCH_COND <= "001";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"50" =>  -- BVC
+                            IS_BRANCH <= '1'; BRANCH_COND <= "010";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"70" =>  -- BVS
+                            IS_BRANCH <= '1'; BRANCH_COND <= "011";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"90" =>  -- BCC
+                            IS_BRANCH <= '1'; BRANCH_COND <= "100";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"B0" =>  -- BCS
+                            IS_BRANCH <= '1'; BRANCH_COND <= "101";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"D0" =>  -- BNE
+                            IS_BRANCH <= '1'; BRANCH_COND <= "110";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"F0" =>  -- BEQ
+                            IS_BRANCH <= '1'; BRANCH_COND <= "111";
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
+                        when x"80" =>  -- BRA
+                            IS_BRANCH <= '1';
+                            if M_WIDTH = WIDTH_32 then INSTR_LEN <= "011"; else INSTR_LEN <= "010"; end if;
                         when x"82" => IS_BRANCH <= '1'; INSTR_LEN <= "011";  -- BRL
                         
                         -- Stack operations

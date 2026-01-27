@@ -1,0 +1,7 @@
+# Test output files
+*.bin
+*.s
+*_combined.s
+tests/*.bin
+tests/*.s
+tests/*_combined.s

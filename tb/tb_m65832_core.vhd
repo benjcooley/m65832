@@ -1420,21 +1420,22 @@ begin
         poke(16#800C#, x"00");  -- byte 2
         poke(16#800D#, x"00");  -- byte 3
         poke(16#800E#, x"F0");  -- BEQ
-        poke(16#800F#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
-        poke(16#8010#, x"A9");  -- LDA #
-        poke(16#8011#, x"00");  -- byte 0
-        poke(16#8012#, x"00");  -- byte 1
-        poke(16#8013#, x"00");  -- byte 2
-        poke(16#8014#, x"00");  -- byte 3
-        poke(16#8015#, x"A9");  -- LDA #
-        poke(16#8016#, x"55");  -- byte 0
-        poke(16#8017#, x"00");  -- byte 1
-        poke(16#8018#, x"00");  -- byte 2
-        poke(16#8019#, x"00");  -- byte 3
-        poke(16#801A#, x"8D");  -- STA abs
-        poke(16#801B#, x"3E");  -- $3E
-        poke(16#801C#, x"02");  -- $02  -> $023E
-        poke(16#801D#, x"00");  -- BRK
+        poke(16#800F#, x"05");  -- +5 (low)
+        poke(16#8010#, x"00");  -- +5 (high)
+        poke(16#8011#, x"A9");  -- LDA #
+        poke(16#8012#, x"00");  -- byte 0
+        poke(16#8013#, x"00");  -- byte 1
+        poke(16#8014#, x"00");  -- byte 2
+        poke(16#8015#, x"00");  -- byte 3
+        poke(16#8016#, x"A9");  -- LDA #
+        poke(16#8017#, x"55");  -- byte 0
+        poke(16#8018#, x"00");  -- byte 1
+        poke(16#8019#, x"00");  -- byte 2
+        poke(16#801A#, x"00");  -- byte 3
+        poke(16#801B#, x"8D");  -- STA abs
+        poke(16#801C#, x"3E");  -- $3E
+        poke(16#801D#, x"02");  -- $02  -> $023E
+        poke(16#801E#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1808,21 +1809,22 @@ begin
         poke(16#8010#, x"A0");  -- $A0
         poke(16#8011#, x"02");  -- $02  -> $02A0-$02A3
         poke(16#8012#, x"B0");  -- BCS
-        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
-        poke(16#8014#, x"A9");  -- LDA #
-        poke(16#8015#, x"00");  -- byte 0
-        poke(16#8016#, x"00");  -- byte 1
-        poke(16#8017#, x"00");  -- byte 2
-        poke(16#8018#, x"00");  -- byte 3
-        poke(16#8019#, x"A9");  -- LDA #
-        poke(16#801A#, x"AA");  -- byte 0
-        poke(16#801B#, x"00");  -- byte 1
-        poke(16#801C#, x"00");  -- byte 2
-        poke(16#801D#, x"00");  -- byte 3
-        poke(16#801E#, x"8D");  -- STA abs
-        poke(16#801F#, x"A4");  -- $A4
-        poke(16#8020#, x"02");  -- $02  -> $02A4
-        poke(16#8021#, x"00");  -- BRK
+        poke(16#8013#, x"05");  -- +5 (low)
+        poke(16#8014#, x"00");  -- +5 (high)
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"00");  -- byte 0
+        poke(16#8017#, x"00");  -- byte 1
+        poke(16#8018#, x"00");  -- byte 2
+        poke(16#8019#, x"00");  -- byte 3
+        poke(16#801A#, x"A9");  -- LDA #
+        poke(16#801B#, x"AA");  -- byte 0
+        poke(16#801C#, x"00");  -- byte 1
+        poke(16#801D#, x"00");  -- byte 2
+        poke(16#801E#, x"00");  -- byte 3
+        poke(16#801F#, x"8D");  -- STA abs
+        poke(16#8020#, x"A4");  -- $A4
+        poke(16#8021#, x"02");  -- $02  -> $02A4
+        poke(16#8022#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1862,21 +1864,22 @@ begin
         poke(16#8010#, x"A8");  -- $A8
         poke(16#8011#, x"02");  -- $02  -> $02A8-$02AB
         poke(16#8012#, x"70");  -- BVS
-        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
-        poke(16#8014#, x"A9");  -- LDA #
-        poke(16#8015#, x"00");  -- byte 0
-        poke(16#8016#, x"00");  -- byte 1
-        poke(16#8017#, x"00");  -- byte 2
-        poke(16#8018#, x"00");  -- byte 3
-        poke(16#8019#, x"A9");  -- LDA #
-        poke(16#801A#, x"BB");  -- byte 0
-        poke(16#801B#, x"00");  -- byte 1
-        poke(16#801C#, x"00");  -- byte 2
-        poke(16#801D#, x"00");  -- byte 3
-        poke(16#801E#, x"8D");  -- STA abs
-        poke(16#801F#, x"AC");  -- $AC
-        poke(16#8020#, x"02");  -- $02  -> $02AC
-        poke(16#8021#, x"00");  -- BRK
+        poke(16#8013#, x"05");  -- +5 (low)
+        poke(16#8014#, x"00");  -- +5 (high)
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"00");  -- byte 0
+        poke(16#8017#, x"00");  -- byte 1
+        poke(16#8018#, x"00");  -- byte 2
+        poke(16#8019#, x"00");  -- byte 3
+        poke(16#801A#, x"A9");  -- LDA #
+        poke(16#801B#, x"BB");  -- byte 0
+        poke(16#801C#, x"00");  -- byte 1
+        poke(16#801D#, x"00");  -- byte 2
+        poke(16#801E#, x"00");  -- byte 3
+        poke(16#801F#, x"8D");  -- STA abs
+        poke(16#8020#, x"AC");  -- $AC
+        poke(16#8021#, x"02");  -- $02  -> $02AC
+        poke(16#8022#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1916,21 +1919,22 @@ begin
         poke(16#8010#, x"B0");  -- $B0
         poke(16#8011#, x"02");  -- $02  -> $02B0-$02B3
         poke(16#8012#, x"90");  -- BCC
-        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
-        poke(16#8014#, x"A9");  -- LDA #
-        poke(16#8015#, x"00");  -- byte 0
-        poke(16#8016#, x"00");  -- byte 1
-        poke(16#8017#, x"00");  -- byte 2
-        poke(16#8018#, x"00");  -- byte 3
-        poke(16#8019#, x"A9");  -- LDA #
-        poke(16#801A#, x"CC");  -- byte 0
-        poke(16#801B#, x"00");  -- byte 1
-        poke(16#801C#, x"00");  -- byte 2
-        poke(16#801D#, x"00");  -- byte 3
-        poke(16#801E#, x"8D");  -- STA abs
-        poke(16#801F#, x"B4");  -- $B4
-        poke(16#8020#, x"02");  -- $02  -> $02B4
-        poke(16#8021#, x"00");  -- BRK
+        poke(16#8013#, x"05");  -- +5 (low)
+        poke(16#8014#, x"00");  -- +5 (high)
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"00");  -- byte 0
+        poke(16#8017#, x"00");  -- byte 1
+        poke(16#8018#, x"00");  -- byte 2
+        poke(16#8019#, x"00");  -- byte 3
+        poke(16#801A#, x"A9");  -- LDA #
+        poke(16#801B#, x"CC");  -- byte 0
+        poke(16#801C#, x"00");  -- byte 1
+        poke(16#801D#, x"00");  -- byte 2
+        poke(16#801E#, x"00");  -- byte 3
+        poke(16#801F#, x"8D");  -- STA abs
+        poke(16#8020#, x"B4");  -- $B4
+        poke(16#8021#, x"02");  -- $02  -> $02B4
+        poke(16#8022#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
@@ -1970,21 +1974,22 @@ begin
         poke(16#8010#, x"B8");  -- $B8
         poke(16#8011#, x"02");  -- $02  -> $02B8-$02BB
         poke(16#8012#, x"70");  -- BVS
-        poke(16#8013#, x"05");  -- +5 (skip 32-bit LDA #$00000000)
-        poke(16#8014#, x"A9");  -- LDA #
-        poke(16#8015#, x"00");  -- byte 0
-        poke(16#8016#, x"00");  -- byte 1
-        poke(16#8017#, x"00");  -- byte 2
-        poke(16#8018#, x"00");  -- byte 3
-        poke(16#8019#, x"A9");  -- LDA #
-        poke(16#801A#, x"DD");  -- byte 0
-        poke(16#801B#, x"00");  -- byte 1
-        poke(16#801C#, x"00");  -- byte 2
-        poke(16#801D#, x"00");  -- byte 3
-        poke(16#801E#, x"8D");  -- STA abs
-        poke(16#801F#, x"BC");  -- $BC
-        poke(16#8020#, x"02");  -- $02  -> $02BC
-        poke(16#8021#, x"00");  -- BRK
+        poke(16#8013#, x"05");  -- +5 (low)
+        poke(16#8014#, x"00");  -- +5 (high)
+        poke(16#8015#, x"A9");  -- LDA #
+        poke(16#8016#, x"00");  -- byte 0
+        poke(16#8017#, x"00");  -- byte 1
+        poke(16#8018#, x"00");  -- byte 2
+        poke(16#8019#, x"00");  -- byte 3
+        poke(16#801A#, x"A9");  -- LDA #
+        poke(16#801B#, x"DD");  -- byte 0
+        poke(16#801C#, x"00");  -- byte 1
+        poke(16#801D#, x"00");  -- byte 2
+        poke(16#801E#, x"00");  -- byte 3
+        poke(16#801F#, x"8D");  -- STA abs
+        poke(16#8020#, x"BC");  -- $BC
+        poke(16#8021#, x"02");  -- $02  -> $02BC
+        poke(16#8022#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);

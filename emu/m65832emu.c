@@ -2478,49 +2478,103 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Branches ============ */
         case 0x10: /* BPL */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (!FLAG_TST(cpu, P_N)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (!FLAG_TST(cpu, P_N)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (!FLAG_TST(cpu, P_N)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0x30: /* BMI */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (FLAG_TST(cpu, P_N)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (FLAG_TST(cpu, P_N)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (FLAG_TST(cpu, P_N)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0x50: /* BVC */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (!FLAG_TST(cpu, P_V)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (!FLAG_TST(cpu, P_V)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (!FLAG_TST(cpu, P_V)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0x70: /* BVS */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (FLAG_TST(cpu, P_V)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (FLAG_TST(cpu, P_V)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (FLAG_TST(cpu, P_V)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0x90: /* BCC */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (!FLAG_TST(cpu, P_C)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (!FLAG_TST(cpu, P_C)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (!FLAG_TST(cpu, P_C)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0xB0: /* BCS */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (FLAG_TST(cpu, P_C)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (FLAG_TST(cpu, P_C)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (FLAG_TST(cpu, P_C)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0xD0: /* BNE */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (!FLAG_TST(cpu, P_Z)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (!FLAG_TST(cpu, P_Z)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (!FLAG_TST(cpu, P_Z)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0xF0: /* BEQ */
-            rel8 = (int8_t)fetch8(cpu);
-            cycles = 2;
-            if (FLAG_TST(cpu, P_Z)) { cpu->pc += rel8; cycles++; }
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cycles = 3;
+                if (FLAG_TST(cpu, P_Z)) { cpu->pc += rel16; cycles++; }
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cycles = 2;
+                if (FLAG_TST(cpu, P_Z)) { cpu->pc += rel8; cycles++; }
+            }
             break;
         case 0x80: /* BRA */
-            rel8 = (int8_t)fetch8(cpu);
-            cpu->pc += rel8;
-            cycles = 3;
+            if (WIDTH_M(cpu) == WIDTH_32) {
+                rel16 = (int16_t)fetch16(cpu);
+                cpu->pc += rel16;
+                cycles = 4;
+            } else {
+                rel8 = (int8_t)fetch8(cpu);
+                cpu->pc += rel8;
+                cycles = 3;
+            }
             break;
         case 0x82: /* BRL */
             rel16 = (int16_t)fetch16(cpu);
