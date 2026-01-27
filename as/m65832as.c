@@ -4,7 +4,7 @@
  * A two-pass assembler for the M65832 processor.
  * Supports all 6502/65816 instructions plus M65832 extensions.
  *
- * Build: cc -O2 -o m65832as m65832as.c
+ * Build: make (uses common library)
  * Usage: m65832as [options] input.asm -o output.bin
  *
  * Copyright (c) 2026. MIT License.
@@ -17,6 +17,61 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <limits.h>
+
+/* Include shared ISA definitions */
+#include "m65832_isa.h"
+
+/* Compatibility defines - map local names to shared library names */
+#define AddrMode        M65_AddrMode
+#define AM_IMP          M65_AM_IMP
+#define AM_ACC          M65_AM_ACC
+#define AM_IMM          M65_AM_IMM
+#define AM_DP           M65_AM_DP
+#define AM_DPX          M65_AM_DPX
+#define AM_DPY          M65_AM_DPY
+#define AM_ABS          M65_AM_ABS
+#define AM_ABSX         M65_AM_ABSX
+#define AM_ABSY         M65_AM_ABSY
+#define AM_IND          M65_AM_IND
+#define AM_INDX         M65_AM_INDX
+#define AM_INDY         M65_AM_INDY
+#define AM_INDL         M65_AM_INDL
+#define AM_INDLY        M65_AM_INDLY
+#define AM_ABSL         M65_AM_ABSL
+#define AM_ABSLX        M65_AM_ABSLX
+#define AM_REL          M65_AM_REL
+#define AM_RELL         M65_AM_RELL
+#define AM_SR           M65_AM_SR
+#define AM_SRIY         M65_AM_SRIY
+#define AM_MVP          M65_AM_MVP
+#define AM_MVN          M65_AM_MVN
+#define AM_ABSIND       M65_AM_ABSIND
+#define AM_ABSINDX      M65_AM_ABSINDX
+#define AM_ABSLIND      M65_AM_ABSLIND
+#define AM_IMM32        M65_AM_IMM32
+#define AM_ABS32        M65_AM_ABS32
+#define AM_FPU_REG2     M65_AM_FPU_REG2
+#define AM_FPU_REG1     M65_AM_FPU_REG1
+#define AM_FPU_DP       M65_AM_FPU_DP
+#define AM_FPU_ABS      M65_AM_FPU_ABS
+#define AM_FPU_IND      M65_AM_FPU_IND
+#define AM_FPU_LONG     M65_AM_FPU_LONG
+#define AM_COUNT        M65_AM_COUNT
+
+/* Map struct names - only for compatible types */
+#define Instruction         M65_Instruction
+#define ExtInstruction      M65_ExtInstruction
+/* RegALUInstruction, ShifterInstruction, ExtendInstruction use local definitions
+ * because they have different structures for encoding purposes */
+
+/* Map table names - only for compatible tables */
+#define instructions         m65_instructions
+#define ext_instructions     m65_ext_instructions
+/* regalu_instructions, shifter_instructions, extend_instructions use local tables
+ * because they have different encoding schemes */
+
+/* Invalid opcode marker */
+#define __  M65_OP_INVALID
 
 #define VERSION "1.1.0"
 #define MAX_LINE 1024
@@ -32,50 +87,7 @@
 /* Types and Structures                                                       */
 /* ========================================================================== */
 
-typedef enum {
-    AM_IMP,         /* Implied: NOP */
-    AM_ACC,         /* Accumulator: ASL A (or just ASL) */
-    AM_IMM,         /* Immediate: LDA #$xx */
-    AM_DP,          /* Direct Page: LDA $xx */
-    AM_DPX,         /* DP Indexed X: LDA $xx,X */
-    AM_DPY,         /* DP Indexed Y: LDA $xx,Y */
-    AM_ABS,         /* Absolute: LDA $xxxx */
-    AM_ABSX,        /* Abs Indexed X: LDA $xxxx,X */
-    AM_ABSY,        /* Abs Indexed Y: LDA $xxxx,Y */
-    AM_IND,         /* Indirect: JMP ($xxxx) */
-    AM_INDX,        /* Indexed Indirect: LDA ($xx,X) */
-    AM_INDY,        /* Indirect Indexed: LDA ($xx),Y */
-    AM_INDL,        /* Indirect Long: LDA [$xx] */
-    AM_INDLY,       /* Indirect Long Y: LDA [$xx],Y */
-    AM_ABSL,        /* Absolute Long: LDA $xxxxxx */
-    AM_ABSLX,       /* Abs Long X: LDA $xxxxxx,X */
-    AM_REL,         /* Relative: BEQ label */
-    AM_RELL,        /* Relative Long: BRL label */
-    AM_SR,          /* Stack Relative: LDA $xx,S */
-    AM_SRIY,        /* SR Indirect Y: LDA ($xx,S),Y */
-    AM_MVP,         /* Block Move: MVP src,dst */
-    AM_MVN,         /* Block Move: MVN src,dst */
-    AM_ABSIND,      /* Abs Indirect: JMP ($xxxx) */
-    AM_ABSINDX,     /* Abs Indexed Indirect: JMP ($xxxx,X) */
-    AM_ABSLIND,     /* Abs Long Indirect: JML [$xxxx] */
-    /* Extended 32-bit modes (Extended ALU only) */
-    AM_IMM32,       /* 32-bit Immediate */
-    AM_ABS32,       /* 32-bit Absolute */
-    /* FPU register modes */
-    AM_FPU_REG2,    /* Two FP registers: FADD.S F0, F1 */
-    AM_FPU_REG1,    /* One FP register: F2I.S F0 */
-    AM_FPU_DP,      /* FP register + DP: LDF F0, $xx */
-    AM_FPU_ABS,     /* FP register + Abs: LDF F0, $xxxx */
-    AM_FPU_IND,     /* FP register + GPR indirect: LDF F0, (R0) */
-    AM_FPU_LONG,    /* FP register + 32-bit Abs: LDF F0, $xxxxxxxx */
-    AM_COUNT
-} AddrMode;
-
-typedef struct {
-    const char *name;
-    uint8_t opcodes[AM_COUNT];  /* Opcode for each addressing mode, 0xFF = invalid */
-    uint8_t ext_prefix;         /* 1 if needs $02 prefix */
-} Instruction;
+/* AddrMode, Instruction, and instruction tables now come from m65832_isa.h */
 
 typedef struct {
     char name[MAX_LABEL];
@@ -151,223 +163,32 @@ typedef struct {
     int cfi_stack_depth;
     int emit_dwarf;             /* Emit DWARF debug info (future) */
 } Assembler;
-
 /* ========================================================================== */
-/* Instruction Table                                                          */
+/* Instruction Tables                                                         */
 /* ========================================================================== */
 
-/* Opcode 0xFF = not available for this addressing mode */
-#define __ 0xFF
-
-/* Standard 6502/65816 instructions */
-static const Instruction instructions[] = {
-    /*                IMP   ACC   IMM   DP    DPX   DPY   ABS   ABSX  ABSY  IND   INDX  INDY  INDL  INDLY ABSL  ABSLX REL   RELL  SR    SRIY  MVP   MVN   AIND  AINDX ALIND IMM32 ABS32 */
-    { "ADC",        { __,   __,   0x69, 0x65, 0x75, __,   0x6D, 0x7D, 0x79, __,   0x61, 0x71, 0x67, 0x77, 0x6F, 0x7F, __,   __,   0x63, 0x73, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "AND",        { __,   __,   0x29, 0x25, 0x35, __,   0x2D, 0x3D, 0x39, __,   0x21, 0x31, 0x27, 0x37, 0x2F, 0x3F, __,   __,   0x23, 0x33, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "ASL",        { __,   0x0A, __,   0x06, 0x16, __,   0x0E, 0x1E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BCC",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x90, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BCS",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0xB0, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BEQ",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0xF0, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BIT",        { __,   __,   0x89, 0x24, 0x34, __,   0x2C, 0x3C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BMI",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x30, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BNE",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0xD0, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BPL",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x10, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BRA",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x80, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BRK",        { 0x00, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BRL",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x82, __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BVC",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x50, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "BVS",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x70, __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CLC",        { 0x18, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CLD",        { 0xD8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CLI",        { 0x58, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CLV",        { 0xB8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CMP",        { __,   __,   0xC9, 0xC5, 0xD5, __,   0xCD, 0xDD, 0xD9, __,   0xC1, 0xD1, 0xC7, 0xD7, 0xCF, 0xDF, __,   __,   0xC3, 0xD3, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "COP",        { __,   __,   0x02, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CPX",        { __,   __,   0xE0, 0xE4, __,   __,   0xEC, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "CPY",        { __,   __,   0xC0, 0xC4, __,   __,   0xCC, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "DEC",        { __,   0x3A, __,   0xC6, 0xD6, __,   0xCE, 0xDE, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "DEX",        { 0xCA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "DEY",        { 0x88, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "EOR",        { __,   __,   0x49, 0x45, 0x55, __,   0x4D, 0x5D, 0x59, __,   0x41, 0x51, 0x47, 0x57, 0x4F, 0x5F, __,   __,   0x43, 0x53, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "INC",        { __,   0x1A, __,   0xE6, 0xF6, __,   0xEE, 0xFE, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "INX",        { 0xE8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "INY",        { 0xC8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "JML",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x5C, __,   __,   __,   __,   __,   __,   __,   __,   __,   0xDC, __,   __   }, 0 },
-    { "JMP",        { __,   __,   __,   __,   __,   __,   0x4C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x6C, 0x7C, __,   __,   __   }, 0 },
-    { "JSL",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x22, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "JSR",        { __,   __,   __,   __,   __,   __,   0x20, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "LDA",        { __,   __,   0xA9, 0xA5, 0xB5, __,   0xAD, 0xBD, 0xB9, __,   0xA1, 0xB1, 0xA7, 0xB7, 0xAF, 0xBF, __,   __,   0xA3, 0xB3, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "LDX",        { __,   __,   0xA2, 0xA6, __,   0xB6, 0xAE, __,   0xBE, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "LDY",        { __,   __,   0xA0, 0xA4, 0xB4, __,   0xAC, 0xBC, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "LSR",        { __,   0x4A, __,   0x46, 0x56, __,   0x4E, 0x5E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "MVN",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x54, __,   __,   __,   __,   __   }, 0 },
-    { "MVP",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x44, __,   __,   __,   __,   __,   __   }, 0 },
-    { "NOP",        { 0xEA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "ORA",        { __,   __,   0x09, 0x05, 0x15, __,   0x0D, 0x1D, 0x19, __,   0x01, 0x11, 0x07, 0x17, 0x0F, 0x1F, __,   __,   0x03, 0x13, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PEA",        { __,   __,   0xF4, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PEI",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   0xD4, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PER",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x62, __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHA",        { 0x48, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHB",        { 0x8B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHD",        { 0x0B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHK",        { 0x4B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHP",        { 0x08, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHX",        { 0xDA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PHY",        { 0x5A, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLA",        { 0x68, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLB",        { 0xAB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLD",        { 0x2B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLP",        { 0x28, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLX",        { 0xFA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "PLY",        { 0x7A, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "REP",        { __,   __,   0xC2, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "ROL",        { __,   0x2A, __,   0x26, 0x36, __,   0x2E, 0x3E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "ROR",        { __,   0x6A, __,   0x66, 0x76, __,   0x6E, 0x7E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "RTI",        { 0x40, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "RTL",        { 0x6B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "RTS",        { 0x60, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "SBC",        { __,   __,   0xE9, 0xE5, 0xF5, __,   0xED, 0xFD, 0xF9, __,   0xE1, 0xF1, 0xE7, 0xF7, 0xEF, 0xFF, __,   __,   0xE3, 0xF3, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "SEC",        { 0x38, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "SED",        { 0xF8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "SEI",        { 0x78, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "SEP",        { __,   __,   0xE2, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "STA",        { __,   __,   __,   0x85, 0x95, __,   0x8D, 0x9D, 0x99, __,   0x81, 0x91, 0x87, 0x97, 0x8F, 0x9F, __,   __,   0x83, 0x93, __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "STP",        { 0xDB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "STX",        { __,   __,   __,   0x86, __,   0x96, 0x8E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "STY",        { __,   __,   __,   0x84, 0x94, __,   0x8C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "STZ",        { __,   __,   __,   0x64, 0x74, __,   0x9C, 0x9E, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TAX",        { 0xAA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TAY",        { 0xA8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TCD",        { 0x5B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TCS",        { 0x1B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TDC",        { 0x7B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TRB",        { __,   __,   __,   0x14, __,   __,   0x1C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TSB",        { __,   __,   __,   0x04, __,   __,   0x0C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TSC",        { 0x3B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TSX",        { 0xBA, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TXA",        { 0x8A, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TXS",        { 0x9A, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TXY",        { 0x9B, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TYA",        { 0x98, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "TYX",        { 0xBB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "WAI",        { 0xCB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "WDM",        { __,   __,   0x42, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "XBA",        { 0xEB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { "XCE",        { 0xFB, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
-    { NULL, { 0 }, 0 }
-};
-
-/* M65832 Extended instructions ($02 prefix) */
-typedef struct {
-    const char *name;
-    uint8_t ext_opcode;
-    AddrMode mode;
-} ExtInstruction;
-
-static const ExtInstruction ext_instructions[] = {
-    /* Multiply/Divide */
-    { "MUL",    0x00, AM_DP   },
-    { "MULU",   0x01, AM_DP   },
-    { "MUL",    0x02, AM_ABS  },
-    { "MULU",   0x03, AM_ABS  },
-    { "DIV",    0x04, AM_DP   },
-    { "DIVU",   0x05, AM_DP   },
-    { "DIV",    0x06, AM_ABS  },
-    { "DIVU",   0x07, AM_ABS  },
-    /* Atomics */
-    { "CAS",    0x10, AM_DP   },
-    { "CAS",    0x11, AM_ABS  },
-    { "LLI",    0x12, AM_DP   },
-    { "LLI",    0x13, AM_ABS  },
-    { "SCI",    0x14, AM_DP   },
-    { "SCI",    0x15, AM_ABS  },
-    /* Base registers */
-    { "SVBR",   0x20, AM_IMM  },  /* Actually imm32, handled specially */
-    { "SVBR",   0x21, AM_DP   },
-    { "SB",     0x22, AM_IMM  },
-    { "SB",     0x23, AM_DP   },
-    { "SD",     0x24, AM_IMM  },
-    { "SD",     0x25, AM_DP   },
-    /* Register Window */
-    { "RSET",   0x30, AM_IMP  },
-    { "RCLR",   0x31, AM_IMP  },
-    /* System */
-    { "TRAP",   0x40, AM_IMM  },  /* 8-bit immediate */
-    { "FENCE",  0x50, AM_IMP  },
-    { "FENCER", 0x51, AM_IMP  },
-    { "FENCEW", 0x52, AM_IMP  },
-    /* Extended flags */
-    { "REPE",   0x60, AM_IMM  },
-    { "SEPE",   0x61, AM_IMM  },
-    /* 32-bit stack ops */
-    { "PHD32",  0x70, AM_IMP  },
-    { "PLD32",  0x71, AM_IMP  },
-    { "PHB32",  0x72, AM_IMP  },
-    { "PLB32",  0x73, AM_IMP  },
-    { "PHVBR",  0x74, AM_IMP  },
-    { "PLVBR",  0x75, AM_IMP  },
-    /* Temp register */
-    { "TTA",    0x9A, AM_IMP  },
-    { "TAT",    0x9B, AM_IMP  },
-    /* 64-bit load/store */
-    { "LDQ",    0x9C, AM_DP   },
-    { "LDQ",    0x9D, AM_ABS  },
-    { "STQ",    0x9E, AM_DP   },
-    { "STQ",    0x9F, AM_ABS  },
-    /* LEA */
-    { "LEA",    0xA0, AM_DP   },
-    { "LEA",    0xA1, AM_DPX  },
-    { "LEA",    0xA2, AM_ABS  },
-    { "LEA",    0xA3, AM_ABSX },
-    /* FPU Load/Store (with register byte) */
-    { "LDF",    0xB0, AM_FPU_DP  },
-    { "LDF",    0xB1, AM_FPU_ABS },
-    { "STF",    0xB2, AM_FPU_DP  },
-    { "STF",    0xB3, AM_FPU_ABS },
-    { "LDF",    0xB4, AM_FPU_IND },
-    { "STF",    0xB5, AM_FPU_IND },
-    { "LDF",    0xB6, AM_FPU_LONG },
-    { "STF",    0xB7, AM_FPU_LONG },
-    { "LDF.S",  0xBA, AM_FPU_IND },
-    { "STF.S",  0xBB, AM_FPU_IND },
-    /* FPU single-precision (two-operand) */
-    { "FADD.S", 0xC0, AM_FPU_REG2 },
-    { "FSUB.S", 0xC1, AM_FPU_REG2 },
-    { "FMUL.S", 0xC2, AM_FPU_REG2 },
-    { "FDIV.S", 0xC3, AM_FPU_REG2 },
-    { "FNEG.S", 0xC4, AM_FPU_REG2 },
-    { "FABS.S", 0xC5, AM_FPU_REG2 },
-    { "FCMP.S", 0xC6, AM_FPU_REG2 },
-    { "F2I.S",  0xC7, AM_FPU_REG1 },
-    { "I2F.S",  0xC8, AM_FPU_REG1 },
-    { "FMOV.S", 0xC9, AM_FPU_REG2 },
-    { "FSQRT.S",0xCA, AM_FPU_REG2 },
-    /* FPU double-precision (two-operand) */
-    { "FADD.D", 0xD0, AM_FPU_REG2 },
-    { "FSUB.D", 0xD1, AM_FPU_REG2 },
-    { "FMUL.D", 0xD2, AM_FPU_REG2 },
-    { "FDIV.D", 0xD3, AM_FPU_REG2 },
-    { "FNEG.D", 0xD4, AM_FPU_REG2 },
-    { "FABS.D", 0xD5, AM_FPU_REG2 },
-    { "FCMP.D", 0xD6, AM_FPU_REG2 },
-    { "F2I.D",  0xD7, AM_FPU_REG1 },
-    { "I2F.D",  0xD8, AM_FPU_REG1 },
-    { "FMOV.D", 0xD9, AM_FPU_REG2 },
-    { "FSQRT.D",0xDA, AM_FPU_REG2 },
-    /* FPU register transfers */
-    { "FTOA",   0xE0, AM_FPU_REG1 },
-    { "FTOT",   0xE1, AM_FPU_REG1 },
-    { "ATOF",   0xE2, AM_FPU_REG1 },
-    { "TTOF",   0xE3, AM_FPU_REG1 },
-    { "FCVT.DS",0xE4, AM_FPU_REG2 },
-    { "FCVT.SD",0xE5, AM_FPU_REG2 },
-    { NULL, 0, 0 }
-};
-
-/* Register-targeted ALU instructions ($02 $E8 prefix)
- * Syntax: OP dest, source
- * Example: LD $04, $00 or ADC $08, A or ADC $08, #$1234
+/* Standard and extended instruction tables come from shared library.
+ * The compatibility #defines at the top map:
+ *   instructions -> m65_instructions
+ *   ext_instructions -> m65_ext_instructions
  */
+
+/* Instruction lookup functions - use shared library */
+static const Instruction *find_instruction(const char *mnemonic) {
+    return m65_find_instruction(mnemonic);
+}
+
+static const ExtInstruction *find_ext_instruction(const char *mnemonic, AddrMode mode) {
+    return m65_find_ext_instruction(mnemonic, mode);
+}
+
+/* ========================================================================== */
+/* Register-targeted ALU Instructions ($02 $E8 prefix)                        */
+/* ========================================================================== */
+/* These use a different encoding scheme than the shared library's ExtALU,
+ * so we keep local definitions for assembly purposes.
+ */
+
 typedef struct {
     const char *name;
     uint8_t op_code;  /* High nibble of op|mode byte */
@@ -396,10 +217,18 @@ static const RegALUInstruction regalu_instructions[] = {
 #define REGALU_SRC_ABSY     0x08  /* abs,Y */
 #define REGALU_SRC_DP_IND   0x09  /* (dp) */
 
-/* Shifter instructions ($02 $98 prefix)
- * Syntax: OP dest, src, #count  or  OP dest, src, A
- * Example: SHL $08, $04, #4  or  SHR R2, R1, A
- */
+static const RegALUInstruction *find_regalu_instruction(const char *mnemonic) {
+    for (int i = 0; regalu_instructions[i].name; i++) {
+        if (strcmp(regalu_instructions[i].name, mnemonic) == 0)
+            return &regalu_instructions[i];
+    }
+    return NULL;
+}
+
+/* ========================================================================== */
+/* Shifter Instructions ($02 $98 prefix)                                      */
+/* ========================================================================== */
+
 typedef struct {
     const char *name;
     uint8_t op_code;  /* Bits 7-5 of op|cnt byte */
@@ -409,15 +238,23 @@ static const ShifterInstruction shifter_instructions[] = {
     { "SHL",  0x00 },  /* Shift left logical */
     { "SHR",  0x20 },  /* Shift right logical */
     { "SAR",  0x40 },  /* Shift right arithmetic */
-    { "ROL",  0x60 },  /* Rotate left through carry */
-    { "ROR",  0x80 },  /* Rotate right through carry */
+    { "ROL",  0x60 },  /* Rotate left */
+    { "ROR",  0x80 },  /* Rotate right */
     { NULL, 0 }
 };
 
-/* Extend instructions ($02 $99 prefix)
- * Syntax: OP dest, src
- * Example: SEXT8 $10, $0C  or  CLZ R4, R1
- */
+static const ShifterInstruction *find_shifter_instruction(const char *mnemonic) {
+    for (int i = 0; shifter_instructions[i].name; i++) {
+        if (strcmp(shifter_instructions[i].name, mnemonic) == 0)
+            return &shifter_instructions[i];
+    }
+    return NULL;
+}
+
+/* ========================================================================== */
+/* Extend Instructions ($02 $99 prefix)                                       */
+/* ========================================================================== */
+
 typedef struct {
     const char *name;
     uint8_t subop;
@@ -434,7 +271,17 @@ static const ExtendInstruction extend_instructions[] = {
     { NULL, 0 }
 };
 
-#undef __
+static const ExtendInstruction *find_extend_instruction(const char *mnemonic) {
+    for (int i = 0; extend_instructions[i].name; i++) {
+        if (strcmp(extend_instructions[i].name, mnemonic) == 0)
+            return &extend_instructions[i];
+    }
+    return NULL;
+}
+
+/* ========================================================================== */
+/* Register Parsing                                                           */
+/* ========================================================================== */
 
 /* Check if name is a register alias (R0-R63) and return DP address, or -1 */
 static int parse_register_alias(const char *name) {
@@ -1197,27 +1044,8 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
 /* Instruction Encoding                                                       */
 /* ========================================================================== */
 
-static const Instruction *find_instruction(const char *mnemonic) {
-    for (int i = 0; instructions[i].name; i++) {
-        if (strcmp(instructions[i].name, mnemonic) == 0)
-            return &instructions[i];
-    }
-    return NULL;
-}
-
-static const ExtInstruction *find_ext_instruction(const char *mnemonic, AddrMode mode) {
-    for (int i = 0; ext_instructions[i].name; i++) {
-        if (strcmp(ext_instructions[i].name, mnemonic) == 0 &&
-            ext_instructions[i].mode == mode)
-            return &ext_instructions[i];
-    }
-    /* Try without mode match for implied instructions */
-    for (int i = 0; ext_instructions[i].name; i++) {
-        if (strcmp(ext_instructions[i].name, mnemonic) == 0)
-            return &ext_instructions[i];
-    }
-    return NULL;
-}
+/* find_instruction and find_ext_instruction are now defined at the top
+ * of the file as wrappers around the shared library functions. */
 
 static int get_imm_size(Assembler *as, const char *mnemonic, int data_override) {
     if (data_override == 1) return 1;
@@ -1306,46 +1134,14 @@ static int strip_size_suffix(char *mnemonic, int *size_code) {
     return 1;
 }
 
-typedef struct {
-    const char *name;
-    uint8_t opcode;
-    int requires_src;
-    int allows_mem_dest;
-} ExtALUOp;
-
-static const ExtALUOp ext_alu_ops[] = {
-    /* LD/ST for register-targeted operations (R0-R63) */
-    { "LD",  0x80, 1, 0 },
-    { "ST",  0x81, 1, 1 },
-    /* Traditional mnemonics with size suffix for A-targeted */
-    { "LDA", 0x80, 1, 0 },
-    { "STA", 0x81, 1, 1 },
-    { "ADC", 0x82, 1, 0 },
-    { "SBC", 0x83, 1, 0 },
-    { "AND", 0x84, 1, 0 },
-    { "ORA", 0x85, 1, 0 },
-    { "EOR", 0x86, 1, 0 },
-    { "CMP", 0x87, 1, 0 },
-    { "BIT", 0x88, 1, 0 },
-    { "TSB", 0x89, 1, 1 },
-    { "TRB", 0x8A, 1, 1 },
-    { "INC", 0x8B, 0, 0 },
-    { "DEC", 0x8C, 0, 0 },
-    { "ASL", 0x8D, 0, 0 },
-    { "LSR", 0x8E, 0, 0 },
-    { "ROL", 0x8F, 0, 0 },
-    { "ROR", 0x90, 0, 0 },
-    { "STZ", 0x97, 0, 1 },
-    { NULL, 0, 0, 0 }
-};
+/* Extended ALU operations now use shared library m65_extalu_instructions table.
+ * Access via m65_find_extalu_instruction() which is wrapped as find_regalu_instruction().
+ * Fields: name, opcode, is_unary (1=unary like INC/DEC), allows_mem_dest */
+typedef M65_ExtALUInstruction ExtALUOp;
+#define ext_alu_ops m65_extalu_instructions
 
 static const ExtALUOp *find_ext_alu_op(const char *mnemonic) {
-    for (int i = 0; ext_alu_ops[i].name; i++) {
-        if (strcmp(ext_alu_ops[i].name, mnemonic) == 0) {
-            return &ext_alu_ops[i];
-        }
-    }
-    return NULL;
+    return m65_find_extalu_instruction(mnemonic);
 }
 
 static void append_byte(uint8_t *buf, int *len, uint32_t v) {
@@ -1676,7 +1472,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         int dest_starts_reg = (*p == 'A' || *p == 'a' || *p == 'R' || *p == 'r');
         int use_ext_alu = (size_code >= 0 || dest_starts_reg ||
                            strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0);
-        if (!ext_alu->requires_src && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
+        if (ext_alu->is_unary && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
             use_ext_alu = 0;
         }
         if (use_ext_alu) {
@@ -1691,7 +1487,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             uint8_t operand_bytes[8];
             int operand_len = 0;
 
-            if (ext_alu->requires_src) {
+            if (!ext_alu->is_unary) {
                 /* Split dest,src at top-level comma, but not ,X ,Y ,S which are addressing mode suffixes */
                 char *comma = NULL;
                 int paren_depth = 0;
