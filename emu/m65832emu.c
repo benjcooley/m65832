@@ -3362,6 +3362,29 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cycles = 5;
                         break;
                     }
+                    case 0xBA: { /* LDF.S Fn, (Rm) - 32-bit Register Indirect Load */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = (reg_byte >> 4) & 0x0F;
+                        int rm = reg_byte & 0x0F;
+                        addr = mem_read32(cpu, rm * 4);
+                        uint32_t val32 = mem_read32(cpu, addr);
+                        union { uint64_t u; double d; } conv;
+                        conv.u = (uint64_t)val32;
+                        cpu->f[freg] = conv.d;
+                        cycles = 4;
+                        break;
+                    }
+                    case 0xBB: { /* STF.S Fn, (Rm) - 32-bit Register Indirect Store */
+                        uint8_t reg_byte = fetch8(cpu);
+                        int freg = (reg_byte >> 4) & 0x0F;
+                        int rm = reg_byte & 0x0F;
+                        addr = mem_read32(cpu, rm * 4);
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
+                        cycles = 4;
+                        break;
+                    }
                     case 0xB6: { /* LDF Fn, abs32 */
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = reg_byte & 0x0F;

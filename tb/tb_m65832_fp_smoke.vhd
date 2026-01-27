@@ -28,6 +28,7 @@ architecture sim of tb_M65832_FP_Smoke is
     signal init_done : std_logic := '0';
     signal result_ok_abs32 : std_logic := '0';
     signal result_ok_ind   : std_logic := '0';
+    signal result_ok_ind_s : std_logic := '0';
 begin
     clk <= not clk after CLK_PERIOD / 2;
 
@@ -138,9 +139,29 @@ begin
                 mem(16#802E#) <= x"8D";
                 mem(16#802F#) <= x"01";
                 mem(16#8030#) <= x"02";
+
+                -- STF.S F0, (R0)
+                mem(16#8031#) <= x"02";
+                mem(16#8032#) <= x"BB";
+                mem(16#8033#) <= x"00";
+
+                -- LDF.S F3, (R0)
+                mem(16#8034#) <= x"02";
+                mem(16#8035#) <= x"BA";
+                mem(16#8036#) <= x"30";
+
+                -- F2I.S F3 ($02 $C7 $30) - convert F3 back to A
+                mem(16#8037#) <= x"02";
+                mem(16#8038#) <= x"C7";
+                mem(16#8039#) <= x"30";
+
+                -- STA $0202 (16-bit abs)
+                mem(16#803A#) <= x"8D";
+                mem(16#803B#) <= x"02";
+                mem(16#803C#) <= x"02";
                 
                 -- STP
-                mem(16#8031#) <= x"DB";
+                mem(16#803D#) <= x"DB";
                 
                 -- Reset vector -> $8000
                 mem(16#FFFC#) <= x"00";
@@ -150,11 +171,13 @@ begin
 
             if we = '1' and rdy = '1' then
                 mem(to_integer(unsigned(addr(15 downto 0)))) <= data_out;
-                -- Check if results are 5 at $0200 and $0201
+                -- Check if results are 5 at $0200, $0201, and $0202
                 if addr(15 downto 0) = x"0200" and data_out = x"05" then
                     result_ok_abs32 <= '1';
                 elsif addr(15 downto 0) = x"0201" and data_out = x"05" then
                     result_ok_ind <= '1';
+                elsif addr(15 downto 0) = x"0202" and data_out = x"05" then
+                    result_ok_ind_s <= '1';
                 end if;
             end if;
         end if;
@@ -167,10 +190,10 @@ begin
         rst_n <= '1';
 
         wait for 5 ms;
-        assert result_ok_abs32 = '1' and result_ok_ind = '1'
-            report "FPU smoke test FAILED: expected 5 at $0200 and $0201"
+        assert result_ok_abs32 = '1' and result_ok_ind = '1' and result_ok_ind_s = '1'
+            report "FPU smoke test FAILED: expected 5 at $0200, $0201, $0202"
             severity failure;
-        report "FPU smoke test PASSED: abs32 + (Rm) load/store" severity note;
+        report "FPU smoke test PASSED: abs32 + (Rm) + (Rm) .S load/store" severity note;
         wait;
     end process;
 end sim;

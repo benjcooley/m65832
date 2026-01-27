@@ -3777,12 +3777,13 @@ begin
         check_mem(16#0347#, x"11", "LDQ dp high");
         
         -----------------------------------------------------------------------
-        -- TEST 100A: LDF/STF + FADD.S
+        -- TEST 100A: LDF/STF + FADD.S (16-register, two-operand format)
         -----------------------------------------------------------------------
         report "";
         report "TEST 100A: LDF/STF + FADD.S";
         
-        -- F1 = 1.5 (0x3FC00000), F2 = 2.25 (0x40100000)
+        -- F0 = 1.5 (0x3FC00000), F1 = 2.25 (0x40100000)
+        -- Store 1.5 at $0600, 2.25 at $0608
         poke(16#0600#, x"00");
         poke(16#0601#, x"00");
         poke(16#0602#, x"C0");
@@ -3800,27 +3801,37 @@ begin
         poke(16#060E#, x"00");
         poke(16#060F#, x"00");
         
-        -- Program: LDF F1 abs $0600, LDF F2 abs $0608, FADD.S, STF F0 abs $0620, BRK
+        -- New format: LDF Fn, abs = $02 $B1 $0n addr16
+        --             FADD.S Fd, Fs = $02 $C0 $ds (Fd = Fd + Fs)
+        -- Program: LDF F0, abs $0600 (F0=1.5)
+        --          LDF F1, abs $0608 (F1=2.25)
+        --          FADD.S F0, F1 (F0 = F0 + F1 = 3.75)
+        --          STF F0, abs $0620
+        --          BRK
         poke(16#8000#, x"02");  -- EXT prefix
-        poke(16#8001#, x"B5");  -- LDF F1 abs
-        poke(16#8002#, x"00");
-        poke(16#8003#, x"06");
-        poke(16#8004#, x"02");  -- EXT prefix
-        poke(16#8005#, x"B9");  -- LDF F2 abs
-        poke(16#8006#, x"08");
-        poke(16#8007#, x"06");
-        poke(16#8008#, x"02");  -- EXT prefix
-        poke(16#8009#, x"C0");  -- FADD.S
+        poke(16#8001#, x"B1");  -- LDF abs
+        poke(16#8002#, x"00");  -- reg byte: F0
+        poke(16#8003#, x"00");  -- addr low
+        poke(16#8004#, x"06");  -- addr high
+        poke(16#8005#, x"02");  -- EXT prefix
+        poke(16#8006#, x"B1");  -- LDF abs
+        poke(16#8007#, x"01");  -- reg byte: F1
+        poke(16#8008#, x"08");  -- addr low
+        poke(16#8009#, x"06");  -- addr high
         poke(16#800A#, x"02");  -- EXT prefix
-        poke(16#800B#, x"B3");  -- STF F0 abs
-        poke(16#800C#, x"20");
-        poke(16#800D#, x"06");
-        poke(16#800E#, x"00");  -- BRK
+        poke(16#800B#, x"C0");  -- FADD.S
+        poke(16#800C#, x"01");  -- reg byte: dest=F0, src=F1 ($01)
+        poke(16#800D#, x"02");  -- EXT prefix
+        poke(16#800E#, x"B3");  -- STF abs
+        poke(16#800F#, x"00");  -- reg byte: F0
+        poke(16#8010#, x"20");  -- addr low
+        poke(16#8011#, x"06");  -- addr high
+        poke(16#8012#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(520);
+        wait_cycles(620);
         
         -- 3.75 (0x40700000) little-endian at $0620
         check_mem(16#0620#, x"00", "FADD.S byte0");
@@ -3829,12 +3840,12 @@ begin
         check_mem(16#0623#, x"40", "FADD.S byte3");
 
         -----------------------------------------------------------------------
-        -- TEST 100B: F2I.S and I2F.S
+        -- TEST 100B: F2I.S and I2F.S (16-register format)
         -----------------------------------------------------------------------
         report "";
         report "TEST 100B: F2I.S/I2F.S";
         
-        -- F1 = 5.5 (0x40B00000)
+        -- F0 = 5.5 (0x40B00000)
         poke(16#0630#, x"00");
         poke(16#0631#, x"00");
         poke(16#0632#, x"B0");
@@ -3844,38 +3855,44 @@ begin
         poke(16#0636#, x"00");
         poke(16#0637#, x"00");
         
-        -- Program: set M=32, LDF F1 abs $0630, F2I.S, STA $0640,
-        --          LDA #$07, I2F.S, STF F0 abs $0650, BRK
+        -- New format: F2I.S Fd = $02 $C7 $d0 (A = (int32)Fd)
+        --             I2F.S Fd = $02 $C8 $d0 (Fd = (float32)A)
+        -- Program: set M=32, LDF F0, abs $0630, F2I.S F0, STA $0640,
+        --          LDA #$07, I2F.S F0, STF F0, abs $0650, BRK
         poke(16#8000#, x"C2");  -- REP
         poke(16#8001#, x"40");  -- clear M0
         poke(16#8002#, x"E2");  -- SEP
         poke(16#8003#, x"80");  -- set M1 -> 32-bit
         poke(16#8004#, x"02");  -- EXT prefix
-        poke(16#8005#, x"B5");  -- LDF F1 abs
-        poke(16#8006#, x"30");
-        poke(16#8007#, x"06");
-        poke(16#8008#, x"02");  -- EXT prefix
-        poke(16#8009#, x"C7");  -- F2I.S
-        poke(16#800A#, x"8D");  -- STA abs
-        poke(16#800B#, x"40");
-        poke(16#800C#, x"06");
-        poke(16#800D#, x"A9");  -- LDA #imm32
-        poke(16#800E#, x"07");
-        poke(16#800F#, x"00");
-        poke(16#8010#, x"00");
+        poke(16#8005#, x"B1");  -- LDF abs
+        poke(16#8006#, x"00");  -- reg byte: F0
+        poke(16#8007#, x"30");  -- addr low
+        poke(16#8008#, x"06");  -- addr high
+        poke(16#8009#, x"02");  -- EXT prefix
+        poke(16#800A#, x"C7");  -- F2I.S
+        poke(16#800B#, x"00");  -- reg byte: F0 (dest in high nibble)
+        poke(16#800C#, x"8D");  -- STA abs
+        poke(16#800D#, x"40");
+        poke(16#800E#, x"06");
+        poke(16#800F#, x"A9");  -- LDA #imm32
+        poke(16#8010#, x"07");
         poke(16#8011#, x"00");
-        poke(16#8012#, x"02");  -- EXT prefix
-        poke(16#8013#, x"C8");  -- I2F.S
+        poke(16#8012#, x"00");
+        poke(16#8013#, x"00");
         poke(16#8014#, x"02");  -- EXT prefix
-        poke(16#8015#, x"B3");  -- STF F0 abs
-        poke(16#8016#, x"50");
-        poke(16#8017#, x"06");
-        poke(16#8018#, x"00");  -- BRK
+        poke(16#8015#, x"C8");  -- I2F.S
+        poke(16#8016#, x"00");  -- reg byte: F0 (dest in high nibble)
+        poke(16#8017#, x"02");  -- EXT prefix
+        poke(16#8018#, x"B3");  -- STF abs
+        poke(16#8019#, x"00");  -- reg byte: F0
+        poke(16#801A#, x"50");  -- addr low
+        poke(16#801B#, x"06");  -- addr high
+        poke(16#801C#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(560);
+        wait_cycles(660);
         
         check_mem(16#0640#, x"05", "F2I.S A low byte");
         check_mem(16#0650#, x"00", "I2F.S byte0");
@@ -3884,12 +3901,14 @@ begin
         check_mem(16#0653#, x"40", "I2F.S byte3");
 
         -----------------------------------------------------------------------
-        -- TEST 100C: RSET LDF/STF dp (register window)
+        -- TEST 100C: RSET LDF/STF dp (register window, 16-register format)
         -----------------------------------------------------------------------
         report "";
         report "TEST 100C: RSET LDF/STF dp";
         
-        -- Program: set M=32, RSET, write R0/R1, LDF0 dp $00, STF0 dp $08,
+        -- New format: LDF Fn, dp = $02 $B0 $0n dp
+        --             STF Fn, dp = $02 $B2 $0n dp
+        -- Program: set M=32, RSET, write R0/R1, LDF F0, dp $00, STF F0, dp $08,
         --          LDA $08 -> STA $0700, LDA $0C -> STA $0704, BRK
         poke(16#8000#, x"C2");  -- REP
         poke(16#8001#, x"40");  -- clear M0
@@ -3912,27 +3931,29 @@ begin
         poke(16#8012#, x"85");  -- STA dp
         poke(16#8013#, x"04");  -- R1 (aligned)
         poke(16#8014#, x"02");  -- EXT prefix
-        poke(16#8015#, x"B0");  -- LDF0 dp
-        poke(16#8016#, x"00");
-        poke(16#8017#, x"02");  -- EXT prefix
-        poke(16#8018#, x"B2");  -- STF0 dp
-        poke(16#8019#, x"08");  -- R2/R3
-        poke(16#801A#, x"A5");  -- LDA dp
-        poke(16#801B#, x"08");  -- R2
-        poke(16#801C#, x"8D");  -- STA abs
-        poke(16#801D#, x"00");
-        poke(16#801E#, x"07");
-        poke(16#801F#, x"A5");  -- LDA dp
-        poke(16#8020#, x"0C");  -- R3 (aligned high word)
-        poke(16#8021#, x"8D");  -- STA abs
-        poke(16#8022#, x"04");
-        poke(16#8023#, x"07");
-        poke(16#8024#, x"00");  -- BRK
+        poke(16#8015#, x"B0");  -- LDF dp
+        poke(16#8016#, x"00");  -- reg byte: F0
+        poke(16#8017#, x"00");  -- dp addr
+        poke(16#8018#, x"02");  -- EXT prefix
+        poke(16#8019#, x"B2");  -- STF dp
+        poke(16#801A#, x"00");  -- reg byte: F0
+        poke(16#801B#, x"08");  -- dp addr: R2/R3
+        poke(16#801C#, x"A5");  -- LDA dp
+        poke(16#801D#, x"08");  -- R2
+        poke(16#801E#, x"8D");  -- STA abs
+        poke(16#801F#, x"00");
+        poke(16#8020#, x"07");
+        poke(16#8021#, x"A5");  -- LDA dp
+        poke(16#8022#, x"0C");  -- R3 (aligned high word)
+        poke(16#8023#, x"8D");  -- STA abs
+        poke(16#8024#, x"04");
+        poke(16#8025#, x"07");
+        poke(16#8026#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(1200);
+        wait_cycles(1300);
         
         check_mem(16#0700#, x"44", "RSET LDF/STF low byte0");
         check_mem(16#0701#, x"33", "RSET LDF/STF low byte1");
@@ -3992,11 +4013,12 @@ begin
         report "";
         report "TEST 100D: FPU reserved trap";
         
-        -- Trap vector for FP opcode $D9 -> VEC_SYSCALL + $D9*4 (wraps to $0338)
-        poke(16#0338#, x"00");
-        poke(16#0339#, x"90");
-        poke(16#033A#, x"00");
-        poke(16#033B#, x"00");
+        -- Trap vector for FP opcode $DB -> VEC_SYSCALL + $DB*4 (wraps to $0340)
+        -- Note: $D9 and $DA are now FMOV.D and FSQRT.D, use $DB for trap test
+        poke(16#0340#, x"00");
+        poke(16#0341#, x"90");
+        poke(16#0342#, x"00");
+        poke(16#0343#, x"00");
         
         -- Handler at $9000: LDA #$A5, STA $0709, RTI
         poke(16#9000#, x"A9");
@@ -4006,31 +4028,32 @@ begin
         poke(16#9004#, x"07");
         poke(16#9005#, x"40");
         
-        -- Program: execute reserved FP opcode, then write $0708 and BRK
+        -- Program: execute reserved FP opcode $DB (with reg byte), then write $0708 and BRK
         poke(16#8000#, x"02");  -- EXT prefix
-        poke(16#8001#, x"D9");  -- reserved FP opcode -> trap
-        poke(16#8002#, x"A9");  -- LDA #
-        poke(16#8003#, x"5A");
-        poke(16#8004#, x"8D");  -- STA abs
-        poke(16#8005#, x"08");
-        poke(16#8006#, x"07");
-        poke(16#8007#, x"00");  -- BRK
+        poke(16#8001#, x"DB");  -- reserved FP opcode -> trap
+        poke(16#8002#, x"00");  -- reg byte (still needed, but traps before use)
+        poke(16#8003#, x"A9");  -- LDA #
+        poke(16#8004#, x"5A");
+        poke(16#8005#, x"8D");  -- STA abs
+        poke(16#8006#, x"08");
+        poke(16#8007#, x"07");
+        poke(16#8008#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(260);
+        wait_cycles(300);
         
         check_mem(16#0709#, x"A5", "FP trap handler wrote");
         check_mem(16#0708#, x"5A", "Returned after FP trap");
 
         -----------------------------------------------------------------------
-        -- TEST 100E: FADD.D
+        -- TEST 100E: FADD.D (16-register, two-operand format)
         -----------------------------------------------------------------------
         report "";
         report "TEST 100E: FADD.D";
         
-        -- F1 = 1.5 (0x3FF8000000000000), F2 = 2.25 (0x4002000000000000)
+        -- F0 = 1.5 (0x3FF8000000000000), F1 = 2.25 (0x4002000000000000)
         poke(16#0800#, x"00");
         poke(16#0801#, x"00");
         poke(16#0802#, x"00");
@@ -4048,27 +4071,37 @@ begin
         poke(16#080E#, x"02");
         poke(16#080F#, x"40");
         
-        -- Program: LDF1 abs $0800, LDF2 abs $0808, FADD.D, STF0 abs $0820, BRK
+        -- New format: LDF Fn, abs = $02 $B1 $0n addr16
+        --             FADD.D Fd, Fs = $02 $D0 $ds (Fd = Fd + Fs)
+        -- Program: LDF F0, abs $0800 (F0=1.5)
+        --          LDF F1, abs $0808 (F1=2.25)
+        --          FADD.D F0, F1 (F0 = F0 + F1 = 3.75)
+        --          STF F0, abs $0820
+        --          BRK
         poke(16#8000#, x"02");  -- EXT prefix
-        poke(16#8001#, x"B5");  -- LDF1 abs
-        poke(16#8002#, x"00");
-        poke(16#8003#, x"08");
-        poke(16#8004#, x"02");  -- EXT prefix
-        poke(16#8005#, x"B9");  -- LDF2 abs
-        poke(16#8006#, x"08");
-        poke(16#8007#, x"08");
-        poke(16#8008#, x"02");  -- EXT prefix
-        poke(16#8009#, x"D0");  -- FADD.D
+        poke(16#8001#, x"B1");  -- LDF abs
+        poke(16#8002#, x"00");  -- reg byte: F0
+        poke(16#8003#, x"00");  -- addr low
+        poke(16#8004#, x"08");  -- addr high
+        poke(16#8005#, x"02");  -- EXT prefix
+        poke(16#8006#, x"B1");  -- LDF abs
+        poke(16#8007#, x"01");  -- reg byte: F1
+        poke(16#8008#, x"08");  -- addr low
+        poke(16#8009#, x"08");  -- addr high
         poke(16#800A#, x"02");  -- EXT prefix
-        poke(16#800B#, x"B3");  -- STF0 abs
-        poke(16#800C#, x"20");
-        poke(16#800D#, x"08");
-        poke(16#800E#, x"00");  -- BRK
+        poke(16#800B#, x"D0");  -- FADD.D
+        poke(16#800C#, x"01");  -- reg byte: dest=F0, src=F1 ($01)
+        poke(16#800D#, x"02");  -- EXT prefix
+        poke(16#800E#, x"B3");  -- STF abs
+        poke(16#800F#, x"00");  -- reg byte: F0
+        poke(16#8010#, x"20");  -- addr low
+        poke(16#8011#, x"08");  -- addr high
+        poke(16#8012#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(520);
+        wait_cycles(620);
         
         -- 3.75 (0x400E000000000000) little-endian at $0820
         check_mem(16#0820#, x"00", "FADD.D byte0");
@@ -4081,12 +4114,12 @@ begin
         check_mem(16#0827#, x"40", "FADD.D byte7");
 
         -----------------------------------------------------------------------
-        -- TEST 100F: FCMP.S flags
+        -- TEST 100F: FCMP.S flags (16-register, two-operand format)
         -----------------------------------------------------------------------
         report "";
         report "TEST 100F: FCMP.S flags";
         
-        -- F1 = 1.0 (0x3F800000), F2 = 2.0 (0x40000000)
+        -- F0 = 1.0 (0x3F800000), F1 = 2.0 (0x40000000)
         poke(16#0830#, x"00");
         poke(16#0831#, x"00");
         poke(16#0832#, x"80");
@@ -4104,9 +4137,12 @@ begin
         poke(16#083E#, x"00");
         poke(16#083F#, x"00");
         
-        -- Program: LDF1 abs $0830, LDF2 abs $0838, FCMP.S
+        -- New format: FCMP.S Fd, Fs = $02 $C6 $ds (compare Fd to Fs)
+        -- Program: LDF F0, abs $0830 (F0=1.0)
+        --          LDF F1, abs $0838 (F1=2.0)
+        --          FCMP.S F0, F1 (compare F0 to F1)
         -- BMI less -> set $0728 = 1
-        -- Then make equal and BEQ -> set $0729 = 1
+        -- Then load equal values and BEQ -> set $0729 = 1
         poke(16#8000#, x"A9");  -- LDA #
         poke(16#8001#, x"00");
         poke(16#8002#, x"8D");  -- STA abs
@@ -4116,46 +4152,52 @@ begin
         poke(16#8006#, x"29");
         poke(16#8007#, x"07");
         poke(16#8008#, x"02");  -- EXT prefix
-        poke(16#8009#, x"B5");  -- LDF1 abs
-        poke(16#800A#, x"30");
-        poke(16#800B#, x"08");
-        poke(16#800C#, x"02");  -- EXT prefix
-        poke(16#800D#, x"B9");  -- LDF2 abs
-        poke(16#800E#, x"38");
-        poke(16#800F#, x"08");
-        poke(16#8010#, x"02");  -- EXT prefix
-        poke(16#8011#, x"C6");  -- FCMP.S
-        poke(16#8012#, x"30");  -- BMI
-        poke(16#8013#, x"03");  -- +3 -> LDA #1
-        poke(16#8014#, x"4C");  -- JMP skip
-        poke(16#8015#, x"1C");
-        poke(16#8016#, x"80");
-        poke(16#8017#, x"A9");  -- LDA #
-        poke(16#8018#, x"01");
-        poke(16#8019#, x"8D");  -- STA abs
-        poke(16#801A#, x"28");
-        poke(16#801B#, x"07");
-        poke(16#801C#, x"02");  -- EXT prefix
-        poke(16#801D#, x"B5");  -- LDF1 abs (now equal: reuse F2 value)
-        poke(16#801E#, x"38");
-        poke(16#801F#, x"08");
-        poke(16#8020#, x"02");  -- EXT prefix
-        poke(16#8021#, x"B9");  -- LDF2 abs
-        poke(16#8022#, x"38");
-        poke(16#8023#, x"08");
+        poke(16#8009#, x"B1");  -- LDF abs
+        poke(16#800A#, x"00");  -- reg byte: F0
+        poke(16#800B#, x"30");  -- addr low
+        poke(16#800C#, x"08");  -- addr high
+        poke(16#800D#, x"02");  -- EXT prefix
+        poke(16#800E#, x"B1");  -- LDF abs
+        poke(16#800F#, x"01");  -- reg byte: F1
+        poke(16#8010#, x"38");  -- addr low
+        poke(16#8011#, x"08");  -- addr high
+        poke(16#8012#, x"02");  -- EXT prefix
+        poke(16#8013#, x"C6");  -- FCMP.S
+        poke(16#8014#, x"01");  -- reg byte: dest=F0, src=F1 ($01)
+        poke(16#8015#, x"30");  -- BMI
+        poke(16#8016#, x"03");  -- +3 -> LDA #1
+        poke(16#8017#, x"4C");  -- JMP skip
+        poke(16#8018#, x"1F");
+        poke(16#8019#, x"80");
+        poke(16#801A#, x"A9");  -- LDA #
+        poke(16#801B#, x"01");
+        poke(16#801C#, x"8D");  -- STA abs
+        poke(16#801D#, x"28");
+        poke(16#801E#, x"07");
+        poke(16#801F#, x"02");  -- EXT prefix
+        poke(16#8020#, x"B1");  -- LDF abs (now equal: reuse F1 value for F0)
+        poke(16#8021#, x"00");  -- reg byte: F0
+        poke(16#8022#, x"38");  -- addr low (F1's data = 2.0)
+        poke(16#8023#, x"08");  -- addr high
         poke(16#8024#, x"02");  -- EXT prefix
-        poke(16#8025#, x"C6");  -- FCMP.S
-        poke(16#8026#, x"F0");  -- BEQ
-        poke(16#8027#, x"03");  -- +3 -> LDA #1
-        poke(16#8028#, x"4C");  -- JMP done
-        poke(16#8029#, x"30");
-        poke(16#802A#, x"80");
-        poke(16#802B#, x"A9");  -- LDA #
-        poke(16#802C#, x"01");
-        poke(16#802D#, x"8D");  -- STA abs
-        poke(16#802E#, x"29");
-        poke(16#802F#, x"07");
-        poke(16#8030#, x"00");  -- BRK
+        poke(16#8025#, x"B1");  -- LDF abs
+        poke(16#8026#, x"01");  -- reg byte: F1
+        poke(16#8027#, x"38");  -- addr low
+        poke(16#8028#, x"08");  -- addr high
+        poke(16#8029#, x"02");  -- EXT prefix
+        poke(16#802A#, x"C6");  -- FCMP.S
+        poke(16#802B#, x"01");  -- reg byte: dest=F0, src=F1 ($01)
+        poke(16#802C#, x"F0");  -- BEQ
+        poke(16#802D#, x"03");  -- +3 -> LDA #1
+        poke(16#802E#, x"4C");  -- JMP done
+        poke(16#802F#, x"36");
+        poke(16#8030#, x"80");
+        poke(16#8031#, x"A9");  -- LDA #
+        poke(16#8032#, x"01");
+        poke(16#8033#, x"8D");  -- STA abs
+        poke(16#8034#, x"29");
+        poke(16#8035#, x"07");
+        poke(16#8036#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);

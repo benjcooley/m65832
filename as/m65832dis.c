@@ -282,7 +282,7 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     /* 0xB0-0xBF: FPU Load/Store (with register byte) */
     { "LDF",    AM_FPU_DP   }, { "LDF",    AM_FPU_ABS }, { "STF",    AM_FPU_DP   }, { "STF",    AM_FPU_ABS },
     { "LDF",    AM_FPU_IND  }, { "STF",    AM_FPU_IND }, { "LDF",    AM_FPU_ABS32 }, { "STF",    AM_FPU_ABS32 },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "LDF.S", AM_FPU_IND }, { "STF.S", AM_FPU_IND },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xC0-0xCF: FPU single-precision (with register byte) */
     { "FADD.S", AM_FPU_REG2 }, { "FSUB.S", AM_FPU_REG2 }, { "FMUL.S", AM_FPU_REG2 }, { "FDIV.S", AM_FPU_REG2 },

@@ -313,6 +313,8 @@ begin
                     ADDR_MODE <= "0000"; INSTR_LEN <= "011";  -- LDF/STF Fn, (Rm) (3 bytes)
                 when x"B6" | x"B7" =>
                     ADDR_MODE <= "0101"; EXT_ADDR32 <= '1'; INSTR_LEN <= "111";  -- LDF/STF Fn, abs32 (7 bytes)
+                when x"BA" | x"BB" =>
+                    ADDR_MODE <= "0000"; INSTR_LEN <= "011";  -- LDF.S/STF.S Fn, (Rm) (3 bytes)
                 
                 -- LEA
                 when x"A0" =>

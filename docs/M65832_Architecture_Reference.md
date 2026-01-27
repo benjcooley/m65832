@@ -1936,7 +1936,7 @@ $02 $A3          LEA abs,X         ; A = effective address of abs,X
 ; Register byte: DDDD SSSS (dest << 4 | src)
 
 ; Load/Store
-; For dp/abs/abs32: reg-byte low nibble = Fn. For (Rm): high nibble = Fn, low = Rm.
+; For dp/abs/abs32: reg-byte low nibble = Fn. For (Rm)/LDF.S/STF.S: high nibble = Fn, low = Rm.
 $02 $B0 $0n dp     LDF Fn, dp        ; Load 64-bit from D+dp
 $02 $B1 $0n abs    LDF Fn, abs       ; Load 64-bit from B+abs
 $02 $B2 $0n dp     STF Fn, dp        ; Store 64-bit to D+dp
@@ -1945,6 +1945,8 @@ $02 $B4 $nm        LDF Fn, (Rm)      ; Load 64-bit from [Rm]
 $02 $B5 $nm        STF Fn, (Rm)      ; Store 64-bit to [Rm]
 $02 $B6 $0n abs32  LDF Fn, abs32     ; Load 64-bit from abs32
 $02 $B7 $0n abs32  STF Fn, abs32     ; Store 64-bit to abs32
+$02 $BA $nm        LDF.S Fn, (Rm)    ; Load 32-bit from [Rm] into Fn[31:0]
+$02 $BB $nm        STF.S Fn, (Rm)    ; Store Fn[31:0] to [Rm]
 
 ; Single-precision arithmetic ($C0-$CA)
 $02 $C0 $ds      FADD.S Fd, Fs     ; Fd = Fd + Fs

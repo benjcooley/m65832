@@ -107,7 +107,9 @@ test_success "Comment after .WORD" "    .WORD \$1234  ; comment"
 test_success "Comment after .LONG" "    .LONG \$123456  ; comment"
 test_success "Comment after .DWORD" "    .DWORD \$12345678  ; comment"
 test_success "Trailing whitespace" "    NOP    "
-test_success "Mixed case mnemonics" "    nop
+test_success "Mixed case mnemonics" "    .M16
+    .X16
+    nop
     Lda #\$12
     JMP start
 start:
@@ -129,6 +131,16 @@ echo
 echo "--- Expression Errors ---"
 test_error "Division by zero" "X = 10 / 0"
 test_error "Unmatched parens" "    LDA #(1+2"
+
+echo
+echo "--- Immediate Size Errors ---"
+test_error "M8 immediate overflow" "    .M8
+    LDA #\$1234"
+test_error "X8 immediate overflow" "    .M8
+    .X8
+    LDX #\$1234"
+test_error "M16 immediate overflow" "    .M16
+    LDA #\$12345678"
 
 echo
 echo "--- 32-bit Mode Address Validation ---"
@@ -160,6 +172,10 @@ test_error "32-bit addr with traditional opcode" "    .M32
     .X32
     LDA \$12345678"
 
+test_error "ABS32 hex must be 8 digits" "    .M32
+    .X32
+    LDF F0, \$1234567"
+
 # DP (zero page) addresses should still work
 test_success "DP address in 32-bit mode" "    .M32
     .X32
@@ -170,10 +186,10 @@ test_success "DP,X in 32-bit mode" "    .M32
     LDA \$20,X"
 
 # Odd hex digit counts should be errors
-test_error "Odd hex digits (1)" "    LDA #\$1"
-test_error "Odd hex digits (3)" "    LDA #\$123"
-test_error "Odd hex digits (5)" "    LDA #\$12345"
-test_error "Odd hex digits (7)" "    LDA #\$1234567"
+test_success "Odd hex digits (1)" "    LDA #\$1"
+test_success "Odd hex digits (3)" "    LDA #\$123"
+test_success "Odd hex digits (5)" "    LDA #\$12345"
+test_success "Odd hex digits (7)" "    LDA #\$1234567"
 
 # Even hex digit counts should work
 test_success "Even hex digits (2)" "    LDA #\$12"

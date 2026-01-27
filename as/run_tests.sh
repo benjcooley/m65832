@@ -47,6 +47,9 @@ run_test "Sections" "test/test4_sections.asm" 0
 run_test "Expressions" "test/test6_expressions.asm" 0
 run_test "Shifter/extend instructions (R0-R63)" "test/test7_extended.asm" 0
 run_test "Extended ALU ($02 $80-$97) instructions" "test/test8_ext_alu.asm" 0
+run_test "FPU load/store modes" "test/test9_fpu_loadstore.asm" 0
+run_test "6502 mode (M8/X8)" "test/test9_6502_mode.asm" 0
+run_test "65816 mode (M16/X16)" "test/test10_65816_mode.asm" 0
 
 # Test hex output
 echo -n "Test: Intel HEX output... "
@@ -68,6 +71,22 @@ echo -n "Test: Include path (-I) option... "
 if $ASSEMBLER -I test/inc test/test3_include.asm -o test/test3_include.bin > /dev/null 2>&1; then
     echo "PASS"
     PASS=$((PASS + 1))
+else
+    echo "FAIL"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test .LONG emits 4 bytes
+echo -n "Test: .LONG emits 4 bytes... "
+if $ASSEMBLER test/test9_long.asm -o /tmp/test9_long.bin > /dev/null 2>&1; then
+    bytes=$(wc -c < /tmp/test9_long.bin | tr -d ' ')
+    if [ "$bytes" = "5" ]; then
+        echo "PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL (expected 5 bytes, got $bytes)"
+        FAIL=$((FAIL + 1))
+    fi
 else
     echo "FAIL"
     FAIL=$((FAIL + 1))

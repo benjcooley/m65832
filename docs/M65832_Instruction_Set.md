@@ -243,11 +243,13 @@ After the `$02` prefix byte:
 | $B5 [reg] | STF Fn, (Rm) | Store Fn to address in Rm |
 | $B6 [reg] [abs32] | LDF Fn, abs32 | Load Fn from 32-bit absolute |
 | $B7 [reg] [abs32] | STF Fn, abs32 | Store Fn to 32-bit absolute |
+| $BA [reg] | LDF.S Fn, (Rm) | Load Fn low 32 bits from address in Rm |
+| $BB [reg] | STF.S Fn, (Rm) | Store Fn low 32 bits to address in Rm |
 
 FPU load/store register byte encoding:
 
 - `LDF`/`STF` with `dp`, `abs16`, or `abs32`: low nibble is `Fn` (F0-F15).
-- `LDF`/`STF` with `(Rm)`: high nibble is `Fn`, low nibble is `Rm` (R0-R15).
+- `LDF`/`STF` with `(Rm)` or `LDF.S`/`STF.S`: high nibble is `Fn`, low nibble is `Rm` (R0-R15).
 | **FPU Single-Precision** | | |
 | $C0 | FADD.S | F0 = F1 + F2 |
 | $C1 | FSUB.S | F0 = F1 - F2 |
@@ -1558,6 +1560,8 @@ For conversions: destination only (source field unused or specifies source)
 | STF Fn, abs | $02 $B3 $0n abs | [B+abs..B+abs+7] = Fn (64-bit store) |
 | LDF Fn, (Rm) | $02 $B4 $nm | Fn = [[Rm]..+7] (register indirect load) |
 | STF Fn, (Rm) | $02 $B5 $nm | [[Rm]..+7] = Fn (register indirect store) |
+| LDF.S Fn, (Rm) | $02 $BA $nm | Fn[31:0] = [[Rm]..+3] (single load) |
+| STF.S Fn, (Rm) | $02 $BB $nm | [[Rm]..+3] = Fn[31:0] (single store) |
 
 Where `n` is the FPU register number (0-15) and `m` is the GPR register number (0-63, encoded in reg-byte low nibble for Rm/16).
 

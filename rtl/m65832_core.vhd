@@ -232,8 +232,9 @@ architecture rtl of M65832_Core is
     signal ext_tta, ext_tat                     : std_logic;
     signal ext_fpu                             : std_logic;
     signal ext_ldf, ext_stf                    : std_logic;
+    signal ext_ldf_s, ext_stf_s                : std_logic;
     signal ext_fpu_xfer                        : std_logic;      -- FPU register transfer ops (E0-E5)
-    signal fpu_indirect                        : std_logic;      -- FPU register-indirect load/store (B4/B5)
+    signal fpu_indirect                        : std_logic;      -- FPU register-indirect load/store
     signal fpu_mem_reg                         : unsigned(3 downto 0); -- FPU reg for load/store
     signal ext_fpu_trap                        : std_logic;
     
@@ -1038,7 +1039,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                             IR_EXT2 <= DATA_IN;
                             state <= ST_DECODE;
                         elsif is_extended = '1' and
-                              ((IR_EXT >= x"B0" and IR_EXT <= x"B7") or   -- FPU load/store
+                              ((IR_EXT >= x"B0" and IR_EXT <= x"BB") or   -- FPU load/store
                                (IR_EXT >= x"C0" and IR_EXT <= x"CA") or   -- FPU single-precision
                                (IR_EXT >= x"D0" and IR_EXT <= x"DA") or   -- FPU double-precision
                                (IR_EXT >= x"E0" and IR_EXT <= x"E5") or   -- FPU register transfers
@@ -1108,7 +1109,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 eff_addr <= rw_data1;
                                 data_byte_count <= (others => '0');
                                 ldq_high_phase <= '0';
-                                if ext_ldf = '1' then
+                                if ext_ldf = '1' or ext_ldf_s = '1' then
                                     state <= ST_READ;
                                 else
                                     state <= ST_WRITE;
@@ -1265,7 +1266,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                     -- Store operation
                                     state <= ST_WRITE;
-                                elsif ext_stq = '1' or ext_stf = '1' then
+                                elsif ext_stq = '1' or ext_stf = '1' or ext_stf_s = '1' then
                                     data_byte_count <= (others => '0');
                                     ldq_high_phase <= '0';
                                     state <= ST_WRITE;
@@ -1273,7 +1274,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                     -- STX/STY
                                     state <= ST_WRITE;
                                 else
-                                    if ext_ldq = '1' or ext_ldf = '1' then
+                                    if ext_ldq = '1' or ext_ldf = '1' or ext_ldf_s = '1' then
                                         data_byte_count <= (others => '0');
                                         ldq_high_phase <= '0';
                                     end if;
@@ -1423,13 +1424,13 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                         state <= ST_EXECUTE;
                                     elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                         state <= ST_WRITE;
-                                    elsif ext_stq = '1' or ext_stf = '1' then
+                                    elsif ext_stq = '1' or ext_stf = '1' or ext_stf_s = '1' then
                                         data_byte_count <= (others => '0');
                                         state <= ST_WRITE;
                                     elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                         state <= ST_WRITE;
                                     else
-                                        if ext_ldq = '1' or ext_ldf = '1' then
+                                        if ext_ldq = '1' or ext_ldf = '1' or ext_ldf_s = '1' then
                                             data_byte_count <= (others => '0');
                                             ldq_high_phase <= '0';
                                         end if;
@@ -1562,7 +1563,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 state <= ST_EXECUTE;
                             elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                 state <= ST_WRITE;
-                            elsif ext_stq = '1' or ext_stf = '1' then
+                            elsif ext_stq = '1' or ext_stf = '1' or ext_stf_s = '1' then
                                 state <= ST_WRITE;
                             elsif IS_RMW_OP = '1' and RMW_OP = "100" then
                                 state <= ST_WRITE;
@@ -2299,7 +2300,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     -- STA uses A_reg, STX uses X_reg, STY uses Y_reg
     process(state, data_byte_count, A_reg, X_reg, Y_reg, T_reg, fp_regs, fpu_reg_byte, fpu_mem_reg,
             IS_ALU_OP, IS_RMW_OP, ALU_OP, RMW_OP, REG_SRC, ALU_RES, stack_write_reg_eff, stack_width_eff,
-            ext_stq, ext_stf)
+            ext_stq, ext_stf, ext_stf_s)
         variable write_reg : std_logic_vector(31 downto 0);
         variable f_reg     : std_logic_vector(63 downto 0);
     begin
@@ -2359,6 +2360,13 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     when others => DATA_OUT <= f_reg(31 downto 24);
                 end case;
             end if;
+        elsif ext_stf_s = '1' then
+            case data_byte_count(1 downto 0) is
+                when "00" => DATA_OUT <= f_reg(7 downto 0);
+                when "01" => DATA_OUT <= f_reg(15 downto 8);
+                when "10" => DATA_OUT <= f_reg(23 downto 16);
+                when others => DATA_OUT <= f_reg(31 downto 24);
+            end case;
         elsif state = ST_PUSH then
             if stack_width_eff = WIDTH_8 then
                 DATA_OUT <= write_reg(7 downto 0);
@@ -3225,6 +3233,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     if ext_ldf = '1' then
                         -- Load to register specified by fpu_reg_byte (mode-dependent)
                         fp_regs(to_integer(fpu_mem_reg)) <= ldq_high_buffer & ldq_low_buffer;
+                    elsif ext_ldf_s = '1' then
+                        fp_regs(to_integer(fpu_mem_reg)) <= x"00000000" & data_buffer;
                     elsif fpu_write_fd = '1' then
                         -- Write result to destination register
                         fp_regs(to_integer(fpu_dest)) <= fpu_result;
@@ -3311,6 +3321,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                   WIDTH_16 when (IS_BLOCK_MOVE = '1') else
                   WIDTH_8 when (IS_REP = '1' or IS_SEP = '1') else
                   WIDTH_8 when (ext_repe = '1' or ext_sepe = '1' or ext_trap = '1') else
+                  WIDTH_32 when (ext_ldf_s = '1') else
                   WIDTH_32 when (is_extended = '1' and (IR_EXT = x"20" or IR_EXT = x"22" or IR_EXT = x"24")) else
                   WIDTH_32 when (is_extended = '1' and (IR_EXT = x"21" or IR_EXT = x"23" or IR_EXT = x"25")) else
                   X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "101" and
@@ -3319,7 +3330,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                                     (REG_SRC = "001" or REG_SRC = "010")) else
                   M_width_eff;
     
-    write_width <= X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "100" and
+    write_width <= WIDTH_32 when (ext_stf_s = '1') else
+                   X_width_eff when (IS_RMW_OP = '1' and RMW_OP = "100" and
                                      (REG_SRC = "001" or REG_SRC = "010")) else
                    M_width_eff;
     
@@ -3599,6 +3611,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                         (state = ST_ADDR1 and (IS_RMW_OP = '1' and RMW_OP = "100")) or
                         (state = ST_ADDR1 and ext_stq = '1') or
                         (state = ST_ADDR1 and ext_stf = '1') or
+                        (state = ST_ADDR1 and ext_stf_s = '1') or
                         (stq_high_reg = '1' and state = ST_EXECUTE) or
                         (f_stq_high_reg = '1' and state = ST_EXECUTE) or
                         (state = ST_EXECUTE and IS_RMW_OP = '1' and RMW_OP /= "100" and RMW_OP /= "101" and
@@ -3608,7 +3621,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                         (state = ST_EXECUTE and IS_EXTEND = '1')))    -- Extend write
              else '0';
 
-    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index, R_mode, ext_ldf, ext_stf)
+    process(state, ADDR_MODE, DATA_IN, X_reg, Y_reg, dp_reg_index, R_mode, ext_ldf, ext_stf, ext_ldf_s, ext_stf_s)
         variable dp_sum   : unsigned(7 downto 0);
         variable dp_index : unsigned(5 downto 0);
     begin
@@ -3624,7 +3637,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
             end if;
 
             if R_mode = '1' then
-                if ext_ldf = '1' or ext_stf = '1' then
+                if ext_ldf = '1' or ext_stf = '1' or ext_ldf_s = '1' or ext_stf_s = '1' then
                     -- 64-bit F register pairs require 8-byte alignment
                     if dp_sum(2 downto 0) /= "000" then
                         dp_addr_unaligned <= '1';
@@ -3829,11 +3842,13 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"9C" or IR_EXT = x"9D")) else '0';
     ext_stq <= '1' when (IR = x"02" and (IR_EXT = x"9E" or IR_EXT = x"9F")) else '0';
-    -- FPU load/store: $B0-$B7 (dp/abs/(Rm)/abs32)
+    -- FPU load/store: $B0-$BB (dp/abs/(Rm)/abs32, plus .S (Rm))
     ext_ldf <= '1' when (IR = x"02" and (IR_EXT = x"B0" or IR_EXT = x"B1" or IR_EXT = x"B4" or IR_EXT = x"B6")) else '0';
     ext_stf <= '1' when (IR = x"02" and (IR_EXT = x"B2" or IR_EXT = x"B3" or IR_EXT = x"B5" or IR_EXT = x"B7")) else '0';
-    fpu_indirect <= '1' when (IR = x"02" and (IR_EXT = x"B4" or IR_EXT = x"B5")) else '0';
-    fpu_mem_reg <= unsigned(fpu_reg_byte(7 downto 4)) when (IR_EXT = x"B4" or IR_EXT = x"B5")
+    ext_ldf_s <= '1' when (IR = x"02" and IR_EXT = x"BA") else '0';
+    ext_stf_s <= '1' when (IR = x"02" and IR_EXT = x"BB") else '0';
+    fpu_indirect <= '1' when (IR = x"02" and (IR_EXT = x"B4" or IR_EXT = x"B5" or IR_EXT = x"BA" or IR_EXT = x"BB")) else '0';
+    fpu_mem_reg <= unsigned(fpu_reg_byte(7 downto 4)) when (IR_EXT = x"B4" or IR_EXT = x"B5" or IR_EXT = x"BA" or IR_EXT = x"BB")
                   else unsigned(fpu_reg_byte(3 downto 0));
     -- FPU register transfers: $E0-$E5
     ext_fpu_xfer <= '1' when (is_extended = '1' and IR_EXT >= x"E0" and IR_EXT <= x"E5") else '0';
@@ -3886,7 +3901,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                             ((IR_EXT >= x"80" and IR_EXT <= x"87") or IR_EXT = EXT_SHIFTER or IR_EXT = EXT_EXTEND) and
                             is_regalu_ext = '0') or
                            ((state = ST_DECODE) and is_extended = '1' and
-                            ((IR_EXT >= x"B0" and IR_EXT <= x"B7") or
+                            ((IR_EXT >= x"B0" and IR_EXT <= x"BB") or
                              (IR_EXT >= x"C0" and IR_EXT <= x"CA") or
                              (IR_EXT >= x"D0" and IR_EXT <= x"DA") or
                              (IR_EXT >= x"E0" and IR_EXT <= x"E5") or

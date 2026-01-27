@@ -328,6 +328,8 @@ static const ExtInstruction ext_instructions[] = {
     { "STF",    0xB5, AM_FPU_IND },
     { "LDF",    0xB6, AM_FPU_LONG },
     { "STF",    0xB7, AM_FPU_LONG },
+    { "LDF.S",  0xBA, AM_FPU_IND },
+    { "STF.S",  0xBB, AM_FPU_IND },
     /* FPU single-precision (two-operand) */
     { "FADD.S", 0xC0, AM_FPU_REG2 },
     { "FSUB.S", 0xC1, AM_FPU_REG2 },
@@ -558,7 +560,7 @@ static Symbol *find_symbol(Assembler *as, const char *name) {
 static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int defined) {
     Symbol *sym = find_symbol(as, name);
     if (sym) {
-        if (defined && sym->defined && sym->value != value) {
+        if (defined && sym->defined && sym->value != value && as->pass == 1) {
             error(as, "symbol '%s' already defined at line %d", name, sym->line_defined);
             return NULL;
         }
@@ -948,7 +950,37 @@ typedef struct {
     int force_width;    /* 0=auto, 1=byte, 2=word, 3=long, 4=quad */
     uint8_t mvp_dst;    /* For MVP/MVN */
     int b_relative;     /* Explicit B+offset syntax */
+    int is_hex_literal; /* 1 if operand is a plain hex literal */
+    int hex_digits;     /* Number of hex digits for plain literal */
 } Operand;
+
+static int hex_literal_digits(const char *s, int *digits) {
+    const char *p = skip_whitespace((char *)s);
+    int count = 0;
+    if (*p == '$') {
+        p++;
+        if (!isxdigit((unsigned char)*p)) return 0;
+        while (isxdigit((unsigned char)*p)) {
+            count++;
+            p++;
+        }
+    } else if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        p += 2;
+        if (!isxdigit((unsigned char)*p)) return 0;
+        while (isxdigit((unsigned char)*p)) {
+            count++;
+            p++;
+        }
+    } else {
+        return 0;
+    }
+    p = skip_whitespace((char *)p);
+    if (*p && *p != ',' && *p != ')' && *p != ']' && *p != ';') {
+        return 0;
+    }
+    *digits = count;
+    return 1;
+}
 
 static int parse_operand(Assembler *as, char *s, Operand *op) {
     char *p = skip_whitespace(s);
@@ -957,6 +989,8 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
     op->force_width = 0;
     op->mvp_dst = 0;
     op->b_relative = 0;
+    op->is_hex_literal = 0;
+    op->hex_digits = 0;
     
     if (!*p || *p == ';') {
         /* No operand = implied or accumulator */
@@ -1099,6 +1133,9 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
     }
 
     /* Direct/Absolute addressing */
+    if (hex_literal_digits(p, &op->hex_digits)) {
+        op->is_hex_literal = 1;
+    }
     if (!parse_expression(as, p, &op->value, (const char**)&p)) {
         error(as, "invalid operand");
         return 0;
@@ -1147,6 +1184,11 @@ static int parse_operand(Assembler *as, char *s, Operand *op) {
     else if (op->value <= 0xFFFF) op->mode = AM_ABS;
     else if (op->value <= 0xFFFFFF) op->mode = AM_ABSL;
     else op->mode = AM_ABS32;
+
+    if (as->m_flag == 2 && op->mode == AM_ABS32 && op->is_hex_literal && op->hex_digits != 8) {
+        error(as, "32-bit absolute hex must use 8 digits");
+        return 0;
+    }
     
     return 1;
 }
@@ -1470,7 +1512,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         strncmp(mnemonic, "FTOA", 4) == 0 || strncmp(mnemonic, "FTOT", 4) == 0 ||
         strncmp(mnemonic, "ATOF", 4) == 0 || strncmp(mnemonic, "TTOF", 4) == 0 ||
         strncmp(mnemonic, "FCVT", 4) == 0 ||
-        strncmp(mnemonic, "LDF", 3) == 0 || strcmp(mnemonic, "STF") == 0) {
+        strncmp(mnemonic, "LDF", 3) == 0 || strncmp(mnemonic, "STF", 3) == 0) {
         char *p = skip_whitespace(operand);
         int fd = -1, fs = -1;
 
@@ -1492,7 +1534,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         p += ti;
         p = skip_whitespace(p);
 
-        if (strncmp(mnemonic, "LDF", 3) == 0 || strcmp(mnemonic, "STF") == 0) {
+        if (strncmp(mnemonic, "LDF", 3) == 0 || strncmp(mnemonic, "STF", 3) == 0) {
             /* FP register + memory address: Fn, addr */
             if (*p != ',') {
                 error(as, "expected ',' after FP register");
@@ -1532,7 +1574,10 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                         error(as, "expected ')' after register");
                         return 0;
                     }
-                    uint8_t ind_opcode = (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB4 : 0xB5;
+                    uint8_t ind_opcode;
+                    if (strcmp(mnemonic, "LDF.S") == 0) ind_opcode = 0xBA;
+                    else if (strcmp(mnemonic, "STF.S") == 0) ind_opcode = 0xBB;
+                    else ind_opcode = (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB4 : 0xB5;
                     emit_byte(as, 0x02);
                     emit_byte(as, ind_opcode);
                     emit_byte(as, (uint8_t)((fd << 4) | rm));
@@ -1542,9 +1587,20 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 return 0;
             }
 
+            if (strcmp(mnemonic, "LDF.S") == 0 || strcmp(mnemonic, "STF.S") == 0) {
+                error(as, "LDF.S/STF.S only support (Rm) addressing");
+                return 0;
+            }
+
+            int addr_hex_digits = 0;
+            int addr_is_hex = hex_literal_digits(p, &addr_hex_digits);
             uint32_t addr;
             if (!parse_expression(as, p, &addr, (const char**)&p)) {
                 error(as, "expected address operand");
+                return 0;
+            }
+            if (as->m_flag == 2 && addr > 0xFFFFFF && addr_is_hex && addr_hex_digits != 8) {
+                error(as, "32-bit absolute hex must use 8 digits");
                 return 0;
             }
 
@@ -2057,7 +2113,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     }
     
     if (as->m_flag == 2) {
-        if (op.value > 0xFFFF) {
+        if (mode != AM_IMM && op.value > 0xFFFF) {
             error(as, "32-bit absolute requires extended ALU");
             return 0;
         }
@@ -2108,6 +2164,14 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         case AM_IMM:
             {
                 int size = get_imm_size(as, mnemonic, 0);
+                if (size == 1 && op.value > 0xFF) {
+                    error(as, "immediate too large for 8-bit");
+                    return 0;
+                }
+                if (size == 2 && op.value > 0xFFFF) {
+                    error(as, "immediate too large for 16-bit");
+                    return 0;
+                }
                 if (size == 1) emit_byte(as, op.value & 0xFF);
                 else if (size == 2) emit_word(as, op.value & 0xFFFF);
                 else emit_quad(as, op.value);
@@ -2302,7 +2366,7 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
                     error(as, "invalid long value");
                     return 0;
                 }
-                emit_long(as, value & 0xFFFFFF);
+                emit_quad(as, value);
             }
             p = skip_whitespace(p);
             if (*p == ',') p++;

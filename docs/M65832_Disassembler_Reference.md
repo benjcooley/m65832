@@ -357,7 +357,7 @@ When opcode $02 is encountered, the next byte is looked up in a separate extende
 - MUL, DIV operations ($00-$07)
 - Atomic instructions ($10-$15): CAS, LLI, SCI
 - Memory fences ($50-$52)
-- FPU operations ($B0-$D8)
+- FPU operations ($B0-$BB, $C0-$D8)
 - System instructions ($40, $60-$61)
 - **Extended ALU ($80-$97)**: LD, ST, ADC, SBC, AND, ORA, EOR, CMP, BIT, TSB, TRB, INC, DEC, ASL, LSR, ROL, ROR, STZ
 - Barrel shifter ($98): SHL, SHR, SAR, ROL, ROR

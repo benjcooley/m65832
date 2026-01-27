@@ -13,10 +13,12 @@ High-performance emulator for the M65832 processor architecture. Supports the fu
   - Optional: 6502 emulation mode (for legacy code)
   
 - **Floating Point Unit (FPU)**
-  - Three 64-bit FPU registers (F0, F1, F2)
-  - Single-precision operations (FADD.S, FSUB.S, FMUL.S, FDIV.S, FNEG.S, FABS.S, FCMP.S)
-  - Double-precision operations (FADD.D, FSUB.D, FMUL.D, FDIV.D, FNEG.D, FABS.D, FCMP.D)
-  - Conversion instructions (F2I.S, I2F.S, F2I.D, I2F.D)
+  - Sixteen 64-bit FPU registers (F0-F15)
+  - Two-operand destructive format: Fd = Fd op Fs
+  - Single-precision operations (FADD.S, FSUB.S, FMUL.S, FDIV.S, FNEG.S, FABS.S, FCMP.S, FMOV.S, FSQRT.S)
+  - Double-precision operations (FADD.D, FSUB.D, FMUL.D, FDIV.D, FNEG.D, FABS.D, FCMP.D, FMOV.D, FSQRT.D)
+  - Conversion instructions (F2I.S, I2F.S, F2I.D, I2F.D, FCVT.DS, FCVT.SD)
+  - Register transfer instructions (FTOA, FTOT, ATOF, TTOF)
   - Load/store (LDF0/LDF1/LDF2, STF0/STF1/STF2)
   - Reserved opcode trap for software emulation
   

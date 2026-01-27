@@ -177,8 +177,8 @@ cat > test/test_jsr.asm << 'EOF'
     .org $1000
     
     LDA #$10
-    JSR add_five
-    JSR add_five    ; A should be 0x1A
+    JSR B+add_five
+    JSR B+add_five    ; A should be 0x1A
     STP
 
 add_five:
@@ -233,6 +233,55 @@ cat > test/test_shift.asm << 'EOF'
 EOF
 
 run_test "ASL/LSR shifts" "test/test_shift.asm" "00000020" 200
+
+# Test 11: FPU operations (16 registers, two-operand)
+cat > test/test_fp.asm << 'EOF'
+; Test FPU: I2F, FADD.S, F2I with new two-operand format
+    .org $1000
+    
+    LDA #$02
+    I2F.S F0        ; F0 = 2.0
+    LDA #$03
+    I2F.S F1        ; F1 = 3.0
+    FADD.S F0, F1   ; F0 = 2.0 + 3.0 = 5.0
+    F2I.S F0        ; A = 5
+    STP
+EOF
+
+run_test "FPU I2F/FADD/F2I" "test/test_fp.asm" "00000005" 200
+
+# Test 12: FPU high registers (F8-F15)
+cat > test/test_fp_highregs.asm << 'EOF'
+; Test FPU high registers F8-F15
+    .org $1000
+    
+    LDA #$04
+    I2F.S F8        ; F8 = 4.0
+    LDA #$02
+    I2F.S F15       ; F15 = 2.0
+    FMUL.S F8, F15  ; F8 = 4.0 * 2.0 = 8.0
+    F2I.S F8        ; A = 8
+    STP
+EOF
+
+run_test "FPU high registers F8-F15" "test/test_fp_highregs.asm" "00000008" 200
+
+# Test 13: FPU FMOV.S and FSUB.S
+cat > test/test_fp_mov.asm << 'EOF'
+; Test FPU FMOV.S and FSUB.S
+    .org $1000
+    
+    LDA #$0A
+    I2F.S F0        ; F0 = 10.0
+    FMOV.S F5, F0   ; F5 = F0 = 10.0
+    LDA #$03
+    I2F.S F1        ; F1 = 3.0
+    FSUB.S F5, F1   ; F5 = 10.0 - 3.0 = 7.0
+    F2I.S F5        ; A = 7
+    STP
+EOF
+
+run_test "FPU FMOV.S/FSUB.S" "test/test_fp_mov.asm" "00000007" 200
 
 # Summary
 echo

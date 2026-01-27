@@ -383,8 +383,8 @@ struct m65832_cpu {
     /* Register window (R0-R63) */
     uint32_t regs[M65832_REG_WINDOW_SIZE];
     
-    /* FPU registers (optional) */
-    double   f[3];          /* F0-F2 */
+    /* FPU registers (optional) - 16 x 64-bit */
+    double   f[16];         /* F0-F15 */
     
     /* MMU */
     uint64_t ptbr;          /* Page table base register (65-bit, but we use 64) */

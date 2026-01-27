@@ -64,28 +64,40 @@ LEA_TEST:
     LEA $1234           ; $02 $A2 $34 $12
     LEA $1234,X         ; $02 $A3 $34 $12
 
-; FPU Load/Store
+; FPU Load/Store (16-register format with register byte)
 FPU_TEST:
-    LDF0 $20            ; $02 $B0 $20
-    LDF0 $1234          ; $02 $B1 $34 $12
-    STF0 $30            ; $02 $B2 $30
-    STF0 $2345          ; $02 $B3 $45 $23
+    LDF F0, $20         ; $02 $B0 $00 $20 (LDF dp)
+    LDF F5, $1234       ; $02 $B1 $05 $34 $12 (LDF abs)
+    STF F0, $30         ; $02 $B2 $00 $30 (STF dp)
+    STF F15, $2345      ; $02 $B3 $0F $45 $23 (STF abs)
 
-; FPU Arithmetic
-    FADD.S              ; $02 $C0
-    FSUB.S              ; $02 $C1
-    FMUL.S              ; $02 $C2
-    FDIV.S              ; $02 $C3
-    FNEG.S              ; $02 $C4
-    FABS.S              ; $02 $C5
-    FCMP.S              ; $02 $C6
-    F2I.S               ; $02 $C7
-    I2F.S               ; $02 $C8
+; FPU Arithmetic (two-operand destructive: Fd = Fd op Fs)
+    FADD.S F0, F1       ; $02 $C0 $01
+    FSUB.S F2, F3       ; $02 $C1 $23
+    FMUL.S F4, F5       ; $02 $C2 $45
+    FDIV.S F6, F7       ; $02 $C3 $67
+    FNEG.S F0, F1       ; $02 $C4 $01
+    FABS.S F2, F3       ; $02 $C5 $23
+    FCMP.S F4, F5       ; $02 $C6 $45
+    F2I.S F0            ; $02 $C7 $00
+    I2F.S F1            ; $02 $C8 $10
+    FMOV.S F8, F9       ; $02 $C9 $89
+    FSQRT.S F10, F11    ; $02 $CA $AB
     
-    FADD.D              ; $02 $D0
-    FSUB.D              ; $02 $D1
-    FMUL.D              ; $02 $D2
-    FDIV.D              ; $02 $D3
+    FADD.D F0, F1       ; $02 $D0 $01
+    FSUB.D F2, F3       ; $02 $D1 $23
+    FMUL.D F4, F5       ; $02 $D2 $45
+    FDIV.D F6, F7       ; $02 $D3 $67
+    FMOV.D F12, F13     ; $02 $D9 $CD
+    FSQRT.D F14, F15    ; $02 $DA $EF
+    
+; FPU Register transfers
+    FTOA F0             ; $02 $E0 $00
+    FTOT F1             ; $02 $E1 $10
+    ATOF F2             ; $02 $E2 $20
+    TTOF F3             ; $02 $E3 $30
+    FCVT.DS F4, F5      ; $02 $E4 $45
+    FCVT.SD F6, F7      ; $02 $E5 $67
 
 END_TEST:
     NOP

@@ -427,6 +427,8 @@ except `(Rm)` which uses high nibble for `Fn` and low nibble for `Rm`.
 | STF Fn, (Rm) | $02 $B5 $nm | [[Rm]] = Fn |
 | LDF Fn, abs32 | $02 $B6 $0n abs32 | Fn = [abs32] (64-bit) |
 | STF Fn, abs32 | $02 $B7 $0n abs32 | [abs32] = Fn |
+| LDF.S Fn, (Rm) | $02 $BA $nm | Fn[31:0] = [[Rm]] (32-bit) |
+| STF.S Fn, (Rm) | $02 $BB $nm | [[Rm]] = Fn[31:0] |
 
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
