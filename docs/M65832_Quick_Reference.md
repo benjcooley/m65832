@@ -414,7 +414,8 @@ Bits 4-0: count (0-31), or $1F for shift by A.
 ### Floating Point (16 registers: F0-F15)
 
 All FPU instructions: `$02 [opcode] [reg-byte] [operand...]`
-Register byte: `DDDD SSSS` (dest << 4 | src)
+Register byte: `DDDD SSSS` (dest << 4 | src). Load/store uses low nibble for `Fn`,
+except `(Rm)` which uses high nibble for `Fn` and low nibble for `Rm`.
 
 | Instruction | Encoding | Description |
 |-------------|----------|-------------|
@@ -422,6 +423,10 @@ Register byte: `DDDD SSSS` (dest << 4 | src)
 | LDF Fn, abs | $02 $B1 $0n abs | Fn = [B+abs] (64-bit) |
 | STF Fn, dp | $02 $B2 $0n dp | [D+dp] = Fn |
 | STF Fn, abs | $02 $B3 $0n abs | [B+abs] = Fn |
+| LDF Fn, (Rm) | $02 $B4 $nm | Fn = [[Rm]] (64-bit) |
+| STF Fn, (Rm) | $02 $B5 $nm | [[Rm]] = Fn |
+| LDF Fn, abs32 | $02 $B6 $0n abs32 | Fn = [abs32] (64-bit) |
+| STF Fn, abs32 | $02 $B7 $0n abs32 | [abs32] = Fn |
 
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|

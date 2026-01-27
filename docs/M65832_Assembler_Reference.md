@@ -681,8 +681,12 @@ All extended instructions are prefixed with opcode $02.
 ```asm
     LDF F0, $20         ; Load F0 from DP
     LDF F5, $1234       ; Load F5 from absolute
+    LDF F3, $00123456   ; Load F3 from 32-bit absolute
+    LDF F2, (R0)        ; Load F2 from address in R0
     STF F0, $20         ; Store F0 to DP
     STF F12, $1234      ; Store F12 to absolute
+    STF F4, $00123456   ; Store F4 to 32-bit absolute
+    STF F1, (R3)        ; Store F1 to address in R3
 ```
 
 ### FPU Arithmetic (Single Precision)

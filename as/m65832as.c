@@ -63,13 +63,11 @@ typedef enum {
     AM_ABS32,       /* 32-bit Absolute */
     /* FPU register modes */
     AM_FPU_REG2,    /* Two FP registers: FADD.S F0, F1 */
-    AM_FPU_REG1,    /* One FP register: I2F.S F0 */
+    AM_FPU_REG1,    /* One FP register: F2I.S F0 */
     AM_FPU_DP,      /* FP register + DP: LDF F0, $xx */
     AM_FPU_ABS,     /* FP register + Abs: LDF F0, $xxxx */
-    AM_FPU_IND,     /* FP register + Reg Indirect: LDF F0, (R1) */
+    AM_FPU_IND,     /* FP register + GPR indirect: LDF F0, (R0) */
     AM_FPU_LONG,    /* FP register + 32-bit Abs: LDF F0, $xxxxxxxx */
-    AM_FPU_IMM_S,   /* FP register + single imm: LDF.S F0, #1.5 */
-    AM_FPU_IMM_D,   /* FP register + double imm: LDF.D F0, #1.5 */
     AM_COUNT
 } AddrMode;
 
@@ -84,7 +82,6 @@ typedef struct {
     uint32_t value;
     int defined;
     int line_defined;
-    int section_index;  /* Which section this symbol is in (-1 = none/absolute) */
 } Symbol;
 
 typedef struct {
@@ -331,8 +328,6 @@ static const ExtInstruction ext_instructions[] = {
     { "STF",    0xB5, AM_FPU_IND },
     { "LDF",    0xB6, AM_FPU_LONG },
     { "STF",    0xB7, AM_FPU_LONG },
-    { "LDF.S",  0xB8, AM_FPU_IMM_S },
-    { "LDF.D",  0xB9, AM_FPU_IMM_D },
     /* FPU single-precision (two-operand) */
     { "FADD.S", 0xC0, AM_FPU_REG2 },
     { "FSUB.S", 0xC1, AM_FPU_REG2 },
@@ -563,9 +558,7 @@ static Symbol *find_symbol(Assembler *as, const char *name) {
 static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int defined) {
     Symbol *sym = find_symbol(as, name);
     if (sym) {
-        /* Only error on pass 1 for genuine duplicates (same pass, different value) */
-        /* Pass 2 redefinitions are expected in two-pass assembly */
-        if (defined && sym->defined && sym->value != value && as->pass == 1) {
+        if (defined && sym->defined && sym->value != value) {
             error(as, "symbol '%s' already defined at line %d", name, sym->line_defined);
             return NULL;
         }
@@ -573,7 +566,6 @@ static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int d
             sym->value = value;
             sym->defined = 1;
             sym->line_defined = current_line(as);
-            sym->section_index = as->current_section;
         }
         return sym;
     }
@@ -587,7 +579,6 @@ static Symbol *add_symbol(Assembler *as, const char *name, uint32_t value, int d
     sym->value = value;
     sym->defined = defined;
     sym->line_defined = current_line(as);
-    sym->section_index = defined ? as->current_section : -1;
     return sym;
 }
 
@@ -703,29 +694,28 @@ static void output_free(Output *out) {
 }
 
 static void emit_byte(Assembler *as, uint8_t b) {
-    Section *sec = current_section(as);
-    if (sec) {
-        uint32_t sec_offset = sec->pc - sec->org;
-        /* Track size in both passes for section linking */
-        if (sec_offset + 1 > sec->size)
-            sec->size = sec_offset + 1;
-        
-        if (as->pass == 2) {
-            /* Write to section data */
-            if (sec_offset < sec->capacity) {
-                sec->data[sec_offset] = b;
+    if (as->pass == 2) {
+        Section *sec = current_section(as);
+        if (sec) {
+            uint32_t offset = sec->pc - sec->org;
+            if (offset < sec->capacity) {
+                sec->data[offset] = b;
+                if (offset + 1 > sec->size)
+                    sec->size = offset + 1;
             }
-            /* Write to legacy output buffer using section's absolute PC */
-            uint32_t out_offset = sec->pc - as->output.org;
-            if (out_offset < as->output.capacity) {
-                as->output.data[out_offset] = b;
-                if (out_offset + 1 > as->output.size)
-                    as->output.size = out_offset + 1;
-            }
+            sec->pc++;
         }
-        sec->pc++;
+        /* Also write to legacy output for compatibility */
+        uint32_t offset = as->output.pc - as->output.org;
+        if (offset < as->output.capacity) {
+            as->output.data[offset] = b;
+            if (offset + 1 > as->output.size)
+                as->output.size = offset + 1;
+        }
     }
     as->output.pc++;
+    Section *sec = current_section(as);
+    if (sec && as->pass == 1) sec->pc++;
 }
 
 static void emit_word(Assembler *as, uint16_t w) {
@@ -1470,7 +1460,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     }
     
     /* FPU instructions with register operands */
-    /* Format: FADD.S Fd, Fs  or  LDF Fn, addr  or  F2I.S Fd  or  LDF.S Fn, #imm */
+    /* Format: FADD.S Fd, Fs  or  LDF Fn, addr  or  F2I.S Fd */
     if (strncmp(mnemonic, "FADD", 4) == 0 || strncmp(mnemonic, "FSUB", 4) == 0 ||
         strncmp(mnemonic, "FMUL", 4) == 0 || strncmp(mnemonic, "FDIV", 4) == 0 ||
         strncmp(mnemonic, "FNEG", 4) == 0 || strncmp(mnemonic, "FABS", 4) == 0 ||
@@ -1481,8 +1471,104 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         strncmp(mnemonic, "ATOF", 4) == 0 || strncmp(mnemonic, "TTOF", 4) == 0 ||
         strncmp(mnemonic, "FCVT", 4) == 0 ||
         strncmp(mnemonic, "LDF", 3) == 0 || strcmp(mnemonic, "STF") == 0) {
-        
-        /* Look up the instruction in ext_instructions */
+        char *p = skip_whitespace(operand);
+        int fd = -1, fs = -1;
+
+        /* Parse first FP register */
+        char token[16];
+        int ti = 0;
+        while (p[ti] && !isspace((unsigned char)p[ti]) && p[ti] != ',' && ti < 15) {
+            token[ti] = p[ti];
+            ti++;
+        }
+        token[ti] = '\0';
+        fd = parse_fp_register(token);
+
+        if (fd < 0) {
+            error(as, "expected FP register (F0-F15)");
+            return 0;
+        }
+
+        p += ti;
+        p = skip_whitespace(p);
+
+        if (strncmp(mnemonic, "LDF", 3) == 0 || strcmp(mnemonic, "STF") == 0) {
+            /* FP register + memory address: Fn, addr */
+            if (*p != ',') {
+                error(as, "expected ',' after FP register");
+                return 0;
+            }
+            p++;
+            p = skip_whitespace(p);
+
+            /* Check for register indirect: (Rm) */
+            if (*p == '(') {
+                p++;
+                p = skip_whitespace(p);
+                ti = 0;
+                while (p[ti] && p[ti] != ')' && !isspace((unsigned char)p[ti]) && ti < 15) {
+                    token[ti] = p[ti];
+                    ti++;
+                }
+                token[ti] = '\0';
+
+                int rm = -1;
+                if ((token[0] == 'R' || token[0] == 'r') && isdigit((unsigned char)token[1])) {
+                    rm = 0;
+                    const char *rp = token + 1;
+                    while (isdigit((unsigned char)*rp)) {
+                        rm = rm * 10 + (*rp - '0');
+                        rp++;
+                    }
+                    if (*rp != '\0' || rm > 15) {
+                        rm = -1;  /* Only R0-R15 supported in indirect mode */
+                    }
+                }
+
+                if (rm >= 0) {
+                    p += ti;
+                    p = skip_whitespace(p);
+                    if (*p != ')') {
+                        error(as, "expected ')' after register");
+                        return 0;
+                    }
+                    uint8_t ind_opcode = (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB4 : 0xB5;
+                    emit_byte(as, 0x02);
+                    emit_byte(as, ind_opcode);
+                    emit_byte(as, (uint8_t)((fd << 4) | rm));
+                    return 1;
+                }
+                error(as, "register indirect mode requires R0-R15");
+                return 0;
+            }
+
+            uint32_t addr;
+            if (!parse_expression(as, p, &addr, (const char**)&p)) {
+                error(as, "expected address operand");
+                return 0;
+            }
+
+            if (addr <= 0xFF) {
+                emit_byte(as, 0x02);
+                emit_byte(as, (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB0 : 0xB2);
+                emit_byte(as, (uint8_t)fd);
+                emit_byte(as, addr & 0xFF);
+                return 1;
+            } else if (addr <= 0xFFFF) {
+                emit_byte(as, 0x02);
+                emit_byte(as, (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB1 : 0xB3);
+                emit_byte(as, (uint8_t)fd);
+                emit_word(as, addr & 0xFFFF);
+                return 1;
+            } else {
+                emit_byte(as, 0x02);
+                emit_byte(as, (strncmp(mnemonic, "LDF", 3) == 0) ? 0xB6 : 0xB7);
+                emit_byte(as, (uint8_t)fd);
+                emit_quad(as, addr);
+                return 1;
+            }
+        }
+
         const ExtInstruction *ext = NULL;
         for (int i = 0; ext_instructions[i].name; i++) {
             if (strcmp(ext_instructions[i].name, mnemonic) == 0) {
@@ -1490,239 +1576,43 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 break;
             }
         }
-        
-        if (ext) {
-            char *p = skip_whitespace(operand);
-            int fd = -1, fs = -1;
-            
-            /* Parse first FP register */
-            char token[16];
-            int ti = 0;
+        if (!ext) {
+            error(as, "unknown FPU instruction");
+            return 0;
+        }
+
+        if (ext->mode == AM_FPU_REG2) {
+            if (*p != ',') {
+                error(as, "expected ',' after destination register");
+                return 0;
+            }
+            p++;
+            p = skip_whitespace(p);
+            ti = 0;
             while (p[ti] && !isspace((unsigned char)p[ti]) && p[ti] != ',' && ti < 15) {
                 token[ti] = p[ti];
                 ti++;
             }
             token[ti] = '\0';
-            fd = parse_fp_register(token);
-            
-            if (fd < 0) {
-                error(as, "expected FP register (F0-F15)");
+            fs = parse_fp_register(token);
+            if (fs < 0) {
+                error(as, "expected source FP register (F0-F15)");
                 return 0;
             }
-            
-            p += ti;
-            p = skip_whitespace(p);
-            
-            /* Handle based on instruction type */
-            if (strcmp(mnemonic, "LDF") == 0 || strcmp(mnemonic, "STF") == 0) {
-                /* FP register + memory address: Fn, addr */
-                if (*p != ',') {
-                    error(as, "expected ',' after FP register");
-                    return 0;
-                }
-                p++;
-                p = skip_whitespace(p);
+            emit_byte(as, 0x02);
+            emit_byte(as, ext->ext_opcode);
+            emit_byte(as, (uint8_t)((fd << 4) | fs));
+            return 1;
+        }
 
-                /* Check for register indirect: (Rm) */
-                if (*p == '(') {
-                    p++;
-                    p = skip_whitespace(p);
-                    /* Parse register name */
-                    ti = 0;
-                    while (p[ti] && p[ti] != ')' && !isspace((unsigned char)p[ti]) && ti < 15) {
-                        token[ti] = p[ti];
-                        ti++;
-                    }
-                    token[ti] = '\0';
-
-                    /* Check if it's a register (R0-R15) */
-                    int rm = -1;
-                    if ((token[0] == 'R' || token[0] == 'r') && isdigit((unsigned char)token[1])) {
-                        rm = 0;
-                        const char *rp = token + 1;
-                        while (isdigit((unsigned char)*rp)) {
-                            rm = rm * 10 + (*rp - '0');
-                            rp++;
-                        }
-                        if (*rp != '\0' || rm > 15) {
-                            rm = -1;  /* Only R0-R15 supported in indirect mode */
-                        }
-                    }
-
-                    if (rm >= 0) {
-                        p += ti;
-                        p = skip_whitespace(p);
-                        if (*p != ')') {
-                            error(as, "expected ')' after register");
-                            return 0;
-                        }
-                        /* Use the indirect mode opcode ($B4 for LDF, $B5 for STF) */
-                        uint8_t ind_opcode = (strcmp(mnemonic, "LDF") == 0) ? 0xB4 : 0xB5;
-                        /* Emit: $02 opcode reg_byte (Fn in high nibble, Rm in low nibble) */
-                        emit_byte(as, 0x02);
-                        emit_byte(as, ind_opcode);
-                        emit_byte(as, (uint8_t)((fd << 4) | rm));
-                        return 1;
-                    } else {
-                        error(as, "register indirect mode requires R0-R15");
-                        return 0;
-                    }
-                }
-
-                /* Parse the memory address */
-                uint32_t addr;
-                if (!parse_expression(as, p, &addr, (const char**)&p)) {
-                    error(as, "expected address operand");
-                    return 0;
-                }
-
-                if (addr <= 0xFF) {
-                    /* DP form */
-                    emit_byte(as, 0x02);
-                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB0 : 0xB2);
-                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
-                    emit_byte(as, addr & 0xFF);
-                    return 1;
-                } else if (addr <= 0xFFFF) {
-                    /* ABS form */
-                    emit_byte(as, 0x02);
-                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB1 : 0xB3);
-                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
-                    emit_word(as, addr & 0xFFFF);
-                    return 1;
-                } else {
-                    /* ABS32 form */
-                    emit_byte(as, 0x02);
-                    emit_byte(as, (strcmp(mnemonic, "LDF") == 0) ? 0xB6 : 0xB7);
-                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
-                    emit_quad(as, addr);
-                    return 1;
-                }
-            }
-
-            if (ext->mode == AM_FPU_REG2) {
-                /* Two FP registers: Fd, Fs */
-                if (*p != ',') {
-                    error(as, "expected ',' after destination register");
-                    return 0;
-                }
-                p++;
-                p = skip_whitespace(p);
-                
-                ti = 0;
-                while (p[ti] && !isspace((unsigned char)p[ti]) && p[ti] != ',' && ti < 15) {
-                    token[ti] = p[ti];
-                    ti++;
-                }
-                token[ti] = '\0';
-                fs = parse_fp_register(token);
-                
-                if (fs < 0) {
-                    error(as, "expected source FP register (F0-F15)");
-                    return 0;
-                }
-                
-                /* Emit: $02 opcode reg_byte */
-                emit_byte(as, 0x02);
-                emit_byte(as, ext->ext_opcode);
-                emit_byte(as, (uint8_t)((fd << 4) | fs));
-                return 1;
-                
-            } else if (ext->mode == AM_FPU_REG1) {
-                /* Single FP register: Fd */
-                /* Emit: $02 opcode reg_byte (src=0) */
-                emit_byte(as, 0x02);
-                emit_byte(as, ext->ext_opcode);
-                emit_byte(as, (uint8_t)(fd << 4));
-                return 1;
-                
-            } else if (ext->mode == AM_FPU_DP || ext->mode == AM_FPU_ABS) {
-                /* FP register + memory address: Fn, addr */
-                if (*p != ',') {
-                    error(as, "expected ',' after FP register");
-                    return 0;
-                }
-                p++;
-                p = skip_whitespace(p);
-                
-                /* Check for register indirect: (Rm) */
-                if (*p == '(') {
-                    p++;
-                    p = skip_whitespace(p);
-                    /* Parse register name */
-                    ti = 0;
-                    while (p[ti] && p[ti] != ')' && !isspace((unsigned char)p[ti]) && ti < 15) {
-                        token[ti] = p[ti];
-                        ti++;
-                    }
-                    token[ti] = '\0';
-                    
-                    /* Check if it's a register (R0-R15) */
-                    int rm = -1;
-                    if ((token[0] == 'R' || token[0] == 'r') && isdigit((unsigned char)token[1])) {
-                        rm = 0;
-                        const char *rp = token + 1;
-                        while (isdigit((unsigned char)*rp)) {
-                            rm = rm * 10 + (*rp - '0');
-                            rp++;
-                        }
-                        if (*rp != '\0' || rm > 15) {
-                            rm = -1;  /* Only R0-R15 supported in indirect mode */
-                        }
-                    }
-                    
-                    if (rm >= 0) {
-                        p += ti;
-                        p = skip_whitespace(p);
-                        if (*p != ')') {
-                            error(as, "expected ')' after register");
-                            return 0;
-                        }
-                        /* Use the indirect mode opcode ($B4 for LDF, $B5 for STF) */
-                        uint8_t ind_opcode = (strcmp(mnemonic, "LDF") == 0) ? 0xB4 : 0xB5;
-                        /* Emit: $02 opcode reg_byte (Fn in high nibble, Rm in low nibble) */
-                        emit_byte(as, 0x02);
-                        emit_byte(as, ind_opcode);
-                        emit_byte(as, (uint8_t)((fd << 4) | rm));
-                        return 1;
-                    } else {
-                        error(as, "register indirect mode requires R0-R15");
-                        return 0;
-                    }
-                }
-                
-                /* Parse the memory address */
-                uint32_t addr;
-                if (!parse_expression(as, p, &addr, (const char**)&p)) {
-                    error(as, "expected address operand");
-                    return 0;
-                }
-                
-                /* Determine if DP or ABS based on address size */
-                if (addr <= 0xFF && ext->mode == AM_FPU_DP) {
-                    /* DP form */
-                    emit_byte(as, 0x02);
-                    emit_byte(as, ext->ext_opcode);
-                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
-                    emit_byte(as, addr & 0xFF);
-                    return 1;
-                } else {
-                    /* ABS form - need to use the ABS opcode variant */
-                    uint8_t abs_opcode = ext->ext_opcode;
-                    if (ext->mode == AM_FPU_DP) {
-                        /* Switch from DP to ABS opcode (+1) */
-                        abs_opcode++;
-                    }
-                    emit_byte(as, 0x02);
-                    emit_byte(as, abs_opcode);
-                    emit_byte(as, (uint8_t)fd);  /* Low nibble = register */
-                    emit_word(as, addr & 0xFFFF);
-                    return 1;
-                }
-            }
+        if (ext->mode == AM_FPU_REG1) {
+            emit_byte(as, 0x02);
+            emit_byte(as, ext->ext_opcode);
+            emit_byte(as, (uint8_t)(fd << 4));
+            return 1;
         }
     }
-    
+
     /* Extended ALU instructions ($02 $80-$97) */
     const ExtALUOp *ext_alu = find_ext_alu_op(mnemonic);
     if (ext_alu) {
@@ -2402,19 +2292,17 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
     }
     
     if (strcmp(directive, ".LONG") == 0 || strcmp(directive, ".DL") == 0 ||
-        strcmp(directive, ".DCL") == 0 || strcmp(directive, "DCL") == 0 ||
-        strcmp(directive, ".DWORD") == 0 || strcmp(directive, ".DD") == 0) {
-        /* Emit 32-bit values (4 bytes each) */
+        strcmp(directive, ".DCL") == 0 || strcmp(directive, "DCL") == 0) {
         char *p = operand;
         while (*p) {
             p = skip_whitespace(p);
             if (*p && *p != ',' && *p != ';') {
                 uint32_t value;
                 if (!parse_expression(as, p, &value, (const char**)&p)) {
-                    error(as, "invalid 32-bit value");
+                    error(as, "invalid long value");
                     return 0;
                 }
-                emit_quad(as, value);  /* Full 32-bit value */
+                emit_long(as, value & 0xFFFFFF);
             }
             p = skip_whitespace(p);
             if (*p == ',') p++;
@@ -3254,63 +3142,6 @@ static void reset_sections(Assembler *as) {
     as->output.pc = as->output.org;
 }
 
-/* Link sections: place sections without explicit .org after TEXT */
-static void link_sections(Assembler *as) {
-    /* Find TEXT section and its end address */
-    Section *text = find_section(as, "TEXT");
-    if (!text) return;
-    
-    /* Store old org values for symbol adjustment */
-    uint32_t old_orgs[MAX_SECTIONS];
-    for (int i = 0; i < as->num_sections; i++) {
-        old_orgs[i] = as->sections[i].org;
-    }
-    
-    uint32_t next_addr = text->org + text->size;
-    
-    /* Align to 4-byte boundary */
-    next_addr = (next_addr + 3) & ~3;
-    
-    /* Link order: RODATA, DATA, BSS, then any others */
-    const char *link_order[] = { "RODATA", "DATA", "BSS", NULL };
-    
-    for (int i = 0; link_order[i]; i++) {
-        Section *sec = find_section(as, link_order[i]);
-        if (sec && !sec->org_set && sec->size > 0) {
-            sec->org = next_addr;
-            next_addr += sec->size;
-            next_addr = (next_addr + 3) & ~3;  /* Align */
-        }
-    }
-    
-    /* Link any remaining sections */
-    for (int i = 0; i < as->num_sections; i++) {
-        Section *sec = &as->sections[i];
-        if (!sec->org_set && sec->size > 0 &&
-            strcmp(sec->name, "TEXT") != 0 &&
-            strcmp(sec->name, "RODATA") != 0 &&
-            strcmp(sec->name, "DATA") != 0 &&
-            strcmp(sec->name, "BSS") != 0) {
-            sec->org = next_addr;
-            next_addr += sec->size;
-            next_addr = (next_addr + 3) & ~3;
-        }
-    }
-    
-    /* Adjust symbol values for relocated sections */
-    for (int i = 0; i < as->num_symbols; i++) {
-        Symbol *sym = &as->symbols[i];
-        if (sym->defined && sym->section_index >= 0 && sym->section_index < as->num_sections) {
-            Section *sec = &as->sections[sym->section_index];
-            uint32_t old_org = old_orgs[sym->section_index];
-            if (sec->org != old_org) {
-                /* Adjust symbol by the section relocation delta */
-                sym->value = sym->value - old_org + sec->org;
-            }
-        }
-    }
-}
-
 static int assemble_file(Assembler *as, const char *filename) {
     /* Initialize default section if none exist */
     if (as->num_sections == 0) {
@@ -3321,7 +3152,7 @@ static int assemble_file(Assembler *as, const char *filename) {
         as->current_section = 0;
     }
     
-    /* Pass 1: collect symbols and determine section sizes */
+    /* Pass 1: collect symbols */
     as->pass = 1;
     as->file_depth = 0;
     reset_sections(as);
@@ -3330,10 +3161,7 @@ static int assemble_file(Assembler *as, const char *filename) {
         return 0;
     }
     
-    /* Link sections: place DATA/BSS/etc after TEXT */
-    link_sections(as);
-    
-    /* Pass 2: generate code with final addresses */
+    /* Pass 2: generate code */
     as->pass = 2;
     as->file_depth = 0;
     reset_sections(as);

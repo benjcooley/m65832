@@ -224,6 +224,31 @@ Allows running 6502 code anywhere in the address space.
 
 Accessible via TTA (T→A) and TAT (A→T) instructions.
 
+#### 3.1.9 Floating-Point Registers (F0-F15)
+
+The optional FPU provides **16 × 64-bit floating-point registers** for IEEE 754 arithmetic:
+
+| Registers | Width | Description |
+|-----------|-------|-------------|
+| F0-F15 | 64-bit | Floating-point data registers |
+
+Each register can hold:
+- **Double-precision** (IEEE 754 binary64): full 64 bits
+- **Single-precision** (IEEE 754 binary32): low 32 bits used, high 32 bits undefined after single-precision operations
+
+The FPU uses **two-operand destructive operations**:
+- Binary ops: `Fd = Fd op Fs` (e.g., FADD.D F0, F1 performs F0 = F0 + F1)
+- Unary ops: `Fd = op(Fs)` (e.g., FNEG.D F2, F3 performs F2 = -F3)
+
+FPU Register Calling Convention (suggested):
+| Registers | Usage |
+|-----------|-------|
+| F0-F7 | Argument passing / return values (caller-saved) |
+| F8-F11 | Temporaries (caller-saved) |
+| F12-F15 | Callee-saved |
+
+See [M65832_Instruction_Set.md](M65832_Instruction_Set.md#floating-point-instructions) for complete FPU instruction reference.
+
 ### 3.2 Status Register (P)
 
 The status register is a 14-bit internal register extending the 65816 model. The implementation stores flags in the following layout:
@@ -1905,10 +1930,47 @@ $02 $A2          LEA abs           ; A = effective address of abs
 $02 $A3          LEA abs,X         ; A = effective address of abs,X
 ```
 
-#### FPU Operations (Reserved Range)
+#### FPU Operations (16-register file, two-operand)
 ```
-$02 $B0-$BB      LDF/STF           ; FPU load/store operations
-$02 $C0-$E6      FPU ops           ; FPU arithmetic (reserved)
+; FPU instruction format: $02 [opcode] [reg-byte] [operands...]
+; Register byte: DDDD SSSS (dest << 4 | src)
+
+; Load/Store
+; For dp/abs/abs32: reg-byte low nibble = Fn. For (Rm): high nibble = Fn, low = Rm.
+$02 $B0 $0n dp     LDF Fn, dp        ; Load 64-bit from D+dp
+$02 $B1 $0n abs    LDF Fn, abs       ; Load 64-bit from B+abs
+$02 $B2 $0n dp     STF Fn, dp        ; Store 64-bit to D+dp
+$02 $B3 $0n abs    STF Fn, abs       ; Store 64-bit to B+abs
+$02 $B4 $nm        LDF Fn, (Rm)      ; Load 64-bit from [Rm]
+$02 $B5 $nm        STF Fn, (Rm)      ; Store 64-bit to [Rm]
+$02 $B6 $0n abs32  LDF Fn, abs32     ; Load 64-bit from abs32
+$02 $B7 $0n abs32  STF Fn, abs32     ; Store 64-bit to abs32
+
+; Single-precision arithmetic ($C0-$CA)
+$02 $C0 $ds      FADD.S Fd, Fs     ; Fd = Fd + Fs
+$02 $C1 $ds      FSUB.S Fd, Fs     ; Fd = Fd - Fs
+$02 $C2 $ds      FMUL.S Fd, Fs     ; Fd = Fd × Fs
+$02 $C3 $ds      FDIV.S Fd, Fs     ; Fd = Fd / Fs
+$02 $C4 $ds      FNEG.S Fd, Fs     ; Fd = -Fs
+$02 $C5 $ds      FABS.S Fd, Fs     ; Fd = |Fs|
+$02 $C6 $ds      FCMP.S Fd, Fs     ; Compare, set Z/C/N
+$02 $C7 $d0      F2I.S Fd          ; A = (int32)Fd
+$02 $C8 $d0      I2F.S Fd          ; Fd = (float32)A
+$02 $C9 $ds      FMOV.S Fd, Fs     ; Fd = Fs (copy)
+$02 $CA $ds      FSQRT.S Fd, Fs    ; Fd = √Fs
+
+; Double-precision arithmetic ($D0-$DA)
+$02 $D0-$DA      (same pattern as single, double-precision)
+
+; Register transfers ($E0-$E5)
+$02 $E0 $d0      FTOA Fd           ; A = Fd[31:0]
+$02 $E1 $d0      FTOT Fd           ; T = Fd[63:32]
+$02 $E2 $d0      ATOF Fd           ; Fd[31:0] = A
+$02 $E3 $d0      TTOF Fd           ; Fd[63:32] = T
+$02 $E4 $ds      FCVT.DS Fd, Fs    ; Fd = (double)Fs
+$02 $E5 $ds      FCVT.SD Fd, Fs    ; Fd = (single)Fs
+
+; Reserved ($CB-$CF, $DB-$DF, $E6-$EF) trap to software
 ```
 
 ---
