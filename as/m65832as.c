@@ -2051,6 +2051,12 @@ static int process_directive(Assembler *as, char *directive, char *operand) {
             error(as, "invalid ORG value");
             return 0;
         }
+        /* Check for address overlap - new org must not be less than current PC */
+        uint32_t current = get_pc(as);
+        if (value < current && as->pass == 2) {
+            error(as, ".ORG $%04X overlaps with previous code ending at $%04X", value, current);
+            return 0;
+        }
         set_pc(as, value);
         return 1;
     }

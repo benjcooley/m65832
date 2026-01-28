@@ -281,9 +281,9 @@ begin
                 when x"50" | x"51" | x"52" =>
                     INSTR_LEN <= "010";  -- FENCE/FENCER/FENCEW
                 
-                -- Extended status ops
+                -- Extended status ops (like REP/SEP but for extended P bits)
                 when x"60" | x"61" =>
-                    ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- REPE/SEPE #imm8
+                    IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "011";  -- REPE/SEPE #imm8
                 
                 -- Extended stack ops (32-bit)
                 when x"70" => IS_STACK <= '1'; REG_SRC <= "100"; INSTR_LEN <= "010";  -- PHD (32)
@@ -680,12 +680,8 @@ begin
                         when x"98" => IS_TRANSFER <= '1'; REG_SRC <= "010"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TYA
                         when x"BA" => IS_TRANSFER <= '1'; REG_SRC <= "011"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TSX
                         when x"9A" => IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "011"; INSTR_LEN <= "001";  -- TXS
-                        when x"9B" => IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "010"; INSTR_LEN <= "001";  -- TXY
-                        when x"BB" => IS_TRANSFER <= '1'; REG_SRC <= "010"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TYX
-                        when x"5B" => IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "100"; INSTR_LEN <= "001";  -- TCD
-                        when x"7B" => IS_TRANSFER <= '1'; REG_SRC <= "100"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TDC
-                        when x"1B" => IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "011"; INSTR_LEN <= "001";  -- TCS
-                        when x"3B" => IS_TRANSFER <= '1'; REG_SRC <= "011"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TSC
+                        -- Note: TXY ($9B), TYX ($BB), TCD ($5B), TDC ($7B), TCS ($1B), TSC ($3B)
+                        -- have cc=11 so are handled in the "11" group above
                         
                         -- Control
                         when x"EA" => IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- NOP
@@ -774,7 +770,7 @@ begin
                     end case;
                     
                 when "11" =>
-                    -- Group 3: 65816 new addressing modes
+                    -- Group 3: 65816 new addressing modes and special opcodes
                     if IR = x"CB" then
                         IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- WAI
                     elsif IR = x"DB" then
@@ -783,6 +779,19 @@ begin
                         IS_RTL <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";  -- RTL
                     elsif IR = x"FB" then
                         IS_XCE <= '1'; IS_FLAG_OP <= '1'; INSTR_LEN <= "001";  -- XCE
+                    -- Stack pointer transfers (these have cc=11)
+                    elsif IR = x"1B" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "011"; INSTR_LEN <= "001";  -- TCS
+                    elsif IR = x"3B" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "011"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TSC
+                    elsif IR = x"5B" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "000"; REG_DST <= "100"; INSTR_LEN <= "001";  -- TCD
+                    elsif IR = x"7B" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "100"; REG_DST <= "000"; INSTR_LEN <= "001";  -- TDC
+                    elsif IR = x"9B" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "001"; REG_DST <= "010"; INSTR_LEN <= "001";  -- TXY
+                    elsif IR = x"BB" then
+                        IS_TRANSFER <= '1'; REG_SRC <= "010"; REG_DST <= "001"; INSTR_LEN <= "001";  -- TYX
                     else
                         IS_ALU_OP <= '1';
                         ALU_OP <= aaa;

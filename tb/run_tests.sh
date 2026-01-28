@@ -39,7 +39,7 @@ fi
 
 case " ${modules} " in
   *" all "*)
-    modules="mmu core_smoke core timer coprocessor mx65_illegal interleave coprocessor_soak maincore_timeslice"
+    modules="mmu core_smoke core stack32 timer coprocessor mx65_illegal interleave coprocessor_soak maincore_timeslice"
     ;;
 esac
 
@@ -64,6 +64,9 @@ for mod in ${modules}; do
       ;;
     core)
       sources="${sources} tb/tb_m65832_core.vhd"
+      ;;
+    stack32)
+      sources="${sources} tb/tb_m65832_stack32.vhd"
       ;;
     timer)
       sources="${sources} tb/tb_m65832_timer.vhd"
@@ -103,6 +106,9 @@ for mod in ${modules}; do
       ;;
     core)
       run_tb tb_M65832_Core 1ms "Core" "${idx}" "${total}"
+      ;;
+    stack32)
+      run_tb tb_M65832_Stack32 500us "Stack32" "${idx}" "${total}"
       ;;
     timer)
       run_tb tb_M65832_Timer 1ms "Timer" "${idx}" "${total}"

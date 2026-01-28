@@ -1,5 +1,5 @@
 // Test: stdlib atoi() with negative - simple version
-// Expected: atoi("-50") returns 50 (absolute value)
+// Expected: 50
 
 int atoi_neg(const char *s) {
     int result = 0;

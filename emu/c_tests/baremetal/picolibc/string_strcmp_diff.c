@@ -1,5 +1,5 @@
 // Test: string strcmp() with different strings
-// Expected: strcmp("abc", "abd") < 0, return 1 if correct
+// Expected: 1
 
 int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {

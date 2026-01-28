@@ -23,11 +23,12 @@ LLVM_BUILD_FAST = os.path.join(LLVM_ROOT, "build-fast", "bin")
 LLVM_BUILD_DEFAULT = os.path.join(LLVM_ROOT, "build", "bin")
 LLVM_BUILD = os.environ.get("LLVM_BUILD", LLVM_BUILD_FAST if os.path.exists(os.path.join(LLVM_BUILD_FAST, "clang")) else LLVM_BUILD_DEFAULT)
 CLANG = os.path.join(LLVM_BUILD, "clang")
-LLD = os.path.join(LLVM_BUILD, "ld.lld")
-EMU = "/Users/benjamincooley/projects/M65832/emu/m65832emu"
+# LLD is only in the full build directory
+LLD = os.path.join(LLVM_BUILD_DEFAULT, "ld.lld")
+EMU = "/Users/benjamincooley/projects/m65832/emu/m65832emu"
 SYSROOT = "/Users/benjamincooley/projects/m65832-sysroot"
 PICOLIBC_TEST = "/Users/benjamincooley/projects/picolibc-m65832/test"
-CUSTOM_TESTS = "/Users/benjamincooley/projects/M65832/emu/c_tests/baremetal/picolibc"
+CUSTOM_TESTS = "/Users/benjamincooley/projects/m65832/emu/c_tests/baremetal/picolibc"
 
 # Colors (gtest style)
 GREEN = "\033[32m"

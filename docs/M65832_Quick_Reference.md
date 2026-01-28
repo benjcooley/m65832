@@ -178,31 +178,33 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 | BRL rel16 | Always (16-bit) | $82 |
 
 ### Jump/Call
-| Instruction | Operation | Opcode |
-|-------------|-----------|--------|
-| JMP abs | PC = B + abs | $4C |
-| JMP (abs) | PC = [B + abs] | $6C |
-| JMP (abs,X) | PC = [B + abs + X] | $7C |
-| JML long | PC = long | $5C |
-| JSR abs | push PC-1; PC = abs | $20 |
-| JSL long | push PC; PC = long | $22 |
-| RTS | PC = pull + 1 | $60 |
-| RTL | PC = pull (long) | $6B |
-| RTI | P = pull; PC = pull | $40 |
+| Instruction | Operation | Opcode | Notes |
+|-------------|-----------|--------|-------|
+| JMP abs | PC = B + abs | $4C | |
+| JMP (abs) | PC = [B + abs] | $6C | |
+| JMP (abs,X) | PC = [B + abs + X] | $7C | |
+| JML long | PC = long | $5C | |
+| JSR abs | push32 PC-1; PC = B + abs | $20 | 32-bit call in 32-bit mode |
+| JSL long | *Reserved* | $22 | Reserved for M65864 (64-bit) |
+| RTS | PC = pull32 + 1 | $60 | 32-bit return in 32-bit mode |
+| RTL | *Reserved* | $6B | Reserved for M65864 (64-bit) |
+| RTI | P = pull; PC = pull | $40 | |
 
 ### Stack
-| Instruction | Operation | Opcode |
-|-------------|-----------|--------|
-| PHA / PLA | Push/Pull A | $48/$68 |
-| PHX / PLX | Push/Pull X | $DA/$FA |
-| PHY / PLY | Push/Pull Y | $5A/$7A |
-| PHP / PLP | Push/Pull P | $08/$28 |
-| PHD / PLD | Push/Pull D | $0B/$2B |
-| PHB / PLB | Push/Pull B | $8B/$AB |
-| PHK | Push program bank | $4B |
-| PEA #imm16 | Push imm16 | $F4 |
-| PEI (dp) | Push [dp] | $D4 |
-| PER rel16 | Push PC + rel | $62 |
+**Note:** In 32-bit mode, ALL stack operations push/pull 32 bits.
+
+| Instruction | Operation | Opcode | 32-bit mode |
+|-------------|-----------|--------|-------------|
+| PHA / PLA | Push/Pull A | $48/$68 | 32-bit |
+| PHX / PLX | Push/Pull X | $DA/$FA | 32-bit |
+| PHY / PLY | Push/Pull Y | $5A/$7A | 32-bit |
+| PHP / PLP | Push/Pull P | $08/$28 | 32-bit (P zero-extended) |
+| PHD / PLD | Push/Pull D | $0B/$2B | 32-bit |
+| PHB / PLB | Push/Pull B | $8B/$AB | 32-bit |
+| PHK | Push program bank | $4B | 8-bit (legacy) |
+| PEA #imm16 | Push imm16 | $F4 | 32-bit (zero-extended) |
+| PEI (dp) | Push [dp] | $D4 | 32-bit |
+| PER rel16 | Push PC + rel | $62 | 32-bit |
 
 ### Transfers
 | Instruction | Operation | Opcode | Flags |
@@ -403,14 +405,17 @@ Bits 4-0: count (0-31), or $1F for shift by A.
 | LEA abs,X | $02 $A3 | A = B + abs + X |
 
 ### 32-bit Stack (Extended)
+**Note:** In 32-bit mode, standard push/pull instructions automatically use 32-bit widths.
+These extended instructions are for explicit 32-bit operations in 8/16-bit modes.
+
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
-| PHD | $02 $70 | Push D (32-bit) |
-| PLD | $02 $71 | Pull D (32-bit) |
-| PHB | $02 $72 | Push B (32-bit) |
-| PLB | $02 $73 | Pull B (32-bit) |
-| PHVBR | $02 $74 | Push VBR |
-| PLVBR | $02 $75 | Pull VBR |
+| PHD32 | $02 $70 | Push D (explicit 32-bit) |
+| PLD32 | $02 $71 | Pull D (explicit 32-bit) |
+| PHB32 | $02 $72 | Push B (explicit 32-bit) |
+| PLB32 | $02 $73 | Pull B (explicit 32-bit) |
+| PHVBR | $02 $74 | Push VBR (32-bit) |
+| PLVBR | $02 $75 | Pull VBR (32-bit) |
 
 ### Floating Point (16 registers: F0-F15)
 

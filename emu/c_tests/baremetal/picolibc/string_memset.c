@@ -1,5 +1,5 @@
 // Test: string memset()
-// Expected: memset fills with 0x42, sum = 0x42*4 = 264
+// Expected: 264
 
 typedef unsigned int size_t;
 

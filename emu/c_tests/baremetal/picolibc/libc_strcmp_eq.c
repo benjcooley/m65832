@@ -1,4 +1,5 @@
-
+// Test: strcmp equal strings
+// Expected: 1
 #include <string.h>
 char s1[] = "abc";
 char s2[] = "abc";

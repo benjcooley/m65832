@@ -877,9 +877,17 @@ Pushes return address (PC-1) and jumps.
 |------|--------|--------|-------|--------|
 | Absolute | JSR abs | $20 | 3 | 6 |
 
+**32-bit mode behavior:**
+- Pushes full 32-bit return address (PC-1) to stack
+- Target address is B + abs (32-bit absolute addressing)
+- Use `JSR B+addr` syntax in assembler
+
 #### JSL - Jump to Subroutine Long
 
-Pushes full 24/32-bit return address.
+**Reserved/Illegal in 32-bit mode.** Use JSR instead.
+Opcode $22 is reserved for future M65864 (64-bit) extensions.
+
+In 8/16-bit modes: Pushes 24-bit return address (bank + PC).
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
@@ -893,9 +901,16 @@ Pushes full 24/32-bit return address.
 |------|--------|--------|-------|--------|
 | Implied | RTS | $60 | 1 | 6 |
 
+**32-bit mode behavior:**
+- Pulls full 32-bit return address from stack
+- Adds 1 to get next instruction address
+
 #### RTL - Return from Subroutine Long
 
-Returns from JSL, pulling full return address.
+**Reserved/Illegal in 32-bit mode.** Use RTS instead.
+Opcode $6B is reserved for future M65864 (64-bit) extensions.
+
+In 8/16-bit modes: Pulls 24-bit return address (bank + PC).
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
@@ -915,36 +930,39 @@ In native mode, also restores program bank.
 
 ### Stack Instructions
 
+**32-bit Mode:** In 32-bit mode (M=10), ALL stack operations push/pull 32 bits.
+This ensures consistent stack alignment and simplifies ABI design.
+
 #### Push Instructions
 
-| Instruction | Opcode | Description |
-|-------------|--------|-------------|
-| PHA | $48 | Push A (width per M flag) |
-| PHX | $DA | Push X (width per X flag) |
-| PHY | $5A | Push Y (width per X flag) |
-| PHP | $08 | Push P (processor status) |
-| PHD | $0B | Push D (16-bit in 65816 mode) |
-| PHB | $8B | Push B (data bank in 65816, 32-bit in M65832) |
-| PHK | $4B | Push program bank |
+| Instruction | Opcode | 8/16-bit Mode | 32-bit Mode |
+|-------------|--------|---------------|-------------|
+| PHA | $48 | Width per M flag | 32-bit |
+| PHX | $DA | Width per X flag | 32-bit |
+| PHY | $5A | Width per X flag | 32-bit |
+| PHP | $08 | 8-bit | 32-bit (P zero-extended) |
+| PHD | $0B | 16-bit | 32-bit |
+| PHB | $8B | 8-bit (bank) | 32-bit (full B) |
+| PHK | $4B | 8-bit | 8-bit (legacy) |
 
 #### Pull Instructions
 
-| Instruction | Opcode | Description | Flags |
-|-------------|--------|-------------|-------|
-| PLA | $68 | Pull A | N, Z |
-| PLX | $FA | Pull X | N, Z |
-| PLY | $7A | Pull Y | N, Z |
-| PLP | $28 | Pull P | All |
-| PLD | $2B | Pull D | N, Z |
-| PLB | $AB | Pull B | N, Z |
+| Instruction | Opcode | 8/16-bit Mode | 32-bit Mode | Flags |
+|-------------|--------|---------------|-------------|-------|
+| PLA | $68 | Width per M flag | 32-bit | N, Z |
+| PLX | $FA | Width per X flag | 32-bit | N, Z |
+| PLY | $7A | Width per X flag | 32-bit | N, Z |
+| PLP | $28 | 8-bit | 32-bit | All |
+| PLD | $2B | 16-bit | 32-bit | N, Z |
+| PLB | $AB | 8-bit (bank) | 32-bit (full B) | N, Z |
 
 #### Special Stack Instructions
 
-| Instruction | Opcode | Bytes | Description |
-|-------------|--------|-------|-------------|
-| PEA #imm16 | $F4 | 3 | Push Effective Absolute |
-| PEI (dp) | $D4 | 2 | Push Effective Indirect |
-| PER rel16 | $62 | 3 | Push Effective Relative |
+| Instruction | Opcode | Bytes | 8/16-bit Mode | 32-bit Mode |
+|-------------|--------|-------|---------------|-------------|
+| PEA #imm16 | $F4 | 3 | Push 16-bit | Push 32-bit (zero-ext) |
+| PEI (dp) | $D4 | 2 | Push 16-bit | Push 32-bit |
+| PER rel16 | $62 | 3 | Push 16-bit | Push 32-bit |
 
 ---
 

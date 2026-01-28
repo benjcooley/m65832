@@ -290,21 +290,31 @@ Internal P Register (14 bits):
 | 12 | R | Register Window: 1=DP accesses register file, 0=DP accesses memory |
 | 13 | K | Compatibility: 1=illegal opcodes become NOP |
 
-#### 65816-Compatible Push/Pull Format
+#### Stack Operations and P Register Format
 
-When pushed to the stack (PHP/PLP), flags are packed into one or two bytes in a 65816-compatible format:
+**32-bit Mode:** In 32-bit mode (M=10), ALL stack operations push/pull 32 bits.
+This includes PHP/PLP, PHA/PLA, PHX/PLX, PHY/PLY, PHD/PLD, PHB/PLB, JSR/RTS, RTL.
 
+When pushed to the stack (PHP/PLP), flags are packed as follows:
+
+**8-bit mode (emulation):** Single byte pushed
 ```
-Standard byte (always pushed):
  Bit 7   6   5   4   3   2   1   0
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
     │ N │ V │ 1 │ B │ D │ I │ Z │ C │
     └───┴───┴───┴───┴───┴───┴───┴───┘
+```
 
-Extended byte (pushed in native mode):
- Bit 7   6   5   4   3   2   1   0
+**32-bit mode:** Full 16-bit P register pushed (zero-extended to 32 bits)
+```
+ Bits 31-16: Zero
+ Bits 15-8 (extended byte):
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
     │M1 │M0 │X1 │X0 │ E │ S │ R │ K │
+    └───┴───┴───┴───┴───┴───┴───┴───┘
+ Bits 7-0 (standard byte):
+    ┌───┬───┬───┬───┬───┬───┬───┬───┐
+    │ N │ V │ 1 │ B │ D │ I │ Z │ C │
     └───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
@@ -1070,30 +1080,47 @@ FENCEW          Order all stores
 
 #### REPE - REP for Extended Flags
 ```
-REPE #imm8      Clear bits in extended P where imm8 bit is 1
+REPE #imm8      Clear bits in P[7:0] where imm8 bit is 1
 ```
-Affects bits M1, M0, X1, X0, E, S, R, K.
+Like REP but as an extended instruction. Used to modify M65832's width flags:
+- Bit 7: M1 (clear with REPE #$80)
+- Bit 6: M0 (clear with REPE #$40)
+- Bit 5: X1 (clear with REPE #$20)
+- Bit 4: X0 (clear with REPE #$10)
+
+Example: Enter 32-bit mode (M=10): `REPE #$40` then `SEPE #$80`
 
 #### SEPE - SEP for Extended Flags
 ```
-SEPE #imm8      Set bits in extended P where imm8 bit is 1
+SEPE #imm8      Set bits in P[7:0] where imm8 bit is 1
 ```
-Affects bits M1, M0, X1, X0, E, S, R, K.
+Like SEP but as an extended instruction. Used to modify M65832's width flags.
 
-### 8.18 Extended: 32-bit Stack Operations
+### 8.18 Stack Operations in 32-bit Mode
 
-When using the extended opcode page ($02 prefix):
+**In 32-bit mode (M=10), ALL standard stack operations automatically use 32-bit widths:**
+- PHA/PLA, PHX/PLX, PHY/PLY: 32-bit
+- PHP/PLP: 32-bit (P is zero-extended to 32 bits)
+- PHD/PLD, PHB/PLB: 32-bit
+- JSR/RTS, RTL: Push/pull 32-bit return address
+- PEA/PEI/PER: 32-bit (values zero-extended if smaller)
+
+**JSL is illegal (reserved) in 32-bit mode** - use JSR instead.
+
+#### Explicit 32-bit Stack (Extended Prefix)
+
+For explicit 32-bit stack operations in 8/16-bit modes, use the extended opcode page ($02 prefix):
 
 ```
-PHD             Push D (32-bit direct page base)
-PLD             Pull D
-PHB             Push B (32-bit absolute base)
-PLB             Pull B
-PHVBR           Push VBR (32-bit virtual base register)
-PLVBR           Pull VBR
+PHD32           Push D (explicit 32-bit)     $02 $70
+PLD32           Pull D (explicit 32-bit)     $02 $71
+PHB32           Push B (explicit 32-bit)     $02 $72
+PLB32           Pull B (explicit 32-bit)     $02 $73
+PHVBR           Push VBR (32-bit)            $02 $74
+PLVBR           Pull VBR (32-bit)            $02 $75
 ```
 
-These always push/pull full 32-bit values regardless of width flags.
+These always push/pull full 32-bit values regardless of current width flags.
 
 ---
 

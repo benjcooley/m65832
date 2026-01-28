@@ -19,7 +19,7 @@ if [ -x "$LLD_FAST" ]; then
 else
     LLD="$LLD_DEFAULT"
 fi
-EMU="/Users/benjamincooley/projects/M65832/emu/m65832emu"
+EMU="/Users/benjamincooley/projects/m65832/emu/m65832emu"
 SYSROOT="/Users/benjamincooley/projects/m65832-sysroot"
 
 TEST_FILE="$1"

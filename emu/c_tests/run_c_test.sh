@@ -61,7 +61,17 @@ fi
     echo ""
     echo "; === Startup code ==="
     echo "_crt_start:"
+    echo "    ; Initialize Direct Page to $4000"
+    echo "    LDA #\$4000"
+    echo "    TCD"
+    echo "    ; Initialize Stack Pointer to $FFFF"
+    echo "    LDX #\$FFFF"
+    echo "    TXS"
+    echo "    ; Initialize B register to 0 for absolute addressing"
+    echo "    SB #\$0000"
+    echo "    ; Call main"
     echo "    JSR B+_c_main"
+    echo "    ; Get return value from R0 and stop"
     echo "    LDA R0"
     echo "    STP"
     echo ""
@@ -97,8 +107,9 @@ if ! $ASM "$WORKDIR/${BASE}_combined.s" -o "$WORKDIR/${BASE}.bin" 2>&1; then
 fi
 
 # Step 4: Run on emulator (time the run)
+# Load binary at 0x1000 (matching .org $1000) and set entry point
 START_TIME=$(date +%s)
-OUTPUT=$($EMU -c "$CYCLES" -s "$WORKDIR/${BASE}.bin" 2>&1)
+OUTPUT=$($EMU -o 0x1000 -e 0x1000 -c "$CYCLES" -s "$WORKDIR/${BASE}.bin" 2>&1)
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 

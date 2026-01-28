@@ -194,6 +194,8 @@ architecture rtl of M65832_Core is
     signal ILLEGAL_OP                              : std_logic;
     signal illegal_regalu                          : std_logic;
     signal illegal_dp_align                        : std_logic;
+    signal illegal_jsl                             : std_logic;  -- JSL illegal in 32-bit mode
+    signal illegal_rtl                             : std_logic;  -- RTL illegal in 32-bit mode
     signal dp_addr_unaligned                       : std_logic;
     
     ---------------------------------------------------------------------------
@@ -683,6 +685,11 @@ M_width_eff <= WIDTH_32 when ext_ldq = '1' else
 X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
+    -- JSL/RTL are illegal in 32-bit mode (use JSR/RTS instead)
+    -- Reserved for future M65864 (64-bit) extensions
+    illegal_jsl <= '1' when (IS_JSL = '1' and W_mode = '1') else '0';
+    illegal_rtl <= '1' when (IS_RTL = '1' and W_mode = '1') else '0';
+    
     -- DP alignment check for R_mode: DP address must be multiple of 4
     -- dp_addr_unaligned is computed in dp_reg_index_next process
     illegal_dp_align <= '1' when (R_mode = '1' and dp_addr_unaligned = '1' and
@@ -961,7 +968,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
                     state <= ST_PUSH;
-                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1') and ext_fpu_trap = '0' and 
+                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1' or illegal_jsl = '1' or illegal_rtl = '1') and ext_fpu_trap = '0' and 
                       (state = ST_DECODE or state = ST_ADDR1) and
                       int_in_progress = '0' and rti_in_progress = '0' then
                     int_in_progress <= '1';
@@ -1077,7 +1084,8 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 state <= ST_FETCH;
                             elsif IS_TRANSFER = '1' then
                                 state <= ST_EXECUTE;
-                            elsif IS_FLAG_OP = '1' and IS_REP = '0' and IS_SEP = '0' then
+                            elsif IS_FLAG_OP = '1' and IS_REP = '0' and IS_SEP = '0' and 
+                                  ext_repe = '0' and ext_sepe = '0' then
                                 state <= ST_EXECUTE;
                             elsif IS_BRANCH = '1' then
                                 state <= ST_BRANCH;
@@ -1119,7 +1127,18 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 end if;
                             elsif ADDR_MODE = "0000" then
                                 -- Implied/Accumulator
-                                state <= ST_EXECUTE;
+                                if IS_RTS = '1' then
+                                    -- RTS: pull return address from stack (32-bit in 32-bit mode, 16-bit otherwise)
+                                    data_byte_count <= (others => '0');
+                                    state <= ST_PULL;
+                                elsif IS_RTL = '1' and W_mode = '0' then
+                                    -- RTL in 8/16-bit mode: pull 24-bit return address (bank + addr)
+                                    -- Note: RTL is illegal in 32-bit mode, caught by illegal_rtl
+                                    data_byte_count <= (others => '0');
+                                    state <= ST_PULL;
+                                else
+                                    state <= ST_EXECUTE;
+                                end if;
                             elsif ADDR_MODE = "0001" then
                                 -- Immediate
                                 state <= ST_READ;
@@ -1420,10 +1439,11 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                 when "0101" | "0110" | "0111" =>
                                     -- Absolute modes - done after 2 bytes
                                     if IS_JSR = '1' then
-                                        -- JSR: capture return address (PC of high byte)
-                                        jsr_return <= PC_reg;
-                                    end if;
-                                    if ext_lea = '1' then
+                                        -- JSR: capture return address, then push it to stack
+                                        jsr_return <= std_logic_vector(unsigned(PC_reg) - 1);
+                                        data_byte_count <= (others => '0');
+                                        state <= ST_PUSH;  -- Push return address, then execute
+                                    elsif ext_lea = '1' then
                                         state <= ST_EXECUTE;
                                     elsif IS_ALU_OP = '1' and ALU_OP = "100" then
                                         state <= ST_WRITE;
@@ -1901,12 +1921,18 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                         if stack_width_eff = WIDTH_8 or data_byte_count = "011" then
                             if int_in_progress = '1' then
                                 state <= ST_INT_NEXT;
+                            elsif IS_JSR = '1' then
+                                -- JSR: after pushing return address, jump to target
+                                state <= ST_EXECUTE;
                             else
                                 state <= ST_FETCH;
                             end if;
                         elsif stack_width_eff = WIDTH_16 and data_byte_count = "001" then
                             if int_in_progress = '1' then
                                 state <= ST_INT_NEXT;
+                            elsif IS_JSR = '1' then
+                                -- JSR: after pushing return address, jump to target
+                                state <= ST_EXECUTE;
                             else
                                 state <= ST_FETCH;
                             end if;
@@ -3300,8 +3326,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                    M_width_eff;
     
 
-    process(IR, M_width_eff, X_width_eff, A_reg, X_reg, Y_reg, D_reg, B_reg, VBR_reg, P_reg, PC_reg, data_buffer,
-            ext_stack32_push, ext_stack32_pull)
+    process(IR, IR_EXT, M_width_eff, X_width_eff, W_mode, A_reg, X_reg, Y_reg, D_reg, B_reg, VBR_reg, P_reg, PC_reg, data_buffer,
+            ext_stack32_push, ext_stack32_pull, jsr_return)
     begin
         stack_width <= WIDTH_8;
         stack_write_reg <= (others => '0');
@@ -3309,13 +3335,57 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
         if ext_stack32_push = '1' or ext_stack32_pull = '1' then
             stack_width <= WIDTH_32;
         elsif IR = x"48" or IR = x"68" then
+            -- PHA/PLA: 32-bit in 32-bit mode, else per M flag
             stack_width <= M_width_eff;
         elsif IR = x"DA" or IR = x"FA" or IR = x"5A" or IR = x"7A" then
+            -- PHX/PLX/PHY/PLY: 32-bit in 32-bit mode, else per X flag
             stack_width <= X_width_eff;
+        elsif IR = x"08" or IR = x"28" then
+            -- PHP/PLP: 32-bit in 32-bit mode, else 8-bit (65816 compat)
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_8;
+            end if;
         elsif IR = x"0B" or IR = x"2B" then
-            stack_width <= WIDTH_16;
+            -- PHD/PLD: 32-bit in 32-bit mode, else 16-bit (65816 compat)
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_16;
+            end if;
+        elsif IR = x"8B" or IR = x"AB" then
+            -- PHB/PLB: 32-bit in 32-bit mode, else 8-bit (65816 compat)
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_8;
+            end if;
         elsif IR = x"F4" or IR = x"D4" or IR = x"62" then
-            stack_width <= WIDTH_16;
+            -- PEA/PEI/PER: 32-bit in 32-bit mode, else 16-bit
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_16;
+            end if;
+        elsif IR = x"20" or IR = x"FC" then
+            -- JSR abs / JSR (abs,X): 32-bit in 32-bit mode, else 16-bit
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_16;
+            end if;
+        elsif IR = x"60" then
+            -- RTS: 32-bit in 32-bit mode, else 16-bit
+            if W_mode = '1' then
+                stack_width <= WIDTH_32;
+            else
+                stack_width <= WIDTH_16;
+            end if;
+        elsif IR = x"6B" then
+            -- RTL: illegal in 32-bit mode, 24-bit (3 bytes) in 8/16-bit mode
+            -- Note: In 32-bit mode, illegal_rtl prevents this from being used
+            stack_width <= WIDTH_32;  -- Use 32-bit width but only pull 3 bytes
         else
             stack_width <= WIDTH_8;
         end if;
@@ -3331,7 +3401,12 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                 stack_write_reg <= (others => '0');
             end if;
         elsif IR = x"08" then
-            stack_write_reg <= x"000000" & P_reg(7 downto 0);
+            -- PHP: in 32-bit mode push full 16-bit P (zero-extended), else 8-bit
+            if W_mode = '1' then
+                stack_write_reg <= x"0000" & P_reg;
+            else
+                stack_write_reg <= x"000000" & P_reg(7 downto 0);
+            end if;
         elsif IR = x"48" then
             stack_write_reg <= A_reg;
         elsif IR = x"DA" then
@@ -3350,6 +3425,10 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                 signed(PC_reg) + resize(signed(data_buffer(15 downto 0)), 32));
         elsif IR = x"F4" or IR = x"D4" then
             stack_write_reg <= data_buffer;
+        elsif IR = x"20" or IR = x"FC" then
+            -- JSR: push return address (PC-1, but PC already points past instruction)
+            -- jsr_return holds the correct return address captured during address fetch
+            stack_write_reg <= jsr_return;
         else
             stack_write_reg <= A_reg;
         end if;
@@ -3422,6 +3501,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
             else fpu_int_result when (fpu_write_a = '1')
             else X_reg when (IS_TRANSFER = '1' and REG_SRC = "001" and REG_DST = "000")  -- TXA
             else Y_reg when (IS_TRANSFER = '1' and REG_SRC = "010" and REG_DST = "000")  -- TYA
+            else SP_reg when (IS_TRANSFER = '1' and REG_SRC = "011" and REG_DST = "000")  -- TSC
             else eff_addr when (ext_lea = '1')
             else exec_result;
     
@@ -3473,8 +3553,10 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
               else '0';
     
     -- Stack pointer
-    SP_in <= (others => '0');
-    SP_load <= '0';
+    SP_in <= A_reg when (IS_TRANSFER = '1' and REG_DST = "011")  -- TCS: A -> SP
+             else (others => '0');
+    SP_load <= '1' when (state = ST_EXECUTE and IS_TRANSFER = '1' and REG_DST = "011")  -- TCS
+               else '0';
     SP_inc <= '1' when state = ST_PULL else '0';
     SP_dec <= '1' when state = ST_PUSH else '0';
     
@@ -3626,28 +3708,42 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     
     dp_reg_index_next_plus1 <= std_logic_vector(unsigned(dp_reg_index_next) + 1);
     
+    -- REP/SEP and REPE/SEPE all operate on lower 8 bits of P
+    -- In M65832: bits 6-7 are M0/M1, bits 4-5 are X0/X1
     p_next <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and (not data_buffer(7 downto 0)))
               when (IS_REP = '1' or ext_repe = '1') else
               P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or data_buffer(7 downto 0))
               when (IS_SEP = '1' or ext_sepe = '1') else
               P_reg;
     
-    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg, int_step, rti_step, IS_XCE)
+    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg, int_step, rti_step, IS_XCE, W_mode)
     begin
         p_override <= P_reg;
         p_override_valid <= '0';
         if state = ST_EXECUTE and stack_is_pull = '1' and IR = x"28" then
-            p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            -- PLP: in 32-bit mode load full 16-bit P from data_buffer, else 8-bit
+            if W_mode = '1' then
+                p_override <= data_buffer(P_WIDTH-1 downto 0);
+            else
+                p_override <= P_reg(P_WIDTH-1 downto 8) & data_buffer(7 downto 0);
+            end if;
             p_override_valid <= '1';
         elsif state = ST_EXECUTE and IS_XCE = '1' then
             p_override <= P_reg;
             p_override(P_C) <= P_reg(P_E);
             p_override(P_E) <= P_reg(P_C);
             if P_reg(P_C) = '1' then
+                -- Entering emulation mode: force M/X to 8-bit (11 = compat mode)
                 p_override(P_M0) <= '1';
                 p_override(P_M1) <= '1';
                 p_override(P_X0) <= '1';
                 p_override(P_X1) <= '1';
+            else
+                -- Entering native mode: set M/X to 16-bit (01) for 65816 compatibility
+                p_override(P_M0) <= '1';
+                p_override(P_M1) <= '0';
+                p_override(P_X0) <= '1';
+                p_override(P_X1) <= '0';
             end if;
             p_override_valid <= '1';
         elsif state = ST_RTI_NEXT and rti_step = to_unsigned(0, rti_step'length) then
@@ -3766,8 +3862,10 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     pc_direct <= DATA_IN & data_buffer(23 downto 0) when state = ST_VECTOR4
                  else data_buffer when (state = ST_RTI_NEXT and rti_step = to_unsigned(1, rti_step'length))
                  else data_buffer when (state = ST_EXECUTE and IS_JML = '1' and ADDR_MODE = "1011")
-                 else eff_addr when (state = ST_EXECUTE and (IS_JML = '1' or IS_JSL = '1'))
-                 else std_logic_vector(unsigned(jsr_return) + 1);
+                 else eff_addr when (state = ST_EXECUTE and IS_JML = '1')
+                 else eff_addr when (state = ST_EXECUTE and IS_JSR = '1')  -- JSR: jump to target
+                 else std_logic_vector(unsigned(data_buffer) + 1) when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1'))
+                 else std_logic_vector(unsigned(jsr_return) + 1);  -- Fallback (shouldn't be used)
     
     is_indirect_addr <= '1' when ((ADDR_MODE = "1000" and IS_JMP_d = '0') or
                                   ADDR_MODE = "1001" or ADDR_MODE = "1010" or
@@ -3883,8 +3981,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                             is_fpu_ext = '0') or
                            ((state = ST_READ or state = ST_READ2 or state = ST_READ3 or state = ST_READ4) and
                             ADDR_MODE = "0001")) -- Immediate mode
-               else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSL = '1'))
-                   -- RTS/RTL uses stored return, JML/JSL use eff_addr via pc_direct
+               else "111" when (state = ST_EXECUTE and (IS_RTS = '1' or IS_RTL = '1' or IS_JML = '1' or IS_JSR = '1'))
+                   -- RTS/RTL uses pulled return address via pc_direct, JML/JSR use eff_addr via pc_direct
                else "000";
     PC_DEC <= '0';
     ADDR_CTRL <= (others => '0');
