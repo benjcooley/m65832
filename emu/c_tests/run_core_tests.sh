@@ -31,6 +31,8 @@ SKIPPED=0
 #   // Expected: 0x30
 #   // Expected: 42
 #   // Expected: -1
+#   // Expected: ... = 25 (0x19)
+# Prefers hex in parentheses if present, otherwise first number
 extract_expected() {
     local file="$1"
     local line expected hexval decval
@@ -39,15 +41,23 @@ extract_expected() {
         echo ""
         return
     fi
-    expected=$(echo "$line" | sed -E 's/.*Expected:[[:space:]]*//')
-    expected=$(echo "$expected" | sed -E 's/[^0-9a-fA-FxX+-].*$//')
-    if [[ "$expected" =~ ^0[xX][0-9a-fA-F]+$ ]]; then
-        hexval="${expected#0x}"
-        hexval="${hexval#0X}"
+    
+    # Try to extract hex value from parentheses like (0x19)
+    if [[ "$line" =~ \(0[xX]([0-9a-fA-F]+)\) ]]; then
+        hexval="${BASH_REMATCH[1]}"
         decval=$((16#$hexval))
+    # Try bare hex at start like "Expected: 0x30"
+    elif [[ "$line" =~ Expected:[[:space:]]*0[xX]([0-9a-fA-F]+) ]]; then
+        hexval="${BASH_REMATCH[1]}"
+        decval=$((16#$hexval))
+    # Try decimal number at start like "Expected: 42"
+    elif [[ "$line" =~ Expected:[[:space:]]*(-?[0-9]+) ]]; then
+        decval="${BASH_REMATCH[1]}"
     else
-        decval=$((expected))
+        echo ""
+        return
     fi
+    
     if [ "$decval" -lt 0 ]; then
         decval=$((decval + 0x100000000))
     fi
