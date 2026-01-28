@@ -3,8 +3,16 @@
 #
 # Usage: run_c_test.sh <test.c> [expected_result] [cycles]
 
-CLANG="/Users/benjamincooley/projects/llvm-m65832/build/bin/clang"
-LLC="/Users/benjamincooley/projects/llvm-m65832/build/bin/llc"
+LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
+LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+    LLVM_BUILD="$LLVM_BUILD_FAST"
+else
+    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+fi
+CLANG="$LLVM_BUILD/bin/clang"
+LLC="$LLVM_BUILD/bin/llc"
 ASM="../../as/m65832as"
 EMU="../m65832emu"
 
@@ -27,7 +35,7 @@ if [ "$EXT" = "c" ]; then
     # C file -> clang -> assembly
     if [ ! -f "$CLANG" ]; then
         echo "FAIL: clang not found at $CLANG"
-        echo "Build with: cd llvm-m65832 && make -C build clang"
+        echo "Build with: cd llvm-m65832 && ninja -C build-fast clang"
         exit 1
     fi
     if ! $CLANG -target m65832 -S -O2 -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.s" 2>&1; then
@@ -88,8 +96,11 @@ if ! $ASM "$WORKDIR/${BASE}_combined.s" -o "$WORKDIR/${BASE}.bin" 2>&1; then
     exit 1
 fi
 
-# Step 4: Run on emulator
+# Step 4: Run on emulator (time the run)
+START_TIME=$(date +%s)
 OUTPUT=$($EMU -c "$CYCLES" -s "$WORKDIR/${BASE}.bin" 2>&1)
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
 
 # Extract A register value (from line like "  PC: 00001008  A: 00000030  X: ...")
 A_VALUE=$(echo "$OUTPUT" | grep "PC:.*A:.*X:" | sed 's/.*A: \([0-9A-Fa-f]*\).*/\1/')
@@ -100,14 +111,14 @@ if [ -n "$EXPECTED" ]; then
     EXP_UPPER=$(echo "$EXPECTED" | tr 'a-f' 'A-F')
     
     if [ "$A_UPPER" = "$EXP_UPPER" ]; then
-        echo "PASS: $BASE (A=$A_VALUE)"
+        echo "PASS: $BASE (A=$A_VALUE, ${ELAPSED}s)"
         exit 0
     else
-        echo "FAIL: $BASE (expected A=$EXPECTED, got A=$A_VALUE)"
+        echo "FAIL: $BASE (expected A=$EXPECTED, got A=$A_VALUE, ${ELAPSED}s)"
         echo "$OUTPUT"
         exit 1
     fi
 else
-    echo "Result: $BASE A=$A_VALUE"
+    echo "Result: $BASE A=$A_VALUE (${ELAPSED}s)"
     echo "$OUTPUT"
 fi

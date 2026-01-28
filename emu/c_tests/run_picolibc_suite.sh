@@ -4,8 +4,22 @@
 # This script compiles picolibc test sources and runs them on our emulator
 
 PICOLIBC_TEST="/Users/benjamincooley/projects/picolibc-m65832/test"
-CLANG="/Users/benjamincooley/projects/llvm-m65832/build/bin/clang"
-LLD="/Users/benjamincooley/projects/llvm-m65832/build/bin/ld.lld"
+LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
+LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+    LLVM_BUILD="$LLVM_BUILD_FAST"
+else
+    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+fi
+CLANG="$LLVM_BUILD/bin/clang"
+LLD_FAST="$LLVM_BUILD_FAST/bin/ld.lld"
+LLD_DEFAULT="$LLVM_BUILD_DEFAULT/bin/ld.lld"
+if [ -x "$LLD_FAST" ]; then
+    LLD="$LLD_FAST"
+else
+    LLD="$LLD_DEFAULT"
+fi
 EMU="/Users/benjamincooley/projects/M65832/emu/m65832emu"
 SYSROOT="/Users/benjamincooley/projects/m65832-sysroot"
 WORKDIR="/tmp/picolibc_suite"

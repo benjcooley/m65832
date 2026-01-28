@@ -3,7 +3,15 @@
 #
 # Usage: run_libc_test.sh <test.c> [expected_result] [cycles]
 
-CLANG="/Users/benjamincooley/projects/llvm-m65832/build/bin/clang"
+LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
+LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+    LLVM_BUILD="$LLVM_BUILD_FAST"
+else
+    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+fi
+CLANG="$LLVM_BUILD/bin/clang"
 ASM="../../as/m65832as"
 EMU="../m65832emu"
 STDLIB="/Users/benjamincooley/projects/llvm-m65832/m65832-stdlib"

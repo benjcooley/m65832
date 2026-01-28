@@ -18,9 +18,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 # Paths
-LLVM_BUILD = "/Users/benjamincooley/projects/llvm-m65832/build/bin"
-CLANG = f"{LLVM_BUILD}/clang"
-LLD = f"{LLVM_BUILD}/ld.lld"
+LLVM_ROOT = "/Users/benjamincooley/projects/llvm-m65832"
+LLVM_BUILD_FAST = os.path.join(LLVM_ROOT, "build-fast", "bin")
+LLVM_BUILD_DEFAULT = os.path.join(LLVM_ROOT, "build", "bin")
+LLVM_BUILD = os.environ.get("LLVM_BUILD", LLVM_BUILD_FAST if os.path.exists(os.path.join(LLVM_BUILD_FAST, "clang")) else LLVM_BUILD_DEFAULT)
+CLANG = os.path.join(LLVM_BUILD, "clang")
+LLD = os.path.join(LLVM_BUILD, "ld.lld")
 EMU = "/Users/benjamincooley/projects/M65832/emu/m65832emu"
 SYSROOT = "/Users/benjamincooley/projects/m65832-sysroot"
 PICOLIBC_TEST = "/Users/benjamincooley/projects/picolibc-m65832/test"

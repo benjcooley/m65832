@@ -3,8 +3,22 @@
 #
 # Usage: run_picolibc_test.sh <test.c> [expected_result] [max_cycles]
 
-CLANG="/Users/benjamincooley/projects/llvm-m65832/build/bin/clang"
-LLD="/Users/benjamincooley/projects/llvm-m65832/build/bin/ld.lld"
+LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
+LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+    LLVM_BUILD="$LLVM_BUILD_FAST"
+else
+    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+fi
+CLANG="$LLVM_BUILD/bin/clang"
+LLD_FAST="$LLVM_BUILD_FAST/bin/ld.lld"
+LLD_DEFAULT="$LLVM_BUILD_DEFAULT/bin/ld.lld"
+if [ -x "$LLD_FAST" ]; then
+    LLD="$LLD_FAST"
+else
+    LLD="$LLD_DEFAULT"
+fi
 EMU="/Users/benjamincooley/projects/M65832/emu/m65832emu"
 SYSROOT="/Users/benjamincooley/projects/m65832-sysroot"
 
@@ -50,24 +64,27 @@ if [ $EMU_EXIT -ne 0 ]; then
     exit 1
 fi
 
-# Extract A register (exit code) - look for "PC:.*A:" pattern
-A_VALUE=$(echo "$OUTPUT" | grep "PC:.*A:" | sed 's/.*A: *\([0-9A-Fa-f]*\).*/\1/' | tr -d ' ')
-if [ -z "$A_VALUE" ]; then
-    echo "FAIL: $BASE - Could not parse A register from output"
+# Extract exit code written by _exit (preferred), fallback to A register
+EXIT_VALUE=$(echo "$OUTPUT" | grep "EXIT:" | sed 's/.*EXIT: *\([0-9A-Fa-f]*\).*/\1/' | tr -d ' ')
+if [ -z "$EXIT_VALUE" ]; then
+    EXIT_VALUE=$(echo "$OUTPUT" | grep "PC:.*A:" | sed 's/.*A: *\([0-9A-Fa-f]*\).*/\1/' | tr -d ' ')
+fi
+if [ -z "$EXIT_VALUE" ]; then
+    echo "FAIL: $BASE - Could not parse exit code from output"
     echo "$OUTPUT"
     exit 1
 fi
-A_DEC=$((16#$A_VALUE))
+EXIT_DEC=$((16#$EXIT_VALUE))
 
 # Check against expected
 if [ -n "$EXPECTED" ]; then
-    if [ "$A_DEC" = "$EXPECTED" ]; then
-        echo "PASS: $BASE (result=$A_DEC)"
+    if [ "$EXIT_DEC" = "$EXPECTED" ]; then
+        echo "PASS: $BASE (result=$EXIT_DEC)"
         exit 0
     else
-        echo "FAIL: $BASE (expected=$EXPECTED, got=$A_DEC)"
+        echo "FAIL: $BASE (expected=$EXPECTED, got=$EXIT_DEC)"
         exit 1
     fi
 else
-    echo "Result: $BASE = $A_DEC (0x$A_VALUE)"
+    echo "Result: $BASE = $EXIT_DEC (0x$EXIT_VALUE)"
 fi

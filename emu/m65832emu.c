@@ -541,6 +541,11 @@ static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
 }
 
 static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
+    /* Exit code pseudo-register */
+    if (addr == 0xFFFFFFFC) {
+        return cpu->exit_code;
+    }
+
     /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
         addr = addr & 0xFF;
@@ -565,6 +570,12 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
 }
 
 static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
+    /* Exit code pseudo-register */
+    if (addr == 0xFFFFFFFC) {
+        cpu->exit_code = val;
+        return;
+    }
+
     /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
         addr = addr & 0xFF;
@@ -779,7 +790,7 @@ static inline uint32_t addr_longx(m65832_cpu_t *cpu) {
 /* (Direct Page) - indirect */
 static inline uint32_t addr_dpi(m65832_cpu_t *cpu) {
     uint32_t ptr = addr_dp(cpu);
-    if (IS_EMU(cpu) || WIDTH_M(cpu) <= WIDTH_16) {
+    if (IS_EMU(cpu)) {
         return mem_read16(cpu, ptr);
     }
     return mem_read32(cpu, ptr);
@@ -788,7 +799,7 @@ static inline uint32_t addr_dpi(m65832_cpu_t *cpu) {
 /* (Direct Page, X) - indexed indirect */
 static inline uint32_t addr_dpxi(m65832_cpu_t *cpu) {
     uint32_t ptr = addr_dpx(cpu);
-    if (IS_EMU(cpu) || WIDTH_M(cpu) <= WIDTH_16) {
+    if (IS_EMU(cpu)) {
         return mem_read16(cpu, ptr);
     }
     return mem_read32(cpu, ptr);
@@ -796,10 +807,9 @@ static inline uint32_t addr_dpxi(m65832_cpu_t *cpu) {
 
 /* (Direct Page), Y - indirect indexed */
 static inline uint32_t addr_dpiy(m65832_cpu_t *cpu) {
-    uint8_t offset = fetch8(cpu);
-    uint32_t ptr = cpu->d + offset;
+    uint32_t ptr = addr_dp(cpu);
     uint32_t base;
-    if (IS_EMU(cpu) || WIDTH_M(cpu) <= WIDTH_16) {
+    if (IS_EMU(cpu)) {
         base = mem_read16(cpu, ptr);
     } else {
         base = mem_read32(cpu, ptr);
@@ -809,15 +819,13 @@ static inline uint32_t addr_dpiy(m65832_cpu_t *cpu) {
 
 /* [Direct Page] - indirect long */
 static inline uint32_t addr_dpil(m65832_cpu_t *cpu) {
-    uint8_t offset = fetch8(cpu);
-    uint32_t ptr = cpu->d + offset;
+    uint32_t ptr = addr_dp(cpu);
     return mem_read32(cpu, ptr);
 }
 
 /* [Direct Page], Y - indirect long indexed */
 static inline uint32_t addr_dpily(m65832_cpu_t *cpu) {
-    uint8_t offset = fetch8(cpu);
-    uint32_t ptr = cpu->d + offset;
+    uint32_t ptr = addr_dp(cpu);
     return mem_read32(cpu, ptr) + cpu->y;
 }
 
@@ -4097,6 +4105,7 @@ void m65832_emu_reset(m65832_cpu_t *cpu) {
     cpu->irq_pending = false;
     cpu->nmi_pending = false;
     cpu->abort_pending = false;
+    cpu->exit_code = 0;
     
     /* Clear TLB */
     tlb_flush_all(cpu);
@@ -4697,6 +4706,7 @@ void m65832_print_state(m65832_cpu_t *cpu) {
            cpu->pc, cpu->a, cpu->x, cpu->y);
     printf("  SP: %08X  D: %08X  B: %08X  T: %08X\n",
            cpu->s, cpu->d, cpu->b, cpu->t);
+    printf("  EXIT: %08X\n", cpu->exit_code);
     printf("  P:  %04X [%c%c%c%c%c%c%c%c%c%c%c%c]\n",
            cpu->p,
            FLAG_TST(cpu, P_N) ? 'N' : '-',

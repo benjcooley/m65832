@@ -409,6 +409,9 @@ struct m65832_cpu {
     /* Cycle counting */
     uint64_t cycles;        /* Total cycles executed */
     uint64_t cycle_limit;   /* Stop after this many cycles (0 = unlimited) */
+
+    /* Program exit status (written by _exit) */
+    uint32_t exit_code;
     
     /* Interrupts */
     bool     irq_pending;

@@ -7,13 +7,26 @@
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECTS_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
-LLVM_BUILD="$PROJECTS_DIR/llvm-m65832/build"
+LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
+LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+    LLVM_BUILD="$LLVM_BUILD_FAST"
+else
+    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+fi
 EMU="$(dirname "$SCRIPT_DIR")/m65832emu"
 BUILD_DIR="$SCRIPT_DIR/build"
 
 # Tools
 CLANG="$LLVM_BUILD/bin/clang"
-LLD="$LLVM_BUILD/bin/ld.lld"
+LLD_FAST="$LLVM_BUILD_FAST/bin/ld.lld"
+LLD_DEFAULT="$LLVM_BUILD_DEFAULT/bin/ld.lld"
+if [ -x "$LLD_FAST" ]; then
+    LLD="$LLD_FAST"
+else
+    LLD="$LLD_DEFAULT"
+fi
 
 # Newlib paths (if installed)
 SYSROOT="$PROJECTS_DIR/m65832-sysroot/m65832-elf"
@@ -47,8 +60,13 @@ compile_standalone() {
         return 1
     fi
     
-    # Link with minimal startup
+# Link with baremetal linker script so the emulator can load it
+local ldscript="$PROJECTS_DIR/llvm-m65832/m65832-stdlib/scripts/baremetal/m65832.ld"
+if [ -f "$ldscript" ]; then
+    "$LLD" -T "$ldscript" --entry=main -o "$elf" "$obj" 2>/dev/null
+else
     "$LLD" --entry=main -o "$elf" "$obj" 2>/dev/null
+fi
     
     return $?
 }
@@ -132,7 +150,7 @@ run_test_check_value() {
     local output=$("$EMU" "$elf" -n 500000 -s 2>&1)
     
     # Extract A register value
-    local actual=$(echo "$output" | grep -o 'A=[0-9A-Fa-f]*' | head -1 | cut -d= -f2)
+    local actual=$(echo "$output" | grep "PC:.*A:" | sed 's/.*A: *\([0-9A-Fa-f]*\).*/\1/' | head -1)
     
     if [ "$actual" = "$expected" ]; then
         return 0
