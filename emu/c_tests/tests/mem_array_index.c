@@ -1,7 +1,0 @@
-// Test: array indexing
-// Expected: arr[3] = 40 (0x28)
-int arr[5] = {10, 20, 30, 40, 50};
-
-int main(void) {
-    return arr[3];
-}

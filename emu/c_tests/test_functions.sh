@@ -11,7 +11,7 @@ run_test "Function chain"     "tests/func_chain.c"        "0000001E"
 run_test "Void function"      "tests/func_void.c"         "00000032"
 run_test "Early return"       "tests/func_early_return.c" "0000000A"
 
-# NOTE: Recursive tests with multiplication disabled - compiler can't select mul(reg,reg)
-# run_test "Factorial (5!)"     "tests/func_factorial.c"    "00000078"
-# run_test "Fibonacci (10)"     "tests/func_fibonacci.c"    "00000037"
+# Recursive tests - need higher cycle count
+run_test "Factorial (5!)"     "tests/func_factorial.c"    "00000078" 10000
+run_test "Fibonacci (10)"     "tests/func_fibonacci.c"    "00000037" 100000
 run_test "Mutual recursion"   "tests/func_mutual.c"       "00000001"

@@ -30,7 +30,7 @@ if [ "$EXT" = "c" ]; then
         echo "Build with: cd llvm-m65832 && make -C build clang"
         exit 1
     fi
-    if ! $CLANG -target m65832 -S -O2 "$TEST_FILE" -o "$WORKDIR/${BASE}.s" 2>&1; then
+    if ! $CLANG -target m65832 -S -O2 -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.s" 2>&1; then
         echo "FAIL: Clang compilation failed"
         exit 1
     fi

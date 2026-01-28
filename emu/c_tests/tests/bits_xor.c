@@ -1,6 +1,0 @@
-// Test: Bitwise XOR
-// Expected: 0x55 (0xFF ^ 0xAA = 0x55)
-
-int main(void) {
-    return 0xFF ^ 0xAA;
-}

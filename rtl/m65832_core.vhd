@@ -222,6 +222,7 @@ architecture rtl of M65832_Core is
     signal write_data       : std_logic_vector(7 downto 0);
     signal branch_taken     : std_logic;
     signal branch_wide      : std_logic;
+    signal load_no_flags    : std_logic;
     signal is_indirect_addr : std_logic;
     signal is_long_x        : std_logic;
     signal is_bit_op        : std_logic;
@@ -3101,30 +3102,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     when x"C4" => s_res := -fs_s;        -- FNEG.S Fd, Fs
                     when x"C5" => s_res := abs(fs_s);    -- FABS.S Fd, Fs
                     when x"C6" =>                        -- FCMP.S Fd, Fs
-                        fpu_flag_load <= '1';
-                        fpu_flag_c_load <= '1';
-                        if fd_s = fs_s then
-                            fpu_flag_z <= '1';
-                            fpu_flag_c <= '1';
-                            fpu_flag_n <= '0';
-                        elsif fd_s < fs_s then
-                            fpu_flag_z <= '0';
-                            fpu_flag_c <= '0';
-                            fpu_flag_n <= '1';
-                        else
-                            fpu_flag_z <= '0';
-                            fpu_flag_c <= '1';
-                            fpu_flag_n <= '0';
-                        end if;
+                        null;
                     when x"C7" =>                        -- F2I.S Fd
                         int32_res := to_signed(to_integer(fd_s, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
-                        fpu_flag_load <= '1';
-                        if int32_res = 0 then
-                            fpu_flag_z <= '1';
-                        end if;
-                        fpu_flag_n <= int32_res(31);
                     when x"C8" =>                        -- I2F.S Fd
                         a_int := to_integer(signed(A_reg));
                         s_res := to_float(a_int, 8, 23);
@@ -3137,11 +3119,6 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     s_bits := to_slv(s_res);
                     fpu_result(31 downto 0) <= s_bits;
                     fpu_write_fd <= '1';
-                    fpu_flag_load <= '1';
-                    if s_bits = x"00000000" then
-                        fpu_flag_z <= '1';
-                    end if;
-                    fpu_flag_n <= s_bits(31);
                 end if;
 
             -- Double-precision operations ($D0-$DA)
@@ -3156,30 +3133,11 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     when x"D4" => d_res := -fs_d;        -- FNEG.D Fd, Fs
                     when x"D5" => d_res := abs(fs_d);    -- FABS.D Fd, Fs
                     when x"D6" =>                        -- FCMP.D Fd, Fs
-                        fpu_flag_load <= '1';
-                        fpu_flag_c_load <= '1';
-                        if fd_d = fs_d then
-                            fpu_flag_z <= '1';
-                            fpu_flag_c <= '1';
-                            fpu_flag_n <= '0';
-                        elsif fd_d < fs_d then
-                            fpu_flag_z <= '0';
-                            fpu_flag_c <= '0';
-                            fpu_flag_n <= '1';
-                        else
-                            fpu_flag_z <= '0';
-                            fpu_flag_c <= '1';
-                            fpu_flag_n <= '0';
-                        end if;
+                        null;
                     when x"D7" =>                        -- F2I.D Fd
                         int32_res := to_signed(to_integer(fd_d, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
                         fpu_write_a <= '1';
-                        fpu_flag_load <= '1';
-                        if int32_res = 0 then
-                            fpu_flag_z <= '1';
-                        end if;
-                        fpu_flag_n <= int32_res(31);
                     when x"D8" =>                        -- I2F.D Fd
                         a_int := to_integer(signed(A_reg));
                         d_res := to_float(a_int, 11, 52);
@@ -3192,11 +3150,6 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     d_bits := to_slv(d_res);
                     fpu_result <= d_bits;
                     fpu_write_fd <= '1';
-                    fpu_flag_load <= '1';
-                    if d_bits = x"0000000000000000" then
-                        fpu_flag_z <= '1';
-                    end if;
-                    fpu_flag_n <= d_bits(63);
                 end if;
             end if;
         elsif ext_fpu_xfer = '1' then
@@ -3772,11 +3725,16 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     flag_v_in <= fpu_flag_v when fpu_flag_load = '1' else
                  ext_flag_v when ext_flag_load = '1' else ALU_VO;
     
+    load_no_flags <= '1' when (W_mode = '1' and
+                               ((IS_ALU_OP = '1' and ALU_OP = "101") or   -- LDA
+                                (IS_RMW_OP = '1' and RMW_OP = "101")))    -- LDX/LDY
+                    else '0';
+    
     flag_nzv_load <= '1' when state = ST_EXECUTE and
                      (fpu_flag_load = '1' or
                       ext_flag_load = '1' or
-                      (IS_ALU_OP = '1' and ALU_OP /= "100") or  -- All ALU except STA
-                      (IS_RMW_OP = '1' and RMW_OP /= "100"))    -- All RMW except STX/STY
+                      (IS_ALU_OP = '1' and ALU_OP /= "100" and load_no_flags = '0') or  -- ALU except STA
+                      (IS_RMW_OP = '1' and RMW_OP /= "100" and load_no_flags = '0'))    -- RMW except STX/STY
                      else '0';
     
     ---------------------------------------------------------------------------

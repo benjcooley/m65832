@@ -16,11 +16,12 @@ PASSED=0
 FAILED=0
 SKIPPED=0
 
-# Run a test: run_test "description" "test_file.c" "expected_hex"
+# Run a test: run_test "description" "test_file.c" "expected_hex" [cycles]
 run_test() {
     local desc="$1"
     local file="$2"
     local expected="$3"
+    local cycles="${4:-1000}"
     
     printf "  %-25s" "$desc..."
     
@@ -31,7 +32,7 @@ run_test() {
     fi
     
     # Run test silently, capture result
-    result=$(./run_c_test.sh "$file" "$expected" 2>&1)
+    result=$(./run_c_test.sh "$file" "$expected" "$cycles" 2>&1)
     
     if echo "$result" | grep -q "^PASS:"; then
         echo -e "${GREEN}PASS${NC}"
@@ -71,7 +72,7 @@ print_summary() {
 }
 
 # Available test groups
-TEST_GROUPS="arithmetic control memory functions bitops types edge algorithms fpu structs switch operators sizeof advanced casts datastructs strings"
+TEST_GROUPS="arithmetic control memory functions bitops types edge algorithms fpu structs switch operators sizeof advanced casts datastructs strings integration"
 
 # Main
 echo "=========================================="

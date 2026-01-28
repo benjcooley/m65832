@@ -1,0 +1,14 @@
+# --------------------------------------------------------------------------
+# M65832 DE25-Nano Quartus Project File
+#
+# Copyright (c) 2026 M65832 Project
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Target: Intel Agilex 5 E-Series (A5EB013BB23BE4SCS)
+# Toolchain: Quartus Prime Pro 24.1+ (free Agilex 5 E-Series license)
+# --------------------------------------------------------------------------
+
+QUARTUS_VERSION = "24.1"
+DATE = "2026-01-27"
+
+PROJECT_REVISION = "m65832_de25"

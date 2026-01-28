@@ -4,14 +4,33 @@ DE25-Nano Target Notes (Bootstrap)
 This document captures initial assumptions for a DE25-Nano bring-up and a
 minimal terminal bootstrap plan. These are starting points, not final specs.
 
-Board Summary (Given)
----------------------
-- FPGA: A5EB013BB23BE4SCS (138K Logic Elements)
+Board Summary (Terasic DE25-Nano)
+---------------------------------
+- FPGA: Intel Agilex 5 E-Series - A5EB013BB23BE4SCS (138K Logic Elements)
 - Memory (FPGA side):
   - LPDDR4: 1 GB, 32-bit bus, 2666 MT/s (Rev B) / 2133 MT/s (Rev A)
   - SDRAM: 128 MB, 16-bit bus
 - UART: 2-pin UART via USB Type-C
-- HDMI, GPIO, ADC, MIPI, etc. (not needed for earliest boot)
+- User I/O: 8 LEDs, 2 buttons, 4 slide switches
+- GPIO: Two 2x20 headers (3.3V)
+- HDMI, ADC, MIPI (not needed for earliest boot)
+
+Toolchain
+---------
+- Quartus Prime Pro Edition 24.1 or later
+- FREE license for Agilex 5 E-Series (SW-AGILEX-5E)
+- Get license from: https://licensing.intel.com/psg/s/
+- Windows or Linux only (no macOS native support)
+
+Synthesis Files
+---------------
+Project files are in: syn/de25/
+- m65832_de25.qpf    - Quartus project file
+- m65832_de25.qsf    - Settings and pin assignments (PLACEHOLDERS - update!)
+- m65832_de25.sdc    - Timing constraints
+- m65832_de25_top.vhd - Top-level SoC wrapper
+- m65832_uart.vhd    - UART (matches emulator interface)
+- m65832_bootrom.vhd - Boot ROM with placeholder code
 
 Bring-Up Goals (Phase 0)
 -----------------------

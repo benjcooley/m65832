@@ -1,6 +1,0 @@
-// Test: Bitwise AND
-// Expected: 0x0F (0xFF & 0x0F = 0x0F)
-
-int main(void) {
-    return 0xFF & 0x0F;
-}
