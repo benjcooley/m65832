@@ -2663,27 +2663,29 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Subroutines ============ */
         case 0x20: /* JSR abs */
-            addr = fetch16(cpu);
-            /* M65832: In 32-bit mode, push full 32-bit return address */
+            /* M65832: In 32-bit mode, JSR is 5 bytes (opcode + 32-bit address) */
             if (width_m == 4) {
+                addr = fetch32(cpu);  /* 32-bit absolute address */
                 push32(cpu, cpu->pc - 1);
-                cpu->pc = addr;  /* Absolute address in 32-bit mode (B is frame ptr now) */
+                cpu->pc = addr;
             } else {
+                addr = fetch16(cpu);  /* 16-bit address in 8/16-bit modes */
                 push16(cpu, (uint16_t)(cpu->pc - 1));
                 cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
             }
             cycles = 6;
             break;
-        case 0x22: /* JSL long */
+        case 0x22: /* JSL long - ILLEGAL in 32-bit mode, valid in 8/16-bit modes */
+            if (width_m == 4) {
+                /* JSL is reserved/illegal in 32-bit mode - use JSR instead */
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = fetch16(cpu);
             addr |= (uint32_t)fetch8(cpu) << 16;
-            /* M65832: In 32-bit mode, push full 32-bit return address */
-            if (width_m == 4) {
-                push32(cpu, cpu->pc - 1);
-            } else {
-                push8(cpu, (uint8_t)(cpu->pc >> 16));
-                push16(cpu, (uint16_t)(cpu->pc - 1));
-            }
+            push8(cpu, (uint8_t)(cpu->pc >> 16));
+            push16(cpu, (uint16_t)(cpu->pc - 1));
             cpu->pc = addr;
             cycles = 8;
             break;
@@ -2708,14 +2710,15 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             }
             cycles = 6;
             break;
-        case 0x6B: /* RTL */
-            /* M65832: In 32-bit mode, pull full 32-bit return address */
+        case 0x6B: /* RTL - ILLEGAL in 32-bit mode, valid in 8/16-bit modes */
             if (width_m == 4) {
-                cpu->pc = pull32(cpu) + 1;
-            } else {
-                cpu->pc = pull16(cpu) + 1;
-                cpu->pc |= (uint32_t)pull8(cpu) << 16;
+                /* RTL is reserved/illegal in 32-bit mode - use RTS instead */
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
             }
+            cpu->pc = pull16(cpu) + 1;
+            cpu->pc |= (uint32_t)pull8(cpu) << 16;
             cycles = 6;
             break;
 

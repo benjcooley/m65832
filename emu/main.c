@@ -714,7 +714,7 @@ int main(int argc, char *argv[]) {
     uint32_t load_addr = 0x1000;
     uint32_t entry_addr = 0;
     int entry_specified = 0;
-    size_t memory_kb = 64;
+    size_t memory_kb = 1024;  /* 1MB default - proper 32-bit memory size */
     int show_state = 0;
     int interactive = 0;
     int load_hex = 0;
@@ -930,6 +930,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
+    /* Initialize UART for console I/O (always enabled in legacy mode) */
+    uart_state_t *uart = uart_init(g_cpu);
+    if (!uart && g_verbose) {
+        fprintf(stderr, "Warning: Failed to initialize UART\n");
+    }
+    
     /* Load program */
     int is_elf = 0;
     uint32_t elf_entry = 0;
@@ -1025,6 +1031,9 @@ int main(int argc, char *argv[]) {
             int cycles = m65832_emu_step(g_cpu);
             if (cycles < 0) break;
             
+            /* Poll UART for input (non-blocking) */
+            if (uart) uart_poll(uart);
+            
             /* Check limits */
             if (g_max_cycles > 0 && (g_cpu->cycles - start_cycles) >= g_max_cycles) break;
             if (g_max_instructions > 0 && (g_cpu->inst_count - start_inst) >= g_max_instructions) break;
@@ -1065,6 +1074,7 @@ int main(int argc, char *argv[]) {
     }
     
     /* Clean up */
+    if (uart) uart_destroy(uart);
     m65832_emu_close(g_cpu);
     
     return 0;
