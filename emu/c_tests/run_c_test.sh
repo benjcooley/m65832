@@ -80,7 +80,8 @@ if [ "$EXT" = "c" ]; then
         echo "Build with: cd llvm-m65832 && ninja -C build-fast clang"
         exit 1
     fi
-    if ! $CLANG -target m65832 -c -O0 -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.o" 2>&1; then
+    OPT_LEVEL="${OPT_LEVEL:--O0}"
+    if ! $CLANG -target m65832 -c $OPT_LEVEL -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.o" 2>&1; then
         echo "FAIL: Clang compilation failed"
         exit 1
     fi
