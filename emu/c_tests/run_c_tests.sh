@@ -21,7 +21,7 @@ run_test() {
     local desc="$1"
     local file="$2"
     local expected="$3"
-    local cycles="${4:-1000}"
+    local cycles="${4:-10000}"
     
     printf "  %-25s" "$desc..."
     

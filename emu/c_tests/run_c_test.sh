@@ -2,6 +2,8 @@
 # Run a single C test on the M65832 emulator
 #
 # Usage: run_c_test.sh <test.c> [expected_result] [cycles]
+#
+# This uses the LLVM toolchain (clang, lld) exclusively.
 
 LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
 LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
@@ -12,13 +14,12 @@ else
     LLVM_BUILD="$LLVM_BUILD_DEFAULT"
 fi
 CLANG="$LLVM_BUILD/bin/clang"
-LLC="$LLVM_BUILD/bin/llc"
-ASM="../../as/m65832as"
+LLD="$LLVM_BUILD/bin/ld.lld"
 EMU="../m65832emu"
 
 TEST_FILE="$1"
 EXPECTED="$2"
-CYCLES="${3:-1000}"
+CYCLES="${3:-10000}"
 
 if [ -z "$TEST_FILE" ]; then
     echo "Usage: $0 <test.c> [expected_result] [cycles]"
@@ -26,26 +27,61 @@ if [ -z "$TEST_FILE" ]; then
 fi
 
 BASE=$(basename "$TEST_FILE" .c)
-BASE=$(basename "$BASE" .ll)  # Also handle .ll files for backward compat
+BASE=$(basename "$BASE" .ll)
 WORKDIR=$(dirname "$TEST_FILE")
 EXT="${TEST_FILE##*.}"
 
-# Step 1: Compile to assembly
+# Create a minimal startup assembly file using LLVM syntax
+CRT0="$WORKDIR/${BASE}_crt0.s"
+cat > "$CRT0" << 'EOF'
+    .text
+    .globl _start
+_start:
+    ; Initialize Direct Page to $4000
+    .byte 0xA9, 0x00, 0x40, 0x00, 0x00   ; LDA #$00004000
+    .byte 0x5B                            ; TCD
+    ; Initialize Stack Pointer to $FFFF
+    .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   ; LDX #$0000FFFF
+    .byte 0x9A                            ; TXS
+    ; Initialize B register to 0 for absolute addressing
+    .byte 0x02, 0x22, 0x00, 0x00, 0x00, 0x00  ; SB #$00000000
+    ; Call main
+    .byte 0x20                            ; JSR opcode
+    .long main
+    ; Get return value from R0 and stop
+    .byte 0xA5, 0x00                      ; LDA dp $00 (R0)
+    .byte 0xDB                            ; STP
+EOF
+
+# Create a simple linker script
+LDSCRIPT="$WORKDIR/${BASE}.ld"
+cat > "$LDSCRIPT" << 'EOF'
+ENTRY(_start)
+SECTIONS {
+    . = 0x1000;
+    .text : { *(.text*) }
+    . = 0x2000;
+    .data : { *(.data*) *(.rodata*) }
+    . = 0x3000;
+    .bss : { *(.bss*) }
+}
+EOF
+
+# Step 1: Compile CRT0 to object
+if ! $CLANG -target m65832 -c "$CRT0" -o "$WORKDIR/${BASE}_crt0.o" 2>&1; then
+    echo "FAIL: CRT0 compilation failed"
+    exit 1
+fi
+
+# Step 2: Compile test file to object
 if [ "$EXT" = "c" ]; then
-    # C file -> clang -> assembly
     if [ ! -f "$CLANG" ]; then
         echo "FAIL: clang not found at $CLANG"
         echo "Build with: cd llvm-m65832 && ninja -C build-fast clang"
         exit 1
     fi
-    if ! $CLANG -target m65832 -S -O2 -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.s" 2>&1; then
+    if ! $CLANG -target m65832 -c -O0 -fno-builtin "$TEST_FILE" -o "$WORKDIR/${BASE}.o" 2>&1; then
         echo "FAIL: Clang compilation failed"
-        exit 1
-    fi
-elif [ "$EXT" = "ll" ]; then
-    # LLVM IR -> llc -> assembly
-    if ! $LLC -march=m65832 "$TEST_FILE" -o "$WORKDIR/${BASE}.s" 2>&1; then
-        echo "FAIL: LLC compilation failed"
         exit 1
     fi
 else
@@ -53,80 +89,32 @@ else
     exit 1
 fi
 
-# Step 2: Create combined assembly with startup code
-{
-    echo "; Combined test: $BASE"
-    echo "    .text"
-    echo "    .org \$1000"
-    echo ""
-    echo "; === Startup code ==="
-    echo "_crt_start:"
-    echo "    ; Initialize Direct Page to \$4000"
-    echo "    .byte 0xA9, 0x00, 0x40, 0x00, 0x00   ; LDA #\$00004000"
-    echo "    .byte 0x5B                            ; TCD"
-    echo "    ; Initialize Stack Pointer to \$FFFF"
-    echo "    .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   ; LDX #\$0000FFFF"
-    echo "    .byte 0x9A                            ; TXS"
-    echo "    ; Initialize B register to 0 for absolute addressing"
-    echo "    .byte 0x02, 0x22, 0x00, 0x00, 0x00, 0x00  ; SB #\$00000000"
-    echo "    ; Call main (32-bit JSR: opcode 0x20 + 4-byte address)"
-    echo "    .byte 0x20                            ; JSR opcode"
-    echo "    .long _c_main                         ; 32-bit address"
-    echo "    ; Get return value from R0 and stop"
-    echo "    .byte 0xA5, 0x00                      ; LDA dp \$00 (R0)"
-    echo "    .byte 0xDB                            ; STP"
-    echo ""
-    echo "; === Test code ==="
-    # Filter output: skip ELF-specific directives, rename main->_c_main
-    # Filter .text since we add our own; keep .data for globals
-    # NOTE: This test harness injects a .org for .data because we do not run
-    # a real linker here. In a production toolchain, the linker script would
-    # place .text and .data in ROM/RAM respectively.
-    # NOTE: Convert JSR label to raw bytes (.byte 0x20 + .long label) for 32-bit mode
-    cat "$WORKDIR/${BASE}.s" | \
-        grep -v '^\s*\.file' | \
-        grep -v '^\s*\.text' | \
-        grep -v '^\s*\.globl' | \
-        grep -v '^\s*\.p2align' | \
-        grep -v '^\s*\.type' | \
-        grep -v '^\s*\.size' | \
-        grep -v '^\s*\.section.*note' | \
-        grep -v '^\s*\.ident' | \
-        grep -v '^\s*\.addrsig' | \
-        grep -v '^\.Lfunc_end' | \
-        grep -v '^; %bb' | \
-        sed 's/^[[:space:]]*\.data/.data\n    .org $2000  ; test harness: place .data in RAM without a linker/' | \
-        sed 's/^[[:space:]]*\.bss/.bss\n    .org $3000  ; test harness: place .bss in RAM without a linker/' | \
-        sed 's/^main:/_c_main:/' | \
-        sed 's/; @main/; @_c_main/' | \
-        sed 's/^\([[:space:]]*\)JSR[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)/\1.byte 0x20\n\1.long \2/'
-} > "$WORKDIR/${BASE}_combined.s"
-
-# Step 3: Assemble
-if ! $ASM "$WORKDIR/${BASE}_combined.s" -o "$WORKDIR/${BASE}.bin" 2>&1; then
-    echo "FAIL: Assembly failed"
-    cat "$WORKDIR/${BASE}_combined.s"
+# Step 3: Link with LLD, output binary directly
+if [ ! -f "$LLD" ]; then
+    echo "FAIL: lld not found at $LLD"
+    exit 1
+fi
+if ! $LLD -T "$LDSCRIPT" --oformat=binary "$WORKDIR/${BASE}_crt0.o" "$WORKDIR/${BASE}.o" -o "$WORKDIR/${BASE}.bin" 2>&1; then
+    echo "FAIL: Linking failed"
     exit 1
 fi
 
-# Step 4: Run on emulator (time the run)
-# Load binary at 0x1000 (matching .org $1000) and set entry point
-# Use --stop-on-brk to catch runaway code that jumps to address 0
+# Step 5: Run on emulator
 START_TIME=$(date +%s)
 OUTPUT=$($EMU -o 0x1000 -e 0x1000 -c "$CYCLES" --stop-on-brk -s "$WORKDIR/${BASE}.bin" 2>&1)
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
-# Extract A register value (from line like "  PC: 00001008  A: 00000030  X: ...")
+# Extract A register value
 A_VALUE=$(echo "$OUTPUT" | grep "PC:.*A:.*X:" | sed 's/.*A: \([0-9A-Fa-f]*\).*/\1/')
 
 if [ -n "$EXPECTED" ]; then
-    # Normalize both to uppercase for comparison
     A_UPPER=$(echo "$A_VALUE" | tr 'a-f' 'A-F')
     EXP_UPPER=$(echo "$EXPECTED" | tr 'a-f' 'A-F')
     
     if [ "$A_UPPER" = "$EXP_UPPER" ]; then
         echo "PASS: $BASE (A=$A_VALUE, ${ELAPSED}s)"
+        rm -f "$CRT0" "$LDSCRIPT" "$WORKDIR/${BASE}_crt0.o" "$WORKDIR/${BASE}.o"
         exit 0
     else
         echo "FAIL: $BASE (expected A=$EXPECTED, got A=$A_VALUE, ${ELAPSED}s)"
