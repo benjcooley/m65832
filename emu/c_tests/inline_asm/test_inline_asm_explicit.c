@@ -1,7 +1,7 @@
 // Test inline assembly with explicit register constraints
 // Tests "a", "x", "y" constraints and named register variables
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Explicit "a" output

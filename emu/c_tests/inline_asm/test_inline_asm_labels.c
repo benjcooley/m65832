@@ -1,7 +1,7 @@
 // Test inline assembly with local labels
 // Uses uppercase .L prefix labels for m65832as compatibility
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Simple forward label

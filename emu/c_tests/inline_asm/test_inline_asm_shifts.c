@@ -1,6 +1,6 @@
 // Test inline assembly with shift and logic operations
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: ASL (arithmetic shift left) on accumulator

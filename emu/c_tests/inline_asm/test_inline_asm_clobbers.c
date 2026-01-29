@@ -1,6 +1,6 @@
 // Test inline assembly clobber lists and memory constraints
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Clobber list with memory

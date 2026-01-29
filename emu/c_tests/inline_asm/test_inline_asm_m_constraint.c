@@ -1,7 +1,7 @@
 // Test inline assembly with "m" memory constraint
 // The "m" constraint provides a register containing the address
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Load from memory using "m" constraint

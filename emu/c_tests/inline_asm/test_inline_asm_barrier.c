@@ -1,6 +1,6 @@
 // Test inline assembly for memory barriers and compiler barriers
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Compiler barrier (empty asm with memory clobber)

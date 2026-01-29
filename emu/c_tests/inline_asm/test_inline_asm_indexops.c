@@ -1,6 +1,6 @@
 // Test inline assembly with INX/INY/DEX/DEY instructions
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: INX

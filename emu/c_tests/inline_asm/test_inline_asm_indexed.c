@@ -1,6 +1,6 @@
 // Test inline assembly with X and Y index registers
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: LDX immediate and transfer to A

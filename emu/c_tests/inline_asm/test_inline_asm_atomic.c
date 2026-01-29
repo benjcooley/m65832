@@ -1,7 +1,7 @@
 // Test inline assembly for atomic operations
 // Tests fence instructions and patterns used for atomics
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Memory fence

@@ -1,6 +1,6 @@
 // Test inline assembly with practical use cases (no branching)
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Multiply by 2 using shift

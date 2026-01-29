@@ -2,7 +2,7 @@
 // Tests 'r' constraint - compiler chooses register
 // M65832 GPRs are R0-R63 real general purpose registers
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Basic 'r' constraint - addition

@@ -1,7 +1,7 @@
 // Test inline assembly with memory operations
 // Basic memory operations without indirect addressing (which may crash)
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Load and store through accumulator

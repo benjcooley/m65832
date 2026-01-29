@@ -1,7 +1,7 @@
 // Test inline assembly with extended ALU instructions
 // Tests LD, CMP with R-register targets
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: LD immediate to register

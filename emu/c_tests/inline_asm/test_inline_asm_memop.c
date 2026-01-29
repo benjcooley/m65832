@@ -2,7 +2,7 @@
 // Note: Full "m" constraint support requires backend work
 // For now, test patterns that work through registers
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Volatile variable through register

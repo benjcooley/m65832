@@ -1,7 +1,7 @@
 // Test inline assembly patterns used for syscalls
 // Tests named register variables and syscall-like patterns
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Named register variable with explicit constraint

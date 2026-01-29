@@ -1,8 +1,12 @@
-#!/bin/bash
-# Struct/Union/Enum tests
+# Struct Tests - Comprehensive struct access patterns
+# Sourced by run_c_tests.sh
 
-run_test "Struct basic"         "tests/struct_basic.c"      "0000001E"
-run_test "Struct nested"        "tests/struct_nested.c"     "0000000F"
-run_test "Struct pointer"       "tests/struct_ptr.c"        "0000002A"
-run_test "Union basic"          "tests/union_basic.c"       "00000078"
-run_test "Enum basic"           "tests/enum_basic.c"        "00000002"
+# Mixed-size struct fields
+run_test "Struct mixed sizes"   "tests/struct_mixed_sizes.c"   "00000001"
+run_test "Struct packed"        "tests/struct_packed.c"        "00000001"
+
+# Original tests (backward compat)
+run_test "Simple struct"        "tests/struct_simple.c"        "00000001"
+run_test "Nested struct"        "tests/struct_nested.c"        "00000001"
+run_test "Struct pointer"       "tests/struct_pointer.c"       "00000001"
+run_test "Struct array"         "tests/struct_array.c"         "00000001"

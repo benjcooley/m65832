@@ -1,7 +1,7 @@
 // Test inline assembly with accumulator 'a' constraint
 // The 'a' constraint forces use of the A register
 
-int _c_main(void) {
+int main(void) {
     int failures = 0;
     
     // Test 1: Basic 'a' constraint for output
