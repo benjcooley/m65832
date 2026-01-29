@@ -171,7 +171,7 @@ def link_test(obj_path: str, work_dir: str) -> Tuple[bool, str, str]:
 
 def run_test(elf_path: str) -> Tuple[bool, int, str]:
     """Run a test on the emulator. Returns (success, exit_code, output)."""
-    cmd = [EMU, "-c", str(MAX_CYCLES), "-s", elf_path]
+    cmd = [EMU, "-c", str(MAX_CYCLES), "--stop-on-brk", "-s", elf_path]
     
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     output = result.stdout + result.stderr
