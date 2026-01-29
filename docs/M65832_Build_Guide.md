@@ -47,12 +47,23 @@ sudo dnf install cmake ninja-build python3 meson
 git clone https://github.com/benjcooley/m65832.git
 cd m65832
 
-# Build everything for baremetal
+# Configure the build (validates prerequisites)
+./configure.sh
+
+# Build just the tools (emulator + assembler) - fast
+./build.sh tools
+
+# Run quick tests
+./test.sh --quick
+
+# Build full baremetal toolchain (includes LLVM - slow)
 ./build.sh baremetal
 
-# Run the test suite
-./build.sh test
+# Run all tests
+./test.sh
 ```
+
+For detailed build system documentation, see [M65832_Build_System.md](M65832_Build_System.md).
 
 ## Directory Structure
 
@@ -320,6 +331,7 @@ Edit `llvm-m65832/m65832-stdlib/picolibc/syscalls.c` to add new system calls. Th
 
 ## See Also
 
+- [M65832_Build_System.md](M65832_Build_System.md) - Detailed build system reference
 - [M65832_Architecture_Reference.md](M65832_Architecture_Reference.md) - CPU architecture
 - [M65832_Instruction_Set.md](M65832_Instruction_Set.md) - Instruction encoding
 - [M65832_C_ABI.md](M65832_C_ABI.md) - C calling convention

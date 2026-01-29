@@ -87,19 +87,29 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - [ ] C compiler optimization and standard library
 - [ ] Linux boot and userland enablement
 
-## Running Tests
+## Building & Testing
 
 ```bash
-# RTL testbenches (requires GHDL)
-tb/run_core_tests.sh          # Core and MMU tests
-tb/run_coprocessor_tests.sh   # 6502 coprocessor tests
+# Quick start
+./configure.sh           # Configure (validates prerequisites)
+./build.sh tools         # Build emulator + assembler (fast)
+./test.sh --quick        # Quick smoke tests
 
-# Assembler/disassembler tests
-cd as && make && ./run_tests.sh
+# Full build
+./build.sh baremetal     # Build full toolchain (includes LLVM - slow)
+./test.sh                # Run all tests
 
-# Emulator tests
-cd emu && make && ./run_tests.sh
+# Individual test suites
+./test.sh --emulator     # Emulator tests
+./test.sh --assembler    # Assembler tests
+./test.sh --compiler     # C compiler tests
+./test.sh --rtl          # RTL/VHDL tests (requires GHDL)
+
+# Check build status
+./build.sh status
 ```
+
+See [Build System Reference](docs/M65832_Build_System.md) for complete documentation.
 
 ## Architecture Highlights
 

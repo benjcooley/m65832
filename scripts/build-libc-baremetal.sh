@@ -23,6 +23,21 @@ STDLIB_DIR="$LLVM_SRC/m65832-stdlib"
 # Functions
 # ============================================================================
 
+resolve_llvm_tool() {
+    local preferred="$1"
+    local fallback="$2"
+    local system_fallback="$3"
+    if [ -x "$preferred" ]; then
+        echo "$preferred"
+    elif [ -x "$fallback" ]; then
+        echo "$fallback"
+    elif [ -n "$system_fallback" ]; then
+        echo "$system_fallback"
+    else
+        echo "$preferred"
+    fi
+}
+
 check_dependencies() {
     log_info "Checking dependencies..."
     
@@ -55,16 +70,23 @@ generate_cross_file() {
     
     local cross_file="$PICOLIBC_BUILD/cross-m65832-baremetal.txt"
     mkdir -p "$PICOLIBC_BUILD"
+    local clang_for_build="$CLANG"
+    if [ ! -x "$clang_for_build" ] && [ -x "$LLVM_BUILD/bin/clang" ]; then
+        clang_for_build="$LLVM_BUILD/bin/clang"
+    fi
+    local llvm_ar
+    local llvm_ranlib
+    llvm_ar="$(resolve_llvm_tool "$LLVM_AR" "$LLVM_BUILD/bin/llvm-ar" "ar")"
+    llvm_ranlib="$(resolve_llvm_tool "$LLVM_RANLIB" "$LLVM_BUILD/bin/llvm-ranlib" "ranlib")"
     
     # Create clang wrapper
     local clang_wrapper="$PICOLIBC_BUILD/m65832-clang"
     cat > "$clang_wrapper" << EOF
 #!/bin/bash
 # Wrapper for clang that adds M65832 target flags
-exec $CLANG \\
+exec $clang_for_build \\
     -target m65832-elf \\
     -ffreestanding \\
-    -fuse-ld=lld \\
     "\$@"
 EOF
     chmod +x "$clang_wrapper"
@@ -79,11 +101,11 @@ stdlib_dir = '$STDLIB_DIR'
 
 [binaries]
 c = '$clang_wrapper'
-ar = '$LLVM_AR'
+ar = '$llvm_ar'
 as = '$clang_wrapper'
 ld = '$LLD'
 strip = 'strip'
-ranlib = '$LLVM_RANLIB'
+ranlib = '$llvm_ranlib'
 
 [built-in options]
 # Note: -g disabled due to debug info crash in MCAssembler::layout()
@@ -138,6 +160,9 @@ install_m65832_files() {
     
     local lib_dir="$SYSROOT_BAREMETAL/lib"
     local inc_dir="$SYSROOT_BAREMETAL/include"
+    local builtins_dir="$LLVM_SRC/compiler-rt/lib/builtins"
+    local llvm_ar
+    llvm_ar="$(resolve_llvm_tool "$LLVM_AR" "$LLVM_BUILD/bin/llvm-ar" "ar")"
     
     mkdir -p "$lib_dir" "$inc_dir"
     
@@ -156,9 +181,27 @@ install_m65832_files() {
     log_info "Installing linker script..."
     cp "$STDLIB_DIR/picolibc/m65832.ld" "$lib_dir/"
     
+    # Compile compiler-rt soft-float builtins needed by picolibc
+    log_info "Compiling compiler-rt soft-float builtins..."
+    local builtin_srcs=(
+        "floatdisf.c"
+        "fixsfdi.c"
+        "fixdfdi.c"
+        "mulsc3.c"
+        "muldc3.c"
+    )
+    local builtin_objs=()
+    for src in "${builtin_srcs[@]}"; do
+        local obj="$lib_dir/${src%.c}.o"
+        "$CLANG" -target m65832-elf -ffreestanding -O1 -D__SOFTFP__ \
+            -I"$builtins_dir" \
+            -c "$builtins_dir/$src" -o "$obj"
+        builtin_objs+=("$obj")
+    done
+
     # Create libsys.a
     log_info "Creating libsys.a..."
-    "$LLVM_AR" rcs "$lib_dir/libsys.a" "$lib_dir/syscalls.o"
+    "$llvm_ar" rcs "$lib_dir/libsys.a" "$lib_dir/syscalls.o" "${builtin_objs[@]}"
     
     log_success "M65832 files installed"
 }
