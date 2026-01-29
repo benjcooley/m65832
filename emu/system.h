@@ -9,6 +9,7 @@
 #define SYSTEM_H
 
 #include "m65832emu.h"
+#include "platform.h"
 #include "uart.h"
 #include "blkdev.h"
 #include <stdbool.h>
@@ -19,27 +20,19 @@ extern "C" {
 
 /* ============================================================================
  * System Memory Map
- * ========================================================================= */
-
-/*
- * Memory Map (for Linux-capable system):
  *
- *   0x00000000 - 0x00000FFF   Reserved (vectors, zero page)
- *   0x00001000 - 0x00001FFF   Boot parameters
- *   0x00002000 - 0x000FFFFF   Available RAM
- *   0x00100000 - 0x00FFFFFF   Kernel load area (1MB-16MB)
- *   0x01000000 - 0x0FFFFFFF   initrd / general RAM
- *   0xFFFF0000 - 0xFFFF0FFF   Boot ROM (4KB)
- *   0xFFFFF000 - 0xFFFFF0FF   System registers (MMU, timer)
- *   0xFFFFF100 - 0xFFFFF10F   UART
- *   0xFFFFF120 - 0xFFFFF13F   Block device
- */
+ * Memory map is defined by platform headers (platform_de25.h, platform_kv260.h)
+ * All platforms use the same logical layout for software compatibility:
+ *
+ *   0x00000000 - 0x0000FFFF   Boot ROM (64 KB)
+ *   0x00010000 - 0x0FFFFFFF   DDR RAM (up to 256 MB)
+ *   0x10000000 - 0x100FFFFF   Peripheral MMIO (1 MB)
+ *   0xFFFFF000 - 0xFFFFFFFF   System registers (MMU, timer)
+ * ========================================================================= */
 
 #define SYSTEM_BOOT_PARAMS      0x00001000
 #define SYSTEM_KERNEL_LOAD      0x00100000
 #define SYSTEM_INITRD_LOAD      0x01000000
-#define SYSTEM_BOOT_ROM         0xFFFF0000
-#define SYSTEM_BOOT_ROM_SIZE    0x1000
 
 /* ============================================================================
  * Boot Parameters Structure
@@ -73,8 +66,11 @@ typedef struct {
  * ========================================================================= */
 
 typedef struct {
-    /* Memory configuration */
-    size_t ram_size;            /* RAM size in bytes (default 256MB) */
+    /* Platform selection */
+    platform_id_t platform;     /* Target platform (DE25, KV260, etc.) */
+    
+    /* Memory configuration (0 = use platform default) */
+    size_t ram_size;            /* RAM size in bytes */
     
     /* Boot configuration */
     const char *kernel_file;    /* Kernel binary to load (NULL = none) */
@@ -97,9 +93,6 @@ typedef struct {
     bool verbose;               /* Verbose output */
 } system_config_t;
 
-/* Default configuration values */
-#define SYSTEM_DEFAULT_RAM_SIZE     (256 * 1024 * 1024)  /* 256 MB */
-
 /* ============================================================================
  * System State
  * ========================================================================= */
@@ -117,6 +110,7 @@ typedef struct system_state {
     
     /* Configuration */
     system_config_t config;
+    const platform_config_t *platform;  /* Active platform configuration */
     
     /* State */
     bool running;

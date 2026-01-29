@@ -3,12 +3,16 @@
  *
  * Simple UART device connected to host terminal.
  * Provides serial I/O for console access.
+ *
+ * Register layout matches platform headers and Linux platform.h
  */
 
 #ifndef UART_H
 #define UART_H
 
 #include "m65832emu.h"
+#include "platform.h"
+#include "platform_de25.h"      /* Default register definitions */
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -17,30 +21,35 @@ extern "C" {
 
 /* ============================================================================
  * UART Register Definitions
+ *
+ * Base address comes from platform config (e.g., DE25_UART_BASE = 0x10006000)
+ * Register offsets:
+ *   DE25_UART_DATA   = 0x00  (TX/RX data)
+ *   DE25_UART_STATUS = 0x04  (Status)
+ *   DE25_UART_CTRL   = 0x08  (Control)
+ *   DE25_UART_BAUD   = 0x0C  (Baud divisor)
  * ========================================================================= */
 
-/* UART base address (in MMIO space - 24-bit addressable) */
-#define UART_BASE       0x00FFF100
+/* UART region size (4 KB) */
+#define UART_SIZE               DE25_PERIPH_SIZE
 
-/* UART register offsets */
-#define UART_STATUS     0x00    /* Status register (R) */
-#define UART_TX_DATA    0x04    /* Transmit data (W) */
-#define UART_RX_DATA    0x08    /* Receive data (R) */
-#define UART_CTRL       0x0C    /* Control register (R/W) */
-
-/* UART region size */
-#define UART_SIZE       0x10
+/* Register offsets (use DE25 as canonical) */
+#define UART_DATA               DE25_UART_DATA
+#define UART_STATUS             DE25_UART_STATUS
+#define UART_CTRL               DE25_UART_CTRL
+#define UART_BAUD               DE25_UART_BAUD
 
 /* Status register bits */
-#define UART_STATUS_TX_READY    0x01    /* TX buffer empty, ready to send */
-#define UART_STATUS_RX_AVAIL    0x02    /* RX data available */
-#define UART_STATUS_TX_BUSY     0x04    /* TX in progress (always 0 for us) */
-#define UART_STATUS_RX_OVERRUN  0x08    /* RX buffer overrun */
+#define UART_STATUS_RX_AVAIL    DE25_UART_STATUS_RXRDY
+#define UART_STATUS_TX_READY    DE25_UART_STATUS_TXRDY
+#define UART_STATUS_TX_BUSY     DE25_UART_STATUS_TXBUSY
+#define UART_STATUS_RX_OVERRUN  DE25_UART_STATUS_RXERR
 
 /* Control register bits */
-#define UART_CTRL_RX_IRQ_EN     0x01    /* Enable RX interrupt */
-#define UART_CTRL_TX_IRQ_EN     0x02    /* Enable TX interrupt (not used) */
-#define UART_CTRL_LOOPBACK      0x04    /* Loopback mode (for testing) */
+#define UART_CTRL_RX_IRQ_EN     DE25_UART_CTRL_RXIE
+#define UART_CTRL_TX_IRQ_EN     DE25_UART_CTRL_TXIE
+#define UART_CTRL_ENABLE        DE25_UART_CTRL_ENABLE
+#define UART_CTRL_LOOPBACK      DE25_UART_CTRL_LOOPBACK
 
 /* ============================================================================
  * UART State
@@ -56,6 +65,7 @@ typedef struct uart_state {
     uint8_t ctrl;
     
     /* Configuration */
+    uint32_t base_addr;         /* MMIO base address (from platform) */
     bool    loopback;           /* Loopback mode for testing */
     bool    raw_mode;           /* Terminal in raw mode */
     
@@ -71,12 +81,13 @@ typedef struct uart_state {
  * ========================================================================= */
 
 /*
- * Initialize UART device and register with CPU.
+ * Initialize UART device and register with CPU at platform-specific address.
  *
  * @param cpu       CPU instance to attach to
+ * @param platform  Platform configuration (determines base address)
  * @return          UART state, or NULL on error
  */
-uart_state_t *uart_init(m65832_cpu_t *cpu);
+uart_state_t *uart_init(m65832_cpu_t *cpu, const platform_config_t *platform);
 
 /*
  * Destroy UART device and unregister from CPU.

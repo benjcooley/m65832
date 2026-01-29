@@ -18,7 +18,8 @@ void system_config_init(system_config_t *config) {
     
     memset(config, 0, sizeof(*config));
     
-    config->ram_size = SYSTEM_DEFAULT_RAM_SIZE;
+    config->platform = platform_get_default();
+    config->ram_size = 0;       /* 0 = use platform default */
     config->kernel_file = NULL;
     config->initrd_file = NULL;
     config->cmdline = NULL;
@@ -104,8 +105,17 @@ system_state_t *system_init(const system_config_t *config) {
     /* Copy configuration */
     sys->config = *config;
     
+    /* Get platform configuration */
+    sys->platform = platform_get_config(config->platform);
+    
+    /* Determine RAM size (use platform default if not specified) */
+    size_t ram_size = config->ram_size;
+    if (ram_size == 0) {
+        ram_size = sys->platform->ram_size;
+    }
+    
     /* Create CPU */
-    sys->cpu = m65832_emu_init(config->ram_size);
+    sys->cpu = m65832_emu_init(ram_size);
     if (!sys->cpu) {
         fprintf(stderr, "error: cannot create CPU\n");
         free(sys);
@@ -113,12 +123,16 @@ system_state_t *system_init(const system_config_t *config) {
     }
     
     if (config->verbose) {
-        printf("System: %zu MB RAM\n", config->ram_size / (1024 * 1024));
+        printf("System: Platform %s (%s)\n", 
+               sys->platform->name, sys->platform->description);
+        printf("System: %zu MB RAM, CPU %u MHz\n", 
+               ram_size / (1024 * 1024),
+               sys->platform->cpu_freq / 1000000);
     }
     
     /* Initialize UART */
     if (config->enable_uart) {
-        sys->uart = uart_init(sys->cpu);
+        sys->uart = uart_init(sys->cpu, sys->platform);
         if (!sys->uart) {
             fprintf(stderr, "error: cannot initialize UART\n");
             m65832_emu_close(sys->cpu);
@@ -131,13 +145,14 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: UART at 0x%08X\n", UART_BASE);
+            printf("System: UART at 0x%08X\n", sys->platform->uart_base);
         }
     }
     
     /* Initialize block device */
     if (config->enable_blkdev) {
-        sys->blkdev = blkdev_init(sys->cpu, config->disk_file, config->disk_readonly);
+        sys->blkdev = blkdev_init(sys->cpu, sys->platform, 
+                                   config->disk_file, config->disk_readonly);
         if (!sys->blkdev) {
             fprintf(stderr, "error: cannot initialize block device\n");
             if (sys->uart) uart_destroy(sys->uart);
@@ -147,7 +162,7 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: Block device at 0x%08X", BLKDEV_BASE);
+            printf("System: SD/Block device at 0x%08X", sys->platform->sd_base);
             if (config->disk_file) {
                 printf(" (%s, %llu sectors)\n", 
                        config->disk_file, 
@@ -162,10 +177,10 @@ system_state_t *system_init(const system_config_t *config) {
     memset(&sys->boot_params, 0, sizeof(sys->boot_params));
     sys->boot_params.magic = BOOT_PARAMS_MAGIC;
     sys->boot_params.version = BOOT_PARAMS_VERSION;
-    sys->boot_params.mem_base = 0;
-    sys->boot_params.mem_size = (uint32_t)config->ram_size;
-    sys->boot_params.uart_base = config->enable_uart ? UART_BASE : 0;
-    sys->boot_params.timer_base = SYSREG_TIMER_CTRL;
+    sys->boot_params.mem_base = sys->platform->ram_base;
+    sys->boot_params.mem_size = (uint32_t)ram_size;
+    sys->boot_params.uart_base = config->enable_uart ? sys->platform->uart_base : 0;
+    sys->boot_params.timer_base = sys->platform->timer_base;
     
     /* Load kernel if specified */
     if (config->kernel_file) {
@@ -396,21 +411,24 @@ m65832_cpu_t *system_get_cpu(system_state_t *sys) {
 }
 
 void system_print_info(system_state_t *sys) {
-    if (!sys) return;
+    if (!sys || !sys->platform) return;
     
     printf("M65832 System Configuration:\n");
-    printf("  RAM:          %zu MB\n", sys->config.ram_size / (1024 * 1024));
+    printf("  Platform:     %s (%s)\n", sys->platform->name, sys->platform->description);
+    printf("  RAM:          %u MB at 0x%08X\n", 
+           sys->boot_params.mem_size / (1024 * 1024), sys->platform->ram_base);
+    printf("  CPU:          %u MHz\n", sys->platform->cpu_freq / 1000000);
     printf("  UART:         %s at 0x%08X\n", 
-           sys->uart ? "enabled" : "disabled", UART_BASE);
+           sys->uart ? "enabled" : "disabled", sys->platform->uart_base);
     printf("  Block device: %s at 0x%08X\n",
-           sys->blkdev ? "enabled" : "disabled", BLKDEV_BASE);
+           sys->blkdev ? "enabled" : "disabled", sys->platform->sd_base);
     if (sys->blkdev && blkdev_get_capacity(sys->blkdev) > 0) {
         uint64_t cap_mb = blkdev_get_capacity_bytes(sys->blkdev) / (1024 * 1024);
         printf("    Disk:       %llu MB (%llu sectors)\n",
                (unsigned long long)cap_mb,
                (unsigned long long)blkdev_get_capacity(sys->blkdev));
     }
-    printf("  Timer:        0x%08X\n", SYSREG_TIMER_CTRL);
+    printf("  Timer:        0x%08X\n", sys->platform->timer_base);
     
     if (sys->boot_params.kernel_size > 0) {
         printf("  Kernel:       0x%08X (%u bytes)\n",

@@ -363,13 +363,15 @@ static void blkdev_mmio_write(m65832_cpu_t *cpu, uint32_t addr,
  * Public API
  * ========================================================================= */
 
-blkdev_state_t *blkdev_init(m65832_cpu_t *cpu, const char *filename, bool read_only) {
-    if (!cpu) return NULL;
+blkdev_state_t *blkdev_init(m65832_cpu_t *cpu, const platform_config_t *platform,
+                            const char *filename, bool read_only) {
+    if (!cpu || !platform) return NULL;
     
     blkdev_state_t *blk = calloc(1, sizeof(blkdev_state_t));
     if (!blk) return NULL;
     
     blk->cpu = cpu;
+    blk->base_addr = platform->sd_base;
     blk->file = NULL;
     blk->filename = NULL;
     blk->capacity = 0;
@@ -385,15 +387,15 @@ blkdev_state_t *blkdev_init(m65832_cpu_t *cpu, const char *filename, bool read_o
     blk->irq_enable = false;
     blk->irq_pending = false;
     
-    /* Register MMIO region */
+    /* Register MMIO region at platform-specified address */
     blk->mmio_index = m65832_mmio_register(
         cpu,
-        BLKDEV_BASE,
+        platform->sd_base,
         BLKDEV_SIZE,
         blkdev_mmio_read,
         blkdev_mmio_write,
         blk,
-        "BLKDEV"
+        "SD/BLKDEV"
     );
     
     if (blk->mmio_index < 0) {

@@ -7,6 +7,7 @@
 
 #include "m65832emu.h"
 #include "system.h"
+#include "platform.h"
 #include "uart.h"
 #include "blkdev.h"
 #include <stdio.h>
@@ -166,7 +167,9 @@ static void print_usage(const char *prog) {
     printf("  --coproc FREQ        Enable 6502 coprocessor at frequency (Hz)\n");
     printf("\nSystem Mode (Linux boot support):\n");
     printf("  --system             Enable system mode with UART and boot support\n");
-    printf("  --ram SIZE           RAM size (e.g., 256M, 1G) (default: 256M)\n");
+    printf("  --platform NAME      Target platform: de25 (default), kv260\n");
+    printf("  --list-platforms     List all supported platforms\n");
+    printf("  --ram SIZE           RAM size (e.g., 256M, 1G) (default: platform-specific)\n");
     printf("  --kernel FILE        Load kernel at 0x00100000\n");
     printf("  --initrd FILE        Load initrd at 0x01000000\n");
     printf("  --cmdline \"STRING\"   Kernel command line\n");
@@ -729,8 +732,9 @@ int main(int argc, char *argv[]) {
     const char *cmdline = NULL;
     const char *disk_file = NULL;
     int disk_readonly = 0;
-    size_t sys_ram_size = 256 * 1024 * 1024;  /* Default 256 MB */
+    size_t sys_ram_size = 0;  /* 0 = use platform default */
     int raw_mode = 0;
+    platform_id_t platform_id = PLATFORM_DE25;  /* Default platform */
     
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -788,6 +792,15 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--system") == 0) {
             g_system_mode = 1;
         }
+        else if (strcmp(argv[i], "--platform") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            platform_id = platform_get_by_name(argv[i]);
+            g_system_mode = 1;
+        }
+        else if (strcmp(argv[i], "--list-platforms") == 0) {
+            platform_list_all();
+            return 0;
+        }
         else if (strcmp(argv[i], "--ram") == 0) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             sys_ram_size = parse_ram_size(argv[i]);
@@ -844,7 +857,8 @@ int main(int argc, char *argv[]) {
         system_config_t config;
         system_config_init(&config);
         
-        config.ram_size = sys_ram_size;
+        config.platform = platform_id;
+        config.ram_size = sys_ram_size;  /* 0 = use platform default */
         config.kernel_file = kernel_file;
         config.initrd_file = initrd_file;
         config.cmdline = cmdline;
@@ -936,7 +950,8 @@ int main(int argc, char *argv[]) {
     }
     
     /* Initialize UART for console I/O (always enabled in legacy mode) */
-    uart_state_t *uart = uart_init(g_cpu);
+    const platform_config_t *legacy_platform = platform_get_config(platform_get_default());
+    uart_state_t *uart = uart_init(g_cpu, legacy_platform);
     if (!uart && g_verbose) {
         fprintf(stderr, "Warning: Failed to initialize UART\n");
     }

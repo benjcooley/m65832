@@ -159,23 +159,24 @@ static void uart_mmio_write(m65832_cpu_t *cpu, uint32_t addr,
  * Public API
  * ========================================================================= */
 
-uart_state_t *uart_init(m65832_cpu_t *cpu) {
-    if (!cpu) return NULL;
+uart_state_t *uart_init(m65832_cpu_t *cpu, const platform_config_t *platform) {
+    if (!cpu || !platform) return NULL;
     
     uart_state_t *uart = calloc(1, sizeof(uart_state_t));
     if (!uart) return NULL;
     
     uart->cpu = cpu;
+    uart->base_addr = platform->uart_base;
     uart->rx_avail = false;
     uart->rx_overrun = false;
     uart->ctrl = 0;
     uart->loopback = false;
     uart->raw_mode = false;
     
-    /* Register MMIO region */
+    /* Register MMIO region at platform-specified address */
     uart->mmio_index = m65832_mmio_register(
         cpu,
-        UART_BASE,
+        platform->uart_base,
         UART_SIZE,
         uart_mmio_read,
         uart_mmio_write,

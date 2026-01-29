@@ -3,12 +3,17 @@
  *
  * Simple block device for disk/storage access.
  * Supports sector-based read/write with DMA transfers.
+ *
+ * This emulates the SD card controller defined in platform headers,
+ * but provides a simplified DMA-based interface for block I/O.
  */
 
 #ifndef BLKDEV_H
 #define BLKDEV_H
 
 #include "m65832emu.h"
+#include "platform.h"
+#include "platform_de25.h"      /* Default register definitions */
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -18,37 +23,41 @@ extern "C" {
 
 /* ============================================================================
  * Block Device Register Definitions
+ *
+ * Base address comes from platform config (e.g., DE25_SD_BASE = 0x1000A000)
+ *
+ * We use a simplified register interface that maps to the SD controller's
+ * DMA mode, making it easy to implement in both emulator and VHDL.
  * ========================================================================= */
 
-/* Block device base address (in MMIO space - 24-bit addressable) */
-#define BLKDEV_BASE         0x00FFF120
+/* Block device region size (4 KB) */
+#define BLKDEV_SIZE             DE25_PERIPH_SIZE
 
-/* Block device register offsets (32 bytes total) */
-#define BLKDEV_STATUS       0x00    /* Status register (R) */
-#define BLKDEV_COMMAND      0x04    /* Command register (W) */
-#define BLKDEV_SECTOR_LO    0x08    /* Sector number low 32 bits (R/W) */
-#define BLKDEV_SECTOR_HI    0x0C    /* Sector number high 32 bits (R/W) */
-#define BLKDEV_DMA_ADDR     0x10    /* DMA address for data transfer (R/W) */
-#define BLKDEV_COUNT        0x14    /* Sector count for multi-sector ops (R/W) */
-#define BLKDEV_CAPACITY_LO  0x18    /* Disk capacity in sectors - low (R) */
-#define BLKDEV_CAPACITY_HI  0x1C    /* Disk capacity in sectors - high (R) */
-
-/* Block device region size */
-#define BLKDEV_SIZE         0x20
+/* Register offsets (matches SD controller DMA extension) */
+#define BLKDEV_STATUS           DE25_SD_STATUS      /* Status register (R) */
+#define BLKDEV_CTRL             DE25_SD_CTRL        /* Control/Command (W) */
+#define BLKDEV_SECTOR_LO        DE25_SD_ARG         /* Sector number low (R/W) */
+#define BLKDEV_SECTOR_HI        DE25_SD_RESP0       /* Sector number high (R/W) */
+#define BLKDEV_DMA_ADDR         DE25_SD_DMA_ADDR    /* DMA address (R/W) */
+#define BLKDEV_COUNT            DE25_SD_BLKCNT      /* Block count (R/W) */
+#define BLKDEV_BLKSIZE          DE25_SD_BLKSIZE     /* Block size (R/W) */
+#define BLKDEV_CAPACITY_LO      0x40                /* Capacity low (R) */
+#define BLKDEV_CAPACITY_HI      0x44                /* Capacity high (R) */
 
 /* Sector size (standard 512 bytes) */
-#define BLKDEV_SECTOR_SIZE  512
+#define BLKDEV_SECTOR_SIZE      512
 
-/* Status register bits */
-#define BLKDEV_STATUS_READY     0x01    /* Device ready for commands */
-#define BLKDEV_STATUS_BUSY      0x02    /* Operation in progress */
-#define BLKDEV_STATUS_ERROR     0x04    /* Error occurred */
-#define BLKDEV_STATUS_DRQ       0x08    /* Data request (for PIO mode) */
-#define BLKDEV_STATUS_PRESENT   0x10    /* Media present */
-#define BLKDEV_STATUS_WRITABLE  0x20    /* Media is writable */
-#define BLKDEV_STATUS_IRQ       0x40    /* IRQ pending (operation complete) */
+/* Status register bits (compatible with SD controller) */
+#define BLKDEV_STATUS_PRESENT   DE25_SD_STATUS_PRESENT
+#define BLKDEV_STATUS_READY     DE25_SD_STATUS_READY
+#define BLKDEV_STATUS_BUSY      DE25_SD_STATUS_BUSY
+#define BLKDEV_STATUS_ERROR     DE25_SD_STATUS_ERROR
+#define BLKDEV_STATUS_COMPLETE  DE25_SD_STATUS_COMPLETE
+#define BLKDEV_STATUS_DRQ       (1 << 14)   /* Data request (for PIO mode) */
+#define BLKDEV_STATUS_WRITABLE  (1 << 15)   /* Media is writable */
+#define BLKDEV_STATUS_IRQ       (1 << 16)   /* IRQ pending */
 
-/* Error codes (in high byte of status when ERROR is set) */
+/* Error codes (in error register when ERROR status is set) */
 #define BLKDEV_ERR_NONE         0x00    /* No error */
 #define BLKDEV_ERR_NOT_READY    0x01    /* Device not ready */
 #define BLKDEV_ERR_NO_MEDIA     0x02    /* No media present */
@@ -58,7 +67,7 @@ extern "C" {
 #define BLKDEV_ERR_BAD_CMD      0x06    /* Invalid command */
 #define BLKDEV_ERR_DMA          0x07    /* DMA address error */
 
-/* Command codes */
+/* Command codes (written to CTRL register) */
 #define BLKDEV_CMD_NOP          0x00    /* No operation */
 #define BLKDEV_CMD_READ         0x01    /* Read sector(s) via DMA */
 #define BLKDEV_CMD_WRITE        0x02    /* Write sector(s) via DMA */
@@ -87,6 +96,7 @@ typedef struct blkdev_state {
     uint8_t     error;              /* Error code */
     
     /* Configuration */
+    uint32_t    base_addr;          /* MMIO base address (from platform) */
     bool        irq_enable;         /* IRQ enabled */
     bool        irq_pending;        /* IRQ waiting to be acknowledged */
     
@@ -105,11 +115,13 @@ typedef struct blkdev_state {
  * Initialize block device with a disk image file.
  *
  * @param cpu           CPU instance to attach to
+ * @param platform      Platform configuration (determines base address)
  * @param filename      Path to disk image file (NULL = no disk)
  * @param read_only     Open file read-only
  * @return              Block device state, or NULL on error
  */
-blkdev_state_t *blkdev_init(m65832_cpu_t *cpu, const char *filename, bool read_only);
+blkdev_state_t *blkdev_init(m65832_cpu_t *cpu, const platform_config_t *platform,
+                            const char *filename, bool read_only);
 
 /*
  * Destroy block device and close file.
