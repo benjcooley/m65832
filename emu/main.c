@@ -96,6 +96,7 @@ static int g_verbose = 0;
 static uint64_t g_max_cycles = 0;
 static uint64_t g_max_instructions = 0;
 static int g_system_mode = 0;  /* Use system layer instead of raw CPU */
+static int g_stop_on_brk = 0;  /* Stop on BRK instruction (for test harnesses) */
 
 /* ============================================================================
  * Signal Handler
@@ -161,6 +162,7 @@ static void print_usage(const char *prog) {
     printf("  -i, --interactive    Interactive debugger mode\n");
     printf("  -x, --hex            Load Intel HEX file instead of binary\n");
     printf("  --emulation          Start in 6502 emulation mode (default: 32-bit native)\n");
+    printf("  --stop-on-brk        Stop execution on BRK instruction (for test harnesses)\n");
     printf("  --coproc FREQ        Enable 6502 coprocessor at frequency (Hz)\n");
     printf("\nSystem Mode (Linux boot support):\n");
     printf("  --system             Enable system mode with UART and boot support\n");
@@ -775,6 +777,9 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--emulation") == 0 || strcmp(argv[i], "--emu") == 0) {
             emulation_mode = 1;
         }
+        else if (strcmp(argv[i], "--stop-on-brk") == 0) {
+            g_stop_on_brk = 1;
+        }
         else if (strcmp(argv[i], "--coproc") == 0) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             coproc_freq = (uint32_t)strtoul(argv[i], NULL, 0);
@@ -1040,12 +1045,21 @@ int main(int argc, char *argv[]) {
             
             /* Handle traps */
             m65832_trap_t trap = m65832_get_trap(g_cpu);
-            if (trap != TRAP_NONE && trap != TRAP_BRK && trap != TRAP_COP &&
-                trap != TRAP_SYSCALL) {
-                if (g_verbose) {
-                    printf("Trap: %s at %08X\n", m65832_trap_name(trap), g_cpu->trap_addr);
+            if (trap != TRAP_NONE && trap != TRAP_COP && trap != TRAP_SYSCALL) {
+                /* BRK: stop if --stop-on-brk flag is set */
+                if (trap == TRAP_BRK && g_stop_on_brk) {
+                    if (g_verbose) {
+                        printf("Trap: BRK at %08X (--stop-on-brk)\n", g_cpu->trap_addr);
+                    }
+                    break;
                 }
-                break;
+                /* Other traps (except BRK without flag) stop execution */
+                if (trap != TRAP_BRK) {
+                    if (g_verbose) {
+                        printf("Trap: %s at %08X\n", m65832_trap_name(trap), g_cpu->trap_addr);
+                    }
+                    break;
+                }
             }
         }
         

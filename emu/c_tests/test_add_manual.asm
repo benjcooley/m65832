@@ -15,5 +15,5 @@ do_test:
 
 ; Test function: returns 16 + 32 = 48
 test_add:
-    LD.L R0, #48        ; LLVM would generate: LD R0,#48
+    LD R0, #48
     RTS

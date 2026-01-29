@@ -61,19 +61,20 @@ fi
     echo ""
     echo "; === Startup code ==="
     echo "_crt_start:"
-    echo "    ; Initialize Direct Page to $4000"
-    echo "    LDA #\$4000"
-    echo "    TCD"
-    echo "    ; Initialize Stack Pointer to $FFFF"
-    echo "    LDX #\$FFFF"
-    echo "    TXS"
+    echo "    ; Initialize Direct Page to \$4000"
+    echo "    .byte 0xA9, 0x00, 0x40, 0x00, 0x00   ; LDA #\$00004000"
+    echo "    .byte 0x5B                            ; TCD"
+    echo "    ; Initialize Stack Pointer to \$FFFF"
+    echo "    .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   ; LDX #\$0000FFFF"
+    echo "    .byte 0x9A                            ; TXS"
     echo "    ; Initialize B register to 0 for absolute addressing"
-    echo "    SB #\$0000"
-    echo "    ; Call main"
-    echo "    JSR B+_c_main"
+    echo "    .byte 0x02, 0x22, 0x00, 0x00, 0x00, 0x00  ; SB #\$00000000"
+    echo "    ; Call main (32-bit JSR: opcode 0x20 + 4-byte address)"
+    echo "    .byte 0x20                            ; JSR opcode"
+    echo "    .long _c_main                         ; 32-bit address"
     echo "    ; Get return value from R0 and stop"
-    echo "    LDA R0"
-    echo "    STP"
+    echo "    .byte 0xA5, 0x00                      ; LDA dp \$00 (R0)"
+    echo "    .byte 0xDB                            ; STP"
     echo ""
     echo "; === Test code ==="
     # Filter output: skip ELF-specific directives, rename main->_c_main
@@ -81,6 +82,7 @@ fi
     # NOTE: This test harness injects a .org for .data because we do not run
     # a real linker here. In a production toolchain, the linker script would
     # place .text and .data in ROM/RAM respectively.
+    # NOTE: Convert JSR label to raw bytes (.byte 0x20 + .long label) for 32-bit mode
     cat "$WORKDIR/${BASE}.s" | \
         grep -v '^\s*\.file' | \
         grep -v '^\s*\.text' | \
@@ -96,7 +98,8 @@ fi
         sed 's/^[[:space:]]*\.data/.data\n    .org $2000  ; test harness: place .data in RAM without a linker/' | \
         sed 's/^[[:space:]]*\.bss/.bss\n    .org $3000  ; test harness: place .bss in RAM without a linker/' | \
         sed 's/^main:/_c_main:/' | \
-        sed 's/; @main/; @_c_main/'
+        sed 's/; @main/; @_c_main/' | \
+        sed 's/^\([[:space:]]*\)JSR[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)/\1.byte 0x20\n\1.long \2/'
 } > "$WORKDIR/${BASE}_combined.s"
 
 # Step 3: Assemble
@@ -108,8 +111,9 @@ fi
 
 # Step 4: Run on emulator (time the run)
 # Load binary at 0x1000 (matching .org $1000) and set entry point
+# Use --stop-on-brk to catch runaway code that jumps to address 0
 START_TIME=$(date +%s)
-OUTPUT=$($EMU -o 0x1000 -e 0x1000 -c "$CYCLES" -s "$WORKDIR/${BASE}.bin" 2>&1)
+OUTPUT=$($EMU -o 0x1000 -e 0x1000 -c "$CYCLES" --stop-on-brk -s "$WORKDIR/${BASE}.bin" 2>&1)
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
