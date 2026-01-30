@@ -135,44 +135,44 @@ typedef struct {
 
 /* Standard 6502/65816 opcode table */
 static const OpcodeEntry opcode_table[256] = {
-    /* 0x00-0x0F */
+    /* 0x00-0x0F - Note: M65832 $0B=ORA long (cc=11), not PHD; $0F=ORA (sr,S),Y */
     { "BRK", AM_IMP   }, { "ORA", AM_INDX  }, { "COP", AM_IMM   }, { "ORA", AM_SR    },
     { "TSB", AM_DP    }, { "ORA", AM_DP    }, { "ASL", AM_DP    }, { "ORA", AM_INDL  },
-    { "PHP", AM_IMP   }, { "ORA", AM_IMM_M }, { "ASL", AM_ACC   }, { "PHD", AM_IMP   },
-    { "TSB", AM_ABS   }, { "ORA", AM_ABS   }, { "ASL", AM_ABS   }, { "ORA", AM_ABSL  },
-    /* 0x10-0x1F */
-    { "BPL", AM_REL   }, { "ORA", AM_INDY  }, { "ORA", AM_IND   }, { "ORA", AM_SRIY  },
-    { "TRB", AM_DP    }, { "ORA", AM_DPX   }, { "ASL", AM_DPX   }, { "ORA", AM_INDLY },
+    { "PHP", AM_IMP   }, { "ORA", AM_IMM_M }, { "ASL", AM_ACC   }, { "ORA", AM_ABSL  },
+    { "TSB", AM_ABS   }, { "ORA", AM_ABS   }, { "ASL", AM_ABS   }, { "ORA", AM_SRIY  },
+    /* 0x10-0x1F - Note: M65832 $13=ORA [dp],Y, $17 undefined */
+    { "BPL", AM_REL   }, { "ORA", AM_INDY  }, { "ORA", AM_IND   }, { "ORA", AM_INDLY },
+    { "TRB", AM_DP    }, { "ORA", AM_DPX   }, { "ASL", AM_DPX   }, { "???", AM_IMP   },
     { "CLC", AM_IMP   }, { "ORA", AM_ABSY  }, { "INC", AM_ACC   }, { "TCS", AM_IMP   },
     { "TRB", AM_ABS   }, { "ORA", AM_ABSX  }, { "ASL", AM_ABSX  }, { "ORA", AM_ABSLX },
-    /* 0x20-0x2F */
+    /* 0x20-0x2F - Note: M65832 $2B=AND long (cc=11), not PLD; $2F=AND (sr,S),Y */
     { "JSR", AM_ABS   }, { "AND", AM_INDX  }, { "JSL", AM_ABSL  }, { "AND", AM_SR    },
     { "BIT", AM_DP    }, { "AND", AM_DP    }, { "ROL", AM_DP    }, { "AND", AM_INDL  },
-    { "PLP", AM_IMP   }, { "AND", AM_IMM_M }, { "ROL", AM_ACC   }, { "PLD", AM_IMP   },
-    { "BIT", AM_ABS   }, { "AND", AM_ABS   }, { "ROL", AM_ABS   }, { "AND", AM_ABSL  },
-    /* 0x30-0x3F */
-    { "BMI", AM_REL   }, { "AND", AM_INDY  }, { "AND", AM_IND   }, { "AND", AM_SRIY  },
-    { "BIT", AM_DPX   }, { "AND", AM_DPX   }, { "ROL", AM_DPX   }, { "AND", AM_INDLY },
+    { "PLP", AM_IMP   }, { "AND", AM_IMM_M }, { "ROL", AM_ACC   }, { "AND", AM_ABSL  },
+    { "BIT", AM_ABS   }, { "AND", AM_ABS   }, { "ROL", AM_ABS   }, { "AND", AM_SRIY  },
+    /* 0x30-0x3F - Note: M65832 $33=AND [dp],Y, $37 undefined */
+    { "BMI", AM_REL   }, { "AND", AM_INDY  }, { "AND", AM_IND   }, { "AND", AM_INDLY },
+    { "BIT", AM_DPX   }, { "AND", AM_DPX   }, { "ROL", AM_DPX   }, { "???", AM_IMP   },
     { "SEC", AM_IMP   }, { "AND", AM_ABSY  }, { "DEC", AM_ACC   }, { "TSC", AM_IMP   },
     { "BIT", AM_ABSX  }, { "AND", AM_ABSX  }, { "ROL", AM_ABSX  }, { "AND", AM_ABSLX },
-    /* 0x40-0x4F */
+    /* 0x40-0x4F - Note: M65832 $4B=EOR long (cc=11), not PHK; $4F=EOR (sr,S),Y */
     { "RTI", AM_IMP   }, { "EOR", AM_INDX  }, { "WDM", AM_IMM   }, { "EOR", AM_SR    },
     { "MVP", AM_MVP   }, { "EOR", AM_DP    }, { "LSR", AM_DP    }, { "EOR", AM_INDL  },
-    { "PHA", AM_IMP   }, { "EOR", AM_IMM_M }, { "LSR", AM_ACC   }, { "PHK", AM_IMP   },
-    { "JMP", AM_ABS   }, { "EOR", AM_ABS   }, { "LSR", AM_ABS   }, { "EOR", AM_ABSL  },
-    /* 0x50-0x5F */
-    { "BVC", AM_REL   }, { "EOR", AM_INDY  }, { "EOR", AM_IND   }, { "EOR", AM_SRIY  },
-    { "MVN", AM_MVP   }, { "EOR", AM_DPX   }, { "LSR", AM_DPX   }, { "EOR", AM_INDLY },
+    { "PHA", AM_IMP   }, { "EOR", AM_IMM_M }, { "LSR", AM_ACC   }, { "EOR", AM_ABSL  },
+    { "JMP", AM_ABS   }, { "EOR", AM_ABS   }, { "LSR", AM_ABS   }, { "EOR", AM_SRIY  },
+    /* 0x50-0x5F - Note: M65832 $53=EOR [dp],Y, $57 undefined */
+    { "BVC", AM_REL   }, { "EOR", AM_INDY  }, { "EOR", AM_IND   }, { "EOR", AM_INDLY },
+    { "MVN", AM_MVP   }, { "EOR", AM_DPX   }, { "LSR", AM_DPX   }, { "???", AM_IMP   },
     { "CLI", AM_IMP   }, { "EOR", AM_ABSY  }, { "PHY", AM_IMP   }, { "TCD", AM_IMP   },
     { "JML", AM_ABSL  }, { "EOR", AM_ABSX  }, { "LSR", AM_ABSX  }, { "EOR", AM_ABSLX },
-    /* 0x60-0x6F */
+    /* 0x60-0x6F - Note: M65832 $6B=ADC long (cc=11), not RTL; $6F=ADC (sr,S),Y */
     { "RTS", AM_IMP   }, { "ADC", AM_INDX  }, { "PER", AM_RELL  }, { "ADC", AM_SR    },
     { "STZ", AM_DP    }, { "ADC", AM_DP    }, { "ROR", AM_DP    }, { "ADC", AM_INDL  },
-    { "PLA", AM_IMP   }, { "ADC", AM_IMM_M }, { "ROR", AM_ACC   }, { "RTL", AM_IMP   },
-    { "JMP", AM_ABSIND}, { "ADC", AM_ABS   }, { "ROR", AM_ABS   }, { "ADC", AM_ABSL  },
-    /* 0x70-0x7F */
-    { "BVS", AM_REL   }, { "ADC", AM_INDY  }, { "ADC", AM_IND   }, { "ADC", AM_SRIY  },
-    { "STZ", AM_DPX   }, { "ADC", AM_DPX   }, { "ROR", AM_DPX   }, { "ADC", AM_INDLY },
+    { "PLA", AM_IMP   }, { "ADC", AM_IMM_M }, { "ROR", AM_ACC   }, { "ADC", AM_ABSL  },
+    { "JMP", AM_ABSIND}, { "ADC", AM_ABS   }, { "ROR", AM_ABS   }, { "ADC", AM_SRIY  },
+    /* 0x70-0x7F - Note: M65832 $73=ADC [dp],Y, $77 undefined */
+    { "BVS", AM_REL   }, { "ADC", AM_INDY  }, { "ADC", AM_IND   }, { "ADC", AM_INDLY },
+    { "STZ", AM_DPX   }, { "ADC", AM_DPX   }, { "ROR", AM_DPX   }, { "???", AM_IMP   },
     { "SEI", AM_IMP   }, { "ADC", AM_ABSY  }, { "PLY", AM_IMP   }, { "TDC", AM_IMP   },
     { "JMP", AM_ABSINDX},{ "ADC", AM_ABSX  }, { "ROR", AM_ABSX  }, { "ADC", AM_ABSLX },
     /* 0x80-0x8F */
@@ -180,39 +180,39 @@ static const OpcodeEntry opcode_table[256] = {
     { "STY", AM_DP    }, { "STA", AM_DP    }, { "STX", AM_DP    }, { "STA", AM_INDL  },
     { "DEY", AM_IMP   }, { "BIT", AM_IMM_M }, { "TXA", AM_IMP   }, { "PHB", AM_IMP   },
     { "STY", AM_ABS   }, { "STA", AM_ABS   }, { "STX", AM_ABS   }, { "STA", AM_ABSL  },
-    /* 0x90-0x9F */
-    { "BCC", AM_REL   }, { "STA", AM_INDY  }, { "STA", AM_IND   }, { "STA", AM_SRIY  },
-    { "STY", AM_DPX   }, { "STA", AM_DPX   }, { "STX", AM_DPY   }, { "STA", AM_INDLY },
+    /* 0x90-0x9F - Note: M65832 $93=STA [dp],Y (not (sr,S),Y), $97 undefined */
+    { "BCC", AM_REL   }, { "STA", AM_INDY  }, { "STA", AM_IND   }, { "STA", AM_INDLY },
+    { "STY", AM_DPX   }, { "STA", AM_DPX   }, { "STX", AM_DPY   }, { "???", AM_IMP   },
     { "TYA", AM_IMP   }, { "STA", AM_ABSY  }, { "TXS", AM_IMP   }, { "TXY", AM_IMP   },
     { "STZ", AM_ABS   }, { "STA", AM_ABSX  }, { "STZ", AM_ABSX  }, { "STA", AM_ABSLX },
-    /* 0xA0-0xAF */
+    /* 0xA0-0xAF - Note: M65832 remaps cc=11 opcodes (PLB->extended, $AB=LDA long, $AF=LDA (sr,S),Y) */
     { "LDY", AM_IMM_X }, { "LDA", AM_INDX  }, { "LDX", AM_IMM_X }, { "LDA", AM_SR    },
     { "LDY", AM_DP    }, { "LDA", AM_DP    }, { "LDX", AM_DP    }, { "LDA", AM_INDL  },
-    { "TAY", AM_IMP   }, { "LDA", AM_IMM_M }, { "TAX", AM_IMP   }, { "PLB", AM_IMP   },
-    { "LDY", AM_ABS   }, { "LDA", AM_ABS   }, { "LDX", AM_ABS   }, { "LDA", AM_ABSL  },
-    /* 0xB0-0xBF */
-    { "BCS", AM_REL   }, { "LDA", AM_INDY  }, { "LDA", AM_IND   }, { "LDA", AM_SRIY  },
-    { "LDY", AM_DPX   }, { "LDA", AM_DPX   }, { "LDX", AM_DPY   }, { "LDA", AM_INDLY },
+    { "TAY", AM_IMP   }, { "LDA", AM_IMM_M }, { "TAX", AM_IMP   }, { "LDA", AM_ABSL  },
+    { "LDY", AM_ABS   }, { "LDA", AM_ABS   }, { "LDX", AM_ABS   }, { "LDA", AM_SRIY  },
+    /* 0xB0-0xBF - Note: M65832 $B3=LDA [dp],Y (not (sr,S),Y), $B7 undefined */
+    { "BCS", AM_REL   }, { "LDA", AM_INDY  }, { "LDA", AM_IND   }, { "LDA", AM_INDLY },
+    { "LDY", AM_DPX   }, { "LDA", AM_DPX   }, { "LDX", AM_DPY   }, { "???", AM_IMP   },
     { "CLV", AM_IMP   }, { "LDA", AM_ABSY  }, { "TSX", AM_IMP   }, { "TYX", AM_IMP   },
     { "LDY", AM_ABSX  }, { "LDA", AM_ABSX  }, { "LDX", AM_ABSY  }, { "LDA", AM_ABSLX },
-    /* 0xC0-0xCF */
+    /* 0xC0-0xCF - Note: M65832 $CB=CMP long (cc=11), not WAI; $CF=CMP (sr,S),Y */
     { "CPY", AM_IMM_X }, { "CMP", AM_INDX  }, { "REP", AM_IMM   }, { "CMP", AM_SR    },
     { "CPY", AM_DP    }, { "CMP", AM_DP    }, { "DEC", AM_DP    }, { "CMP", AM_INDL  },
-    { "INY", AM_IMP   }, { "CMP", AM_IMM_M }, { "DEX", AM_IMP   }, { "WAI", AM_IMP   },
-    { "CPY", AM_ABS   }, { "CMP", AM_ABS   }, { "DEC", AM_ABS   }, { "CMP", AM_ABSL  },
-    /* 0xD0-0xDF */
-    { "BNE", AM_REL   }, { "CMP", AM_INDY  }, { "CMP", AM_IND   }, { "CMP", AM_SRIY  },
-    { "PEI", AM_IND   }, { "CMP", AM_DPX   }, { "DEC", AM_DPX   }, { "CMP", AM_INDLY },
+    { "INY", AM_IMP   }, { "CMP", AM_IMM_M }, { "DEX", AM_IMP   }, { "CMP", AM_ABSL  },
+    { "CPY", AM_ABS   }, { "CMP", AM_ABS   }, { "DEC", AM_ABS   }, { "CMP", AM_SRIY  },
+    /* 0xD0-0xDF - Note: M65832 $D3=CMP [dp],Y, $D7 undefined */
+    { "BNE", AM_REL   }, { "CMP", AM_INDY  }, { "CMP", AM_IND   }, { "CMP", AM_INDLY },
+    { "PEI", AM_IND   }, { "CMP", AM_DPX   }, { "DEC", AM_DPX   }, { "???", AM_IMP   },
     { "CLD", AM_IMP   }, { "CMP", AM_ABSY  }, { "PHX", AM_IMP   }, { "STP", AM_IMP   },
     { "JML", AM_ABSLIND},{ "CMP", AM_ABSX  }, { "DEC", AM_ABSX  }, { "CMP", AM_ABSLX },
-    /* 0xE0-0xEF */
+    /* 0xE0-0xEF - Note: M65832 $EB=SBC long (cc=11), not XBA; $EF=SBC (sr,S),Y */
     { "CPX", AM_IMM_X }, { "SBC", AM_INDX  }, { "SEP", AM_IMM   }, { "SBC", AM_SR    },
     { "CPX", AM_DP    }, { "SBC", AM_DP    }, { "INC", AM_DP    }, { "SBC", AM_INDL  },
-    { "INX", AM_IMP   }, { "SBC", AM_IMM_M }, { "NOP", AM_IMP   }, { "XBA", AM_IMP   },
-    { "CPX", AM_ABS   }, { "SBC", AM_ABS   }, { "INC", AM_ABS   }, { "SBC", AM_ABSL  },
-    /* 0xF0-0xFF */
-    { "BEQ", AM_REL   }, { "SBC", AM_INDY  }, { "SBC", AM_IND   }, { "SBC", AM_SRIY  },
-    { "PEA", AM_ABS   }, { "SBC", AM_DPX   }, { "INC", AM_DPX   }, { "SBC", AM_INDLY },
+    { "INX", AM_IMP   }, { "SBC", AM_IMM_M }, { "NOP", AM_IMP   }, { "SBC", AM_ABSL  },
+    { "CPX", AM_ABS   }, { "SBC", AM_ABS   }, { "INC", AM_ABS   }, { "SBC", AM_SRIY  },
+    /* 0xF0-0xFF - Note: M65832 $F3=SBC [dp],Y, $F7 undefined */
+    { "BEQ", AM_REL   }, { "SBC", AM_INDY  }, { "SBC", AM_IND   }, { "SBC", AM_INDLY },
+    { "PEA", AM_ABS   }, { "SBC", AM_DPX   }, { "INC", AM_DPX   }, { "???", AM_IMP   },
     { "SED", AM_IMP   }, { "SBC", AM_ABSY  }, { "PLX", AM_IMP   }, { "XCE", AM_IMP   },
     { "JMP", AM_ABSINDX},{ "SBC", AM_ABSX  }, { "INC", AM_ABSX  }, { "SBC", AM_ABSLX },
 };

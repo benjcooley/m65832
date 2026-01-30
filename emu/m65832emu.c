@@ -1379,14 +1379,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 6;
             break;
-        case 0xAB: /* PLB - Pull B (32-bit in 32-bit mode, 8-bit bank in 16-bit mode) */
-            if (width_m == 4) {
-                cpu->b = pull32(cpu);
-            } else {
-                /* 65816 compatibility: pull 8-bit bank byte */
-                cpu->b = (cpu->b & 0x0000FFFF) | ((uint32_t)pull8(cpu) << 16);
-            }
-            cycles = 4;
+        case 0xAB: /* LDA long - M65832 cc=11 bbb=010 */
+            addr = addr_long(cpu);
+            cpu->a = read_val(cpu, addr, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
+            cycles = 5;
             break;
         case 0xAF: /* LDA (sr,S),Y - M65832 cc=11 bbb=011 */
             addr = addr_sriy(cpu);
@@ -3733,7 +3730,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cycles = 2;
                         break;
                     }
-                    case 0xC6: { /* FCMP.S Fd, Fs - Compare Fd to Fs */
+                    case 0xC6: { /* FCMP.S Fd, Fs - Compare Fd to Fs, set N/Z flags */
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
@@ -3741,6 +3738,10 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         union { uint64_t u; double d; } conv_d, conv_s;
                         conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
                         conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        /* Set N flag if Fd < Fs, Z flag if Fd == Fs */
+                        FLAG_CLR(cpu, P_N | P_Z);
+                        if (fd_s.f < fs_s.f) FLAG_SET(cpu, P_N);
+                        if (fd_s.f == fs_s.f) FLAG_SET(cpu, P_Z);
                         cycles = 3;
                         break;
                     }
@@ -3840,10 +3841,16 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cycles = 2;
                         break;
                     }
-                    case 0xD6: { /* FCMP.D Fd, Fs - Compare Fd to Fs */
+                    case 0xD6: { /* FCMP.D Fd, Fs - Compare Fd to Fs, set N/Z flags */
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
+                        double fd_d = cpu->f[fd];
+                        double fs_d = cpu->f[fs];
+                        /* Set N flag if Fd < Fs, Z flag if Fd == Fs */
+                        FLAG_CLR(cpu, P_N | P_Z);
+                        if (fd_d < fs_d) FLAG_SET(cpu, P_N);
+                        if (fd_d == fs_d) FLAG_SET(cpu, P_Z);
                         cycles = 3;
                         break;
                     }
@@ -3944,7 +3951,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     }
                     
-                    /* Reserved FPU opcodes ($CB-$CF, $DB-$DF, $E6-$EF) trap to software emulation */
+                    /* Reserved FPU opcodes ($CB-$CF, $DB-$DF) trap to software emulation.
+                     * Note: VHDL only reserves CB-CF and DB-DF, not E6-EF.
+                     * Trap vector is VEC_SYSCALL + (opcode * 4), which wraps in 16-bit. */
                     case 0xCB:
                     case 0xCC:
                     case 0xCD:
@@ -3954,19 +3963,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                     case 0xDC:
                     case 0xDD:
                     case 0xDE:
-                    case 0xDF:
-                    case 0xE6:
-                    case 0xE7:
-                    case 0xE8:
-                    case 0xE9:
-                    case 0xEA:
-                    case 0xEB:
-                    case 0xEC:
-                    case 0xED:
-                    case 0xEE:
-                    case 0xEF: {
-                        /* Trap via SYSCALL vector + opcode * 4 */
-                        uint32_t trap_vector = VEC_SYSCALL + (ext_op * 4);
+                    case 0xDF: {
+                        /* Consume the register byte (these are 3-byte instructions) */
+                        (void)fetch8(cpu);
+                        /* Trap via SYSCALL vector + opcode*4 (wraps to low memory) */
+                        uint32_t trap_vector = (VEC_SYSCALL + (ext_op * 4)) & 0xFFFF;
                         exception_enter(cpu, trap_vector, cpu->pc);
                         cycles = 7;
                         break;
