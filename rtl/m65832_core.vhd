@@ -195,6 +195,7 @@ architecture rtl of M65832_Core is
     signal illegal_regalu                          : std_logic;
     signal illegal_dp_align                        : std_logic;
     signal illegal_jsl                             : std_logic;  -- JSL illegal in 32-bit mode
+    signal illegal_jml                             : std_logic;  -- JML illegal in 32-bit mode
     signal illegal_rtl                             : std_logic;  -- RTL illegal in 32-bit mode
     signal dp_addr_unaligned                       : std_logic;
     
@@ -688,9 +689,10 @@ M_width_eff <= WIDTH_32 when ext_ldq = '1' else
 X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
-    -- JSL/RTL are illegal in 32-bit mode (use JSR/RTS instead)
+    -- JSL/JML/RTL are illegal in 32-bit mode (use JSR/JMP/RTS instead)
     -- Reserved for future M65864 (64-bit) extensions
     illegal_jsl <= '1' when (IS_JSL = '1' and W_mode = '1') else '0';
+    illegal_jml <= '1' when (IS_JML = '1' and W_mode = '1') else '0';
     illegal_rtl <= '1' when (IS_RTL = '1' and W_mode = '1') else '0';
     
     -- DP alignment check for R_mode: DP address must be multiple of 4
@@ -971,7 +973,7 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
                     state <= ST_PUSH;
-                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1' or illegal_jsl = '1' or illegal_rtl = '1') and ext_fpu_trap = '0' and 
+                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1' or illegal_jsl = '1' or illegal_jml = '1' or illegal_rtl = '1') and ext_fpu_trap = '0' and 
                       (state = ST_DECODE or state = ST_ADDR1) and
                       int_in_progress = '0' and rti_in_progress = '0' then
                     int_in_progress <= '1';
@@ -3321,6 +3323,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                 else '0';
     
     read_width <= WIDTH_32 when (IS_JML = '1' and ADDR_MODE = "1011") else
+                  WIDTH_32 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001") and W_mode = '1') else
                   WIDTH_16 when (IS_JMP_d = '1' and (ADDR_MODE = "1000" or ADDR_MODE = "1001")) else
                   WIDTH_16 when (IS_STACK = '1' and (IR = x"F4" or IR = x"D4" or IR = x"62")) else
                   WIDTH_16 when (IS_BLOCK_MOVE = '1') else
