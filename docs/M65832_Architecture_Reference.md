@@ -863,9 +863,10 @@ Traditional (always 32-bit in 32-bit mode).
 | Syntax | Opcode | Bytes | Description |
 |--------|--------|-------|-------------|
 | JMP $XXXXXXXX | $4C | 5 | PC = abs32 (32-bit absolute) |
-| JMP (B+$XXXX) | $6C | 3 | PC = [B+abs16] (read 32-bit target from data memory) |
-| JMP (B+$XXXX,X) | $7C/$FC | 3 | PC = [B+abs16+X] (read 32-bit target from data memory) |
+| JMP ($XXXXXXXX) | $6C | 5 | PC = [abs32] (read 32-bit target) |
+| JMP ($XXXXXXXX,X) | $7C/$FC | 5 | PC = [abs32+X] (read 32-bit target) |
 | JMP (Rn) | $02 $A5 | 3 | PC = [Rn] (read 32-bit target from register) |
+| JML | $5C/$DC | — | **Illegal** in 32-bit mode |
 
 #### JSR - Jump to Subroutine
 
@@ -881,7 +882,7 @@ Traditional (always 32-bit in 32-bit mode).
 | JSR $XXXXXXXX | $20 | 5 | Push PC-1 (32-bit); PC = abs32 |
 | JSR (Rn) | $02 $A6 | 3 | Push PC-1 (32-bit); PC = [Rn] |
 
-**Note:** JSL ($22) and RTL ($6B) are **illegal** in 32-bit mode (reserved for M65864).
+**Note:** JML ($5C, $DC), JSL ($22), and RTL ($6B) are **illegal** in 32-bit mode (reserved for M65864).
 
 #### RTS - Return from Subroutine
 ```

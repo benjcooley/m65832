@@ -877,17 +877,21 @@ In 32-bit mode, branches use 16-bit signed relative addressing (range: -32768 to
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
 | Absolute | JMP abs | $4C | 5 | 3 |
-| Indirect | JMP (B+abs) | $6C | 3 | 5 |
-| Indexed Indirect | JMP (B+abs,X) | $7C/$FC | 3 | 6 |
+| Indirect | JMP (abs) | $6C | 5 | 5 |
+| Indexed Indirect | JMP (abs,X) | $7C/$FC | 5 | 6 |
 | DP Indirect | JMP (Rn) | $02 $A5 | 3 | 5 |
 
 **32-bit mode notes:**
 - **JMP abs ($4C)**: Uses 32-bit absolute code address (5 bytes total)
-- **JMP (B+abs)** / **(B+abs,X)**: Address operand is B-relative (data memory); reads 32-bit target
+- **JMP (abs)** / **(abs,X)**: Uses 32-bit absolute address (5 bytes); reads 32-bit target
 - **JMP (Rn)**: Extended opcode; reads 32-bit target from register window
 
 #### JML - Jump Long
 
+**Reserved/Illegal in 32-bit mode.** Use JMP instead.
+Opcodes $5C and $DC are reserved for future M65864 (64-bit) extensions.
+
+**8/16-bit mode only:**
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
 | Absolute Long | JML long | $5C | 4 | 4 |

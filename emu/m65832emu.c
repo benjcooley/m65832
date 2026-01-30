@@ -2644,31 +2644,47 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             }
             cycles = 3;
             break;
-        case 0x5C: /* JMP long (24-bit, keeping for 65816 compat) */
+        case 0x5C: /* JML long - ILLEGAL in 32-bit mode, valid in 8/16-bit modes */
+            if (width_m == 4) {
+                /* JML is reserved/illegal in 32-bit mode - use JMP instead */
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = fetch16(cpu);
             addr |= (uint32_t)fetch8(cpu) << 16;
             cpu->pc = addr;
             cycles = 4;
             break;
         case 0x6C: /* JMP (abs) - indirect */
-            addr = addr_abs(cpu);  /* B-relative in 32-bit mode (data memory) */
+            /* M65832: In 32-bit mode, use 32-bit absolute address (5 bytes) */
             if (width_m == 4) {
+                addr = fetch32(cpu);  /* 32-bit absolute address */
                 cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
             } else {
+                addr = fetch16(cpu);  /* 16-bit address */
                 cpu->pc = mem_read16(cpu, addr);
             }
             cycles = 5;
             break;
         case 0x7C: /* JMP (abs,X) - indexed indirect */
-            addr = addr_absx(cpu);  /* B-relative in 32-bit mode (data memory) */
+            /* M65832: In 32-bit mode, use 32-bit absolute address + X (5 bytes) */
             if (width_m == 4) {
+                addr = fetch32(cpu) + cpu->x;  /* 32-bit absolute + X */
                 cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
             } else {
+                addr = fetch16(cpu) + cpu->x;  /* 16-bit address + X */
                 cpu->pc = mem_read16(cpu, addr);
             }
             cycles = 6;
             break;
-        case 0xDC: /* JML [abs] */
+        case 0xDC: /* JML [abs] - ILLEGAL in 32-bit mode */
+            if (width_m == 4) {
+                /* JML is reserved/illegal in 32-bit mode - use JMP (abs) instead */
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = addr_abs(cpu);
             cpu->pc = mem_read32(cpu, addr);
             cycles = 6;
@@ -2703,10 +2719,12 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cycles = 8;
             break;
         case 0xFC: /* JMP (abs,X) - Absolute Indexed Indirect (same as $7C) */
-            addr = addr_absx(cpu);  /* B-relative in 32-bit mode (data memory) */
+            /* M65832: In 32-bit mode, use 32-bit absolute address + X (5 bytes) */
             if (width_m == 4) {
+                addr = fetch32(cpu) + cpu->x;  /* 32-bit absolute + X */
                 cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
             } else {
+                addr = fetch16(cpu) + cpu->x;  /* 16-bit address + X */
                 cpu->pc = mem_read16(cpu, addr);
             }
             cycles = 6;

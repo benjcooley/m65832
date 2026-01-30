@@ -195,12 +195,13 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 | Instruction | Operation | Opcode | Bytes |
 |-------------|-----------|--------|-------|
 | JMP abs | PC = abs32 | $4C | 5 |
-| JMP (B+abs) | PC = [B + abs] | $6C | 3 |
-| JMP (B+abs,X) | PC = [B + abs + X] | $7C/$FC | 3 |
+| JMP (abs) | PC = [abs32] | $6C | 5 |
+| JMP (abs,X) | PC = [abs32 + X] | $7C/$FC | 5 |
 | JMP (Rn) | PC = [Rn] | $02 $A5 | 3 |
+| JML | **Illegal** | $5C/$DC | — |
 | JSR abs | push32 PC-1; PC = abs32 | $20 | 5 |
 | JSR (Rn) | push32 PC-1; PC = [Rn] | $02 $A6 | 3 |
-| JSL long | **Illegal** | $22 | — |
+| JSL | **Illegal** | $22 | — |
 | RTS | PC = pull32 + 1 | $60 | 1 |
 | RTL | **Illegal** | $6B | — |
 | RTI | P = pull; PC = pull | $40 | 1 |
