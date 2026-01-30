@@ -307,6 +307,11 @@ All extended instructions use the `$02` prefix.
 |-------------|----------|-----------|-------|
 | TAB | $02 $91 | B = A | — |
 | TBA | $02 $92 | A = B | N, Z |
+| TXB | $02 $93 | B = X | — |
+| TBX | $02 $94 | X = B | N, Z |
+| TYB | $02 $95 | B = Y | — |
+| TBY | $02 $96 | Y = B | N, Z |
+| TSPB | $02 $A4 | B = SP | — |
 
 ### T Register Transfers
 | Instruction | Encoding | Operation | Flags |

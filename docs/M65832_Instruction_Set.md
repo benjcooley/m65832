@@ -217,9 +217,14 @@ After the `$02` prefix byte:
 | $8F [mode] [dest?] [src...] | ROL | Rotate left |
 | $90 [mode] [dest?] [src...] | ROR | Rotate right |
 | $97 [mode] [dest?] [src...] | STZ | Store zero |
-| **B Register Transfers ($91-$92)** | | |
+| **B Register Transfers ($91-$96, $A4)** | | |
 | $91 | TAB | Transfer A to B |
 | $92 | TBA | Transfer B to A |
+| $93 | TXB | Transfer X to B |
+| $94 | TBX | Transfer B to X |
+| $95 | TYB | Transfer Y to B |
+| $96 | TBY | Transfer B to Y |
+| $A4 | TSPB | Transfer SP to B |
 | **Barrel Shifter ($98)** | | |
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
 | **Extend Operations ($99)** | | |
@@ -1499,9 +1504,50 @@ The B register is the base register for absolute addressing. These extended inst
 
 **Flags Affected:** N, Z (based on transferred value)
 
+#### TXB - Transfer X to B
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TXB | $02 $93 | 2 |
+
+**Flags Affected:** None
+
+#### TBX - Transfer B to X
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TBX | $02 $94 | 2 |
+
+**Flags Affected:** N, Z (based on transferred value)
+
+#### TYB - Transfer Y to B
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TYB | $02 $95 | 2 |
+
+**Flags Affected:** None
+
+#### TBY - Transfer B to Y
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TBY | $02 $96 | 2 |
+
+**Flags Affected:** N, Z (based on transferred value)
+
+#### TSPB - Transfer Stack Pointer to B
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TSPB | $02 $A4 | 2 |
+
+**Flags Affected:** None
+
 **Example:**
 ```asm
-    TBA               ; A = B (read back base register)
+    TSPB              ; B = SP (use stack pointer as base for addressing)
+    LDA B+$10         ; Load from SP+$10 using B-relative addressing
 ```
 
 ---

@@ -413,6 +413,37 @@ EOF
 
 run_test_flag "TBA sets N flag" "test/test_tba_flags.asm" "N" 200
 
+# Test 20: TSPB - Transfer Stack Pointer to B
+cat > test/test_tspb.asm << 'EOF'
+; Test TSPB (SP to B)
+    .org $1000
+    .M32
+    
+    LDX #$0000ABCD   ; Set up stack pointer
+    TXS              ; SP = X
+    TSPB             ; B = SP ($0000ABCD)
+    TBA              ; A = B (to verify)
+    STP
+EOF
+
+run_test "TSPB transfer" "test/test_tspb.asm" "0000ABCD" 200
+
+# Test 21: TXB/TBX - X <-> B transfers
+cat > test/test_txb_tbx.asm << 'EOF'
+; Test TXB and TBX
+    .org $1000
+    .M32
+    
+    LDX #$DEADBEEF   ; Load X with test value
+    TXB              ; B = X
+    LDX #$00000000   ; Clear X
+    TBX              ; X = B (should be $DEADBEEF)
+    TXA              ; A = X (to verify)
+    STP
+EOF
+
+run_test "TXB/TBX transfer" "test/test_txb_tbx.asm" "DEADBEEF" 200
+
 # Summary
 echo
 echo "=== Results ==="

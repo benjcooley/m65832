@@ -49,6 +49,11 @@ FLAG_TEST:
 BTRANS_TEST:
     TAB                 ; $02 $91
     TBA                 ; $02 $92
+    TXB                 ; $02 $93
+    TBX                 ; $02 $94
+    TYB                 ; $02 $95
+    TBY                 ; $02 $96
+    TSPB                ; $02 $A4
 
 ; Temp register transfers
 TEMP_TEST:

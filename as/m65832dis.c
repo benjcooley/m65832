@@ -270,13 +270,13 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0x90-0x9F: B register transfers, Temp register, 64-bit ops */
-    { NULL,     AM_UNKNOWN }, { "TAB",    AM_IMP  }, { "TBA",    AM_IMP  }, { NULL,  AM_UNKNOWN },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { NULL,     AM_UNKNOWN }, { "TAB",    AM_IMP  }, { "TBA",    AM_IMP  }, { "TXB",    AM_IMP  },
+    { "TBX",    AM_IMP  }, { "TYB",    AM_IMP  }, { "TBY",    AM_IMP  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "TTA",    AM_IMP  }, { "TAT",    AM_IMP  },
     { "LDQ",    AM_DP   }, { "LDQ",    AM_ABS  }, { "STQ",    AM_DP   }, { "STQ",    AM_ABS  },
-    /* 0xA0-0xAF: LEA */
+    /* 0xA0-0xAF: LEA, TSPB */
     { "LEA",    AM_DP   }, { "LEA",    AM_DPX  }, { "LEA",    AM_ABS  }, { "LEA",    AM_ABSX },
-    { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { "TSPB",   AM_IMP  }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xB0-0xBF: FPU Load/Store (with register byte) */

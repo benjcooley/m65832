@@ -296,6 +296,11 @@ begin
                 -- Transfer B (base register)
                 when x"91" => INSTR_LEN <= "010";  -- TAB (B = A)
                 when x"92" => INSTR_LEN <= "010";  -- TBA (A = B)
+                when x"93" => INSTR_LEN <= "010";  -- TXB (B = X)
+                when x"94" => INSTR_LEN <= "010";  -- TBX (X = B)
+                when x"95" => INSTR_LEN <= "010";  -- TYB (B = Y)
+                when x"96" => INSTR_LEN <= "010";  -- TBY (Y = B)
+                when x"A4" => INSTR_LEN <= "010";  -- TSPB (B = SP)
                 
                 -- Transfer T (remainder/temp)
                 when x"9A" => INSTR_LEN <= "010";  -- TTA (A = T)

@@ -3246,6 +3246,32 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         update_nz32(cpu, cpu->a);
                         cycles = 2;
                         break;
+                    case 0x93: /* TXB - X to B */
+                        cpu->b = cpu->x;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
+                    case 0x94: /* TBX - B to X */
+                        cpu->x = cpu->b;
+                        update_nz32(cpu, cpu->x);
+                        cycles = 2;
+                        break;
+                    case 0x95: /* TYB - Y to B */
+                        cpu->b = cpu->y;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
+                    case 0x96: /* TBY - B to Y */
+                        cpu->y = cpu->b;
+                        update_nz32(cpu, cpu->y);
+                        cycles = 2;
+                        break;
+                    
+                    case 0xA4: /* TSPB - SP to B */
+                        cpu->b = cpu->s;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
                     
                     /* === T Register Transfers === */
                     case 0x9A: /* TTA - T to A */
