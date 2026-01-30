@@ -421,9 +421,15 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             snprintf(out, out_size, "$%02X,Y", operand[0]);
             break;
         case AM_ABS:
-            val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "B+$%04X", val);
-            else snprintf(out, out_size, "$%04X", val);
+            if (opsize == 4) {
+                /* 32-bit absolute (control flow in 32-bit mode) */
+                val = operand[0] | (operand[1] << 8) | (operand[2] << 16) | (operand[3] << 24);
+                snprintf(out, out_size, "$%08X", val);
+            } else {
+                val = operand[0] | (operand[1] << 8);
+                if (m_flag == 2) snprintf(out, out_size, "B+$%04X", val);
+                else snprintf(out, out_size, "$%04X", val);
+            }
             break;
         case AM_ABSX:
             val = operand[0] | (operand[1] << 8);
@@ -868,6 +874,10 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
         mode = entry->mode;
     }
     
+    /* Check if control flow instruction (uses absolute address, not B-relative) */
+    int is_control_flow = (strcmp(mnemonic, "JSR") == 0 || strcmp(mnemonic, "JMP") == 0 ||
+                           strcmp(mnemonic, "JSL") == 0 || strcmp(mnemonic, "JML") == 0);
+    
     /* Get operand size */
     int opsize;
     if (is_ext && (mode == AM_DP || mode == AM_DPX || mode == AM_DPY || mode == AM_IND ||
@@ -877,6 +887,9 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     } else if (!is_ext && opcode == 0xFC && mode == AM_IND) {
         /* JMP (dp) at $FC always uses 1-byte DP operand */
         opsize = 1;
+    } else if (is_control_flow && m_flag == 2 && mode == AM_ABS) {
+        /* Control flow in 32-bit mode uses 4-byte absolute addresses */
+        opsize = 4;
     } else {
         opsize = get_operand_size(mode, m_flag, x_flag);
     }

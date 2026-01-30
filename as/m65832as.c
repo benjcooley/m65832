@@ -1925,12 +1925,18 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         return 1;
     }
     
+    /* Check if this is a control flow instruction (uses absolute address, not B-relative) */
+    int is_control_flow = (strcasecmp(mnemonic, "JSR") == 0 || strcasecmp(mnemonic, "JMP") == 0 ||
+                           strcasecmp(mnemonic, "JSL") == 0 || strcasecmp(mnemonic, "JML") == 0);
+    
     if (as->m_flag == 2) {
-        if (mode != AM_IMM && op.value > 0xFFFF) {
+        if (mode != AM_IMM && op.value > 0xFFFF && !is_control_flow) {
             error(as, "32-bit absolute requires extended ALU");
             return 0;
         }
-        if ((mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
+        /* Data access requires B+offset, but control flow uses absolute addresses */
+        if (!is_control_flow &&
+            (mode == AM_ABS || mode == AM_ABSX || mode == AM_ABSY ||
              mode == AM_ABSIND || mode == AM_ABSINDX || mode == AM_ABSLIND) &&
             op.value <= 0xFFFF && !op.b_relative) {
             error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
@@ -2007,7 +2013,12 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         case AM_ABSY:
         case AM_ABSIND:
         case AM_ABSINDX:
-            emit_word(as, op.value & 0xFFFF);
+            /* Control flow in 32-bit mode uses 32-bit absolute addresses */
+            if (is_control_flow && as->m_flag == 2) {
+                emit_quad(as, op.value);
+            } else {
+                emit_word(as, op.value & 0xFFFF);
+            }
             break;
         case AM_ABSL:
         case AM_ABSLX:

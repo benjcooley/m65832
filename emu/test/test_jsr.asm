@@ -1,9 +1,10 @@
-; Test JSR/RTS
+; Test JSR/RTS with 32-bit absolute addresses
     .org $1000
+    .M32
     
     LDA #$10
-    JSR B+add_five
-    JSR B+add_five    ; A should be 0x1A
+    JSR add_five      ; 32-bit absolute call
+    JSR add_five      ; A should be 0x1A
     STP
 
 add_five:

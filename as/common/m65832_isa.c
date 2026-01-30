@@ -346,10 +346,13 @@ const M65_ExtInstruction *m65_find_ext_instruction(const char *mnemonic, M65_Add
             m65_ext_instructions[i].mode == mode)
             return &m65_ext_instructions[i];
     }
-    /* For implied instructions, just match name */
-    for (int i = 0; m65_ext_instructions[i].name; i++) {
-        if (strcasecmp_local(m65_ext_instructions[i].name, mnemonic) == 0)
-            return &m65_ext_instructions[i];
+    /* For implied mode operand, also try matching implied instructions by name only */
+    if (mode == M65_AM_IMP) {
+        for (int i = 0; m65_ext_instructions[i].name; i++) {
+            if (strcasecmp_local(m65_ext_instructions[i].name, mnemonic) == 0 &&
+                m65_ext_instructions[i].mode == M65_AM_IMP)
+                return &m65_ext_instructions[i];
+        }
     }
     return NULL;
 }
