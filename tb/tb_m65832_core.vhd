@@ -6206,6 +6206,97 @@ begin
         check_mem(16#0613#, x"A5", "FCMP preserves Z flag");
         
         -----------------------------------------------------------------------
+        -- TEST 133: TAB - Transfer A to B
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 133: TAB - Transfer A to B";
+        
+        -- Program: enter native, set M=32, LDA #$12345678, TAB, SB to mem, store B via TBA
+        poke(16#8000#, x"18");  -- CLC
+        poke(16#8001#, x"FB");  -- XCE (native mode)
+        poke(16#8002#, x"C2");  -- REP
+        poke(16#8003#, x"40");  -- clear M0 (32-bit A)
+        poke(16#8004#, x"E2");  -- SEP
+        poke(16#8005#, x"80");  -- set M1 (32-bit mode)
+        poke(16#8006#, x"A9");  -- LDA #imm32
+        poke(16#8007#, x"78");  -- value low
+        poke(16#8008#, x"56");
+        poke(16#8009#, x"34");
+        poke(16#800A#, x"12");  -- value high
+        poke(16#800B#, x"02");  -- EXT prefix
+        poke(16#800C#, x"91");  -- TAB (B = A)
+        poke(16#800D#, x"A9");  -- LDA #0 (clear A to verify TAB worked)
+        poke(16#800E#, x"00");
+        poke(16#800F#, x"00");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"02");  -- EXT prefix
+        poke(16#8013#, x"92");  -- TBA (A = B, should be $12345678)
+        poke(16#8014#, x"8D");  -- STA abs
+        poke(16#8015#, x"20");
+        poke(16#8016#, x"06");  -- store to $0620
+        poke(16#8017#, x"00");
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0620#, x"78", "TAB/TBA byte 0");
+        check_mem(16#0621#, x"56", "TAB/TBA byte 1");
+        check_mem(16#0622#, x"34", "TAB/TBA byte 2");
+        check_mem(16#0623#, x"12", "TAB/TBA byte 3");
+        
+        -----------------------------------------------------------------------
+        -- TEST 134: TBA sets N/Z flags
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 134: TBA sets N/Z flags";
+        
+        -- Program: set B=$80000000 (negative), TBA, BMI -> store marker
+        poke(16#8000#, x"18");  -- CLC
+        poke(16#8001#, x"FB");  -- XCE (native mode)
+        poke(16#8002#, x"C2");  -- REP
+        poke(16#8003#, x"40");  -- clear M0
+        poke(16#8004#, x"E2");  -- SEP
+        poke(16#8005#, x"80");  -- set M1 (32-bit)
+        poke(16#8006#, x"02");  -- EXT prefix
+        poke(16#8007#, x"22");  -- SB #imm32
+        poke(16#8008#, x"00");
+        poke(16#8009#, x"00");
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"80");  -- B = $80000000
+        poke(16#800C#, x"02");  -- EXT prefix
+        poke(16#800D#, x"92");  -- TBA (A = B, sets N=1)
+        poke(16#800E#, x"30");  -- BMI +5
+        poke(16#800F#, x"05");
+        poke(16#8010#, x"A9");  -- LDA #$FF (skip if not negative)
+        poke(16#8011#, x"FF");
+        poke(16#8012#, x"00");
+        poke(16#8013#, x"00");
+        poke(16#8014#, x"00");
+        poke(16#8015#, x"A9");  -- LDA #$A5 (marker)
+        poke(16#8016#, x"A5");
+        poke(16#8017#, x"00");
+        poke(16#8018#, x"00");
+        poke(16#8019#, x"00");
+        poke(16#801A#, x"8D");  -- STA $0630
+        poke(16#801B#, x"30");
+        poke(16#801C#, x"06");
+        poke(16#801D#, x"00");
+        poke(16#801E#, x"00");
+        poke(16#801F#, x"DB");  -- STP
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(200);
+        
+        check_mem(16#0630#, x"A5", "TBA sets N flag");
+        
+        -----------------------------------------------------------------------
         -- Summary
         -----------------------------------------------------------------------
         report "";

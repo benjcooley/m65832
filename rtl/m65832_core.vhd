@@ -234,6 +234,7 @@ architecture rtl of M65832_Core is
     signal ext_cas, ext_lli, ext_sci            : std_logic;
     signal ext_sb, ext_svbr, ext_sd             : std_logic;
     signal ext_lea, ext_trap                    : std_logic;
+    signal ext_tab, ext_tba                     : std_logic;
     signal ext_tta, ext_tat                     : std_logic;
     signal ext_fpu                             : std_logic;
     signal ext_ldf, ext_stf                    : std_logic;
@@ -3234,7 +3235,7 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         end if;
     end process;
     
-    process(ext_result, ext_result_valid, ext_lea, ext_mul, ext_mulu, ext_div, ext_divu, ext_lli, ext_tta, T_reg,
+    process(ext_result, ext_result_valid, ext_lea, ext_mul, ext_mulu, ext_div, ext_divu, ext_lli, ext_tta, ext_tba, T_reg, B_reg,
             stack_is_pull, IR, data_buffer, M_width_eff, X_width_eff, IS_SHIFTER, shifter_result, IS_EXTEND, extend_result)
         variable value32 : std_logic_vector(31 downto 0);
         variable width_sel : std_logic_vector(1 downto 0);
@@ -3255,6 +3256,10 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
         elsif ext_tta = '1' then
             ext_flag_load <= '1';
             value32 := T_reg;
+            width_sel := M_width_eff;
+        elsif ext_tba = '1' then
+            ext_flag_load <= '1';
+            value32 := B_reg;
             width_sel := M_width_eff;
         elsif ext_result_valid = '1' and ext_lea = '0' then
             ext_flag_load <= '1';
@@ -3498,6 +3503,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                                (stack_is_pull = '1' and IR = x"68"))
             else ldq_low_buffer when (ext_ldq = '1')
             else T_reg when (ext_tta = '1')
+            else B_reg when (ext_tba = '1')
             else fpu_int_result when (fpu_write_a = '1')
             else X_reg when (IS_TRANSFER = '1' and REG_SRC = "001" and REG_DST = "000")  -- TXA
             else Y_reg when (IS_TRANSFER = '1' and REG_SRC = "010" and REG_DST = "000")  -- TYA
@@ -3513,7 +3519,7 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                 RMW_OP /= "100" and RMW_OP /= "101") or  -- Accumulator RMW (not stores/loads)
                (IS_TRANSFER = '1' and REG_DST = "000") or  -- Transfers to A (TXA, TYA)
                ext_lli = '1' or ext_lea = '1' or ext_mul = '1' or ext_mulu = '1' or
-               ext_div = '1' or ext_divu = '1' or ext_tta = '1' or ext_ldq = '1' or
+               ext_div = '1' or ext_divu = '1' or ext_tta = '1' or ext_tba = '1' or ext_ldq = '1' or
                fpu_write_a = '1' or
                (stack_is_pull = '1' and IR = x"68") or
                (state = ST_BM_WRITE and block_active = '1'))
@@ -3567,11 +3573,11 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                ext_sd = '1')
               else '0';
     
-    B_in <= data_buffer;
+    B_in <= A_reg when ext_tab = '1' else data_buffer;
     B_load <= '1' when state = ST_EXECUTE and
               ((stack_is_pull = '1' and IR = x"AB") or
                (ext_stack32_pull = '1' and IR_EXT = x"73") or
-               ext_sb = '1')
+               ext_sb = '1' or ext_tab = '1')
               else '0';
     
     VBR_in <= data_buffer;
@@ -3907,6 +3913,8 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     
     ext_lea <= '1' when (is_extended = '1' and (IR_EXT = x"A0" or IR_EXT = x"A1" or
                                                 IR_EXT = x"A2" or IR_EXT = x"A3")) else '0';
+    ext_tab <= '1' when (is_extended = '1' and IR_EXT = x"91") else '0';
+    ext_tba <= '1' when (is_extended = '1' and IR_EXT = x"92") else '0';
     ext_tta <= '1' when (is_extended = '1' and IR_EXT = x"9A") else '0';
     ext_tat <= '1' when (is_extended = '1' and IR_EXT = x"9B") else '0';
     ext_ldq <= '1' when (IR = x"02" and (IR_EXT = x"9C" or IR_EXT = x"9D")) else '0';

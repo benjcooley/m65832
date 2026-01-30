@@ -159,7 +159,14 @@ const M65_ExtInstruction m65_ext_instructions[] = {
     { "PLB32",  0x73, M65_AM_IMP  },
     { "PHVBR",  0x74, M65_AM_IMP  },
     { "PLVBR",  0x75, M65_AM_IMP  },
-    /* Temp register */
+    /* B register transfers */
+    { "TAB",    0x91, M65_AM_IMP  },
+    { "TBA",    0x92, M65_AM_IMP  },
+    { "TXB",    0x93, M65_AM_IMP  },
+    { "TBX",    0x94, M65_AM_IMP  },
+    { "TYB",    0x95, M65_AM_IMP  },
+    { "TBY",    0x96, M65_AM_IMP  },
+    /* Temp register transfers */
     { "TTA",    0x9A, M65_AM_IMP  },
     { "TAT",    0x9B, M65_AM_IMP  },
     /* 64-bit load/store */

@@ -39,6 +39,10 @@ extern "C" {
 #define UART_CTRL               DE25_UART_CTRL
 #define UART_BAUD               DE25_UART_BAUD
 
+/* Separate TX/RX data registers (extended layout, non-conflicting offsets) */
+#define UART_TX_DATA            0x10    /* TX data register offset */
+#define UART_RX_DATA            0x14    /* RX data register offset */
+
 /* Status register bits */
 #define UART_STATUS_RX_AVAIL    DE25_UART_STATUS_RXRDY
 #define UART_STATUS_TX_READY    DE25_UART_STATUS_TXRDY

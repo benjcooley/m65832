@@ -302,11 +302,17 @@ All extended instructions use the `$02` prefix.
 | WAI | $CB | Wait for interrupt |
 | STP | $DB | Stop processor |
 
-### Temp Register
-| Instruction | Encoding | Operation |
-|-------------|----------|-----------|
-| TTA | $02 $9A | A = T |
-| TAT | $02 $9B | T = A |
+### B Register Transfers
+| Instruction | Encoding | Operation | Flags |
+|-------------|----------|-----------|-------|
+| TAB | $02 $91 | B = A | — |
+| TBA | $02 $92 | A = B | N, Z |
+
+### T Register Transfers
+| Instruction | Encoding | Operation | Flags |
+|-------------|----------|-----------|-------|
+| TTA | $02 $9A | A = T | N, Z |
+| TAT | $02 $9B | T = A | — |
 
 ### 64-bit Load/Store
 | Instruction | Encoding | Operation |

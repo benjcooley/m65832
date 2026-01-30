@@ -11,7 +11,7 @@ PREFIX ?= /usr/local
 
 # Source files
 LIB_SRCS = m65832emu.c m65832_6502.c
-SYS_SRCS = uart.c blkdev.c system.c
+SYS_SRCS = uart.c blkdev.c system.c platform.c platform_de25.c platform_kv260.c
 EMU_SRCS = main.c
 LIB_OBJS = $(LIB_SRCS:.c=.o)
 SYS_OBJS = $(SYS_SRCS:.c=.o)
@@ -41,7 +41,10 @@ $(EMULATOR): $(EMU_OBJS) $(SYS_OBJS) $(LIBRARY)
 uart.o: uart.c uart.h m65832emu.h
 blkdev.o: blkdev.c blkdev.h m65832emu.h
 system.o: system.c system.h uart.h blkdev.h m65832emu.h
-main.o: main.c m65832emu.h system.h uart.h blkdev.h
+platform.o: platform.c platform.h m65832emu.h
+platform_de25.o: platform_de25.c platform.h platform_de25.h
+platform_kv260.o: platform_kv260.c platform.h platform_kv260.h
+main.o: main.c m65832emu.h system.h uart.h blkdev.h platform.h
 
 clean:
 	rm -f $(LIBRARY) $(EMULATOR) *.o

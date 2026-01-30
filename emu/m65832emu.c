@@ -3235,6 +3235,19 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cpu->vbr = pull32(cpu);
                         cycles = 2;
                         break;
+                    /* === B Register Transfers === */
+                    case 0x91: /* TAB - A to B */
+                        cpu->b = cpu->a;
+                        /* TAB does not affect flags (like TXS) */
+                        cycles = 2;
+                        break;
+                    case 0x92: /* TBA - B to A */
+                        cpu->a = cpu->b;
+                        update_nz32(cpu, cpu->a);
+                        cycles = 2;
+                        break;
+                    
+                    /* === T Register Transfers === */
                     case 0x9A: /* TTA - T to A */
                         cpu->a = cpu->t;
                         update_nz32(cpu, cpu->a);

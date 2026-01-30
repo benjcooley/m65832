@@ -217,11 +217,14 @@ After the `$02` prefix byte:
 | $8F [mode] [dest?] [src...] | ROL | Rotate left |
 | $90 [mode] [dest?] [src...] | ROR | Rotate right |
 | $97 [mode] [dest?] [src...] | STZ | Store zero |
+| **B Register Transfers ($91-$92)** | | |
+| $91 | TAB | Transfer A to B |
+| $92 | TBA | Transfer B to A |
 | **Barrel Shifter ($98)** | | |
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
 | **Extend Operations ($99)** | | |
 | $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
-| **Temp Register ($9A-$9B)** | | |
+| **T Register Transfers ($9A-$9B)** | | |
 | $9A | TTA | Transfer T to A |
 | $9B | TAT | Transfer A to T |
 | **64-bit Load/Store ($9C-$9F)** | | |
@@ -1469,6 +1472,41 @@ Computes an effective address without accessing memory.
 ---
 
 ### Temporary Register Instructions
+
+### B Register Transfers
+
+The B register is the base register for absolute addressing. These extended instructions transfer between A and B.
+
+#### TAB - Transfer A to B
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TAB | $02 $91 | 2 |
+
+**Flags Affected:** None (like TXS)
+
+**Example:**
+```asm
+    LDA #$90000000    ; Load base address
+    TAB               ; B = A (set as base for B+addr addressing)
+```
+
+#### TBA - Transfer B to A
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| Implied | TBA | $02 $92 | 2 |
+
+**Flags Affected:** N, Z (based on transferred value)
+
+**Example:**
+```asm
+    TBA               ; A = B (read back base register)
+```
+
+---
+
+### T Register Transfers
 
 The T register holds the high word from 64-bit multiply results and the remainder from divide operations.
 

@@ -36,6 +36,7 @@ extern "C" {
 /* Register offsets (matches SD controller DMA extension) */
 #define BLKDEV_STATUS           DE25_SD_STATUS      /* Status register (R) */
 #define BLKDEV_CTRL             DE25_SD_CTRL        /* Control/Command (W) */
+#define BLKDEV_COMMAND          DE25_SD_CTRL        /* Command register (alias for CTRL) */
 #define BLKDEV_SECTOR_LO        DE25_SD_ARG         /* Sector number low (R/W) */
 #define BLKDEV_SECTOR_HI        DE25_SD_RESP0       /* Sector number high (R/W) */
 #define BLKDEV_DMA_ADDR         DE25_SD_DMA_ADDR    /* DMA address (R/W) */

@@ -293,6 +293,10 @@ begin
                 when x"74" => IS_STACK <= '1'; REG_SRC <= "111"; INSTR_LEN <= "010";  -- PHVBR (32)
                 when x"75" => IS_STACK <= '1'; REG_DST <= "111"; INSTR_LEN <= "010";  -- PLVBR (32)
                 
+                -- Transfer B (base register)
+                when x"91" => INSTR_LEN <= "010";  -- TAB (B = A)
+                when x"92" => INSTR_LEN <= "010";  -- TBA (A = B)
+                
                 -- Transfer T (remainder/temp)
                 when x"9A" => INSTR_LEN <= "010";  -- TTA (A = T)
                 when x"9B" => INSTR_LEN <= "010";  -- TAT (T = A)

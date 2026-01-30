@@ -385,6 +385,34 @@ EOF
 
 run_test_flag "Extended LD preserves Z" "test/test_ld_flags.asm" "Z" 200
 
+# Test 18: TAB/TBA - B register transfers
+cat > test/test_tab_tba.asm << 'EOF'
+; Test TAB (A to B) and TBA (B to A)
+    .org $1000
+    .M32
+    
+    LDA #$12345678   ; Load test value
+    TAB              ; B = A ($12345678)
+    LDA #$00000000   ; Clear A
+    TBA              ; A = B ($12345678)
+    STP
+EOF
+
+run_test "TAB/TBA transfer" "test/test_tab_tba.asm" "12345678" 200
+
+# Test 19: TBA sets N flag
+cat > test/test_tba_flags.asm << 'EOF'
+; Test TBA sets N flag for negative value
+    .org $1000
+    .M32
+    
+    SB #$80000000    ; B = $80000000 (negative)
+    TBA              ; A = B, should set N flag
+    STP
+EOF
+
+run_test_flag "TBA sets N flag" "test/test_tba_flags.asm" "N" 200
+
 # Summary
 echo
 echo "=== Results ==="

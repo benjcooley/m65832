@@ -45,7 +45,12 @@ FLAG_TEST:
     REPE #$A0           ; $02 $60 $A0
     SEPE #$50           ; $02 $61 $50
 
-; Temp register
+; B register transfers
+BTRANS_TEST:
+    TAB                 ; $02 $91
+    TBA                 ; $02 $92
+
+; Temp register transfers
 TEMP_TEST:
     TTA                 ; $02 $9A
     TAT                 ; $02 $9B
