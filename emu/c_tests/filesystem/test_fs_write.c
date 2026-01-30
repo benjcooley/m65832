@@ -11,30 +11,30 @@ int main(void) {
     const char *msg = "hello";
     int fd = open("output.txt", O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (fd < 0) {
-        return 1;
+        _exit(1);
     }
 
     ssize_t n = write(fd, msg, strlen(msg));
     if (n != (ssize_t)strlen(msg)) {
         close(fd);
-        return 2;
+        _exit(2);
     }
     close(fd);
 
     fd = open("output.txt", O_RDONLY);
     if (fd < 0) {
-        return 3;
+        _exit(3);
     }
 
     struct stat st;
     if (fstat(fd, &st) != 0) {
         close(fd);
-        return 4;
+        _exit(4);
     }
     close(fd);
 
     if (st.st_size != (off_t)strlen(msg)) {
-        return 5;
+        _exit(5);
     }
-    return 0;
+    _exit(0);
 }

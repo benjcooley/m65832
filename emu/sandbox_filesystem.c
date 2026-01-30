@@ -42,6 +42,24 @@ typedef struct {
     int32_t  st_spare4[2];
 } m65832_stat_t;
 
+static uint32_t sandbox_get_arg(system_state_t *sys, int index) {
+    m65832_cpu_t *cpu = sys->cpu;
+    if (m65832_flag_r(cpu)) {
+        return cpu->regs[index];
+    }
+    uint32_t addr = cpu->d + (uint32_t)(index * 4);
+    return m65832_emu_read32(cpu, addr);
+}
+
+static void sandbox_set_ret(system_state_t *sys, uint32_t value) {
+    m65832_cpu_t *cpu = sys->cpu;
+    if (m65832_flag_r(cpu)) {
+        cpu->regs[0] = value;
+    } else {
+        m65832_emu_write32(cpu, cpu->d + 0, value);
+    }
+}
+
 static int sandbox_alloc_fd(system_state_t *sys, int host_fd) {
     for (int i = 3; i < M65832_GUEST_FD_MAX; i++) {
         if (!sys->fd_used[i]) {
@@ -138,13 +156,13 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
     if (!sys || !sys->cpu) return false;
 
     m65832_cpu_t *cpu = sys->cpu;
-    uint32_t nr = cpu->regs[0];
-    uint32_t a1 = cpu->regs[1];
-    uint32_t a2 = cpu->regs[2];
-    uint32_t a3 = cpu->regs[3];
-    uint32_t a4 = cpu->regs[4];
-    uint32_t a5 = cpu->regs[5];
-    uint32_t a6 = cpu->regs[6];
+    uint32_t nr = sandbox_get_arg(sys, 0);
+    uint32_t a1 = sandbox_get_arg(sys, 1);
+    uint32_t a2 = sandbox_get_arg(sys, 2);
+    uint32_t a3 = sandbox_get_arg(sys, 3);
+    uint32_t a4 = sandbox_get_arg(sys, 4);
+    uint32_t a5 = sandbox_get_arg(sys, 5);
+    uint32_t a6 = sandbox_get_arg(sys, 6);
 
     (void)a4;
     (void)a5;
@@ -165,50 +183,50 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             return true;
 
         case M65832_SYS_GETPID:
-            cpu->regs[0] = 1;
+            sandbox_set_ret(sys, 1);
             return true;
 
         case M65832_SYS_OPEN: {
             char guest_path[512];
             char host_path[PATH_MAX];
             if (sandbox_read_guest_string(sys, a1, guest_path, sizeof(guest_path)) < 0) {
-                cpu->regs[0] = (uint32_t)-ENAMETOOLONG;
+                sandbox_set_ret(sys, (uint32_t)-ENAMETOOLONG);
                 return true;
             }
             if (sandbox_build_path(sys, guest_path, host_path, sizeof(host_path)) < 0) {
-                cpu->regs[0] = (uint32_t)-EACCES;
+                sandbox_set_ret(sys, (uint32_t)-EACCES);
                 return true;
             }
             int host_fd = open(host_path, (int)a2, (mode_t)a3);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-errno;
+                sandbox_set_ret(sys, (uint32_t)-errno);
                 return true;
             }
             int guest_fd = sandbox_alloc_fd(sys, host_fd);
             if (guest_fd < 0) {
                 close(host_fd);
-                cpu->regs[0] = (uint32_t)-EMFILE;
+                sandbox_set_ret(sys, (uint32_t)-EMFILE);
                 return true;
             }
-            cpu->regs[0] = (uint32_t)guest_fd;
+            sandbox_set_ret(sys, (uint32_t)guest_fd);
             return true;
         }
 
         case M65832_SYS_CLOSE: {
             int guest_fd = (int)a1;
             if (guest_fd >= 0 && guest_fd <= 2) {
-                cpu->regs[0] = 0;
+                sandbox_set_ret(sys, 0);
                 return true;
             }
             int host_fd = sandbox_get_host_fd(sys, guest_fd);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-EBADF;
+                sandbox_set_ret(sys, (uint32_t)-EBADF);
                 return true;
             }
             close(host_fd);
             sys->fd_used[guest_fd] = false;
             sys->host_fds[guest_fd] = -1;
-            cpu->regs[0] = 0;
+            sandbox_set_ret(sys, 0);
             return true;
         }
 
@@ -216,7 +234,7 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             int guest_fd = (int)a1;
             int host_fd = sandbox_get_host_fd(sys, guest_fd);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-EBADF;
+                sandbox_set_ret(sys, (uint32_t)-EBADF);
                 return true;
             }
             size_t len = (size_t)a3;
@@ -228,7 +246,7 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
                 if (chunk > sizeof(buf)) chunk = sizeof(buf);
                 ssize_t r = read(host_fd, buf, chunk);
                 if (r < 0) {
-                    cpu->regs[0] = (uint32_t)-errno;
+                    sandbox_set_ret(sys, (uint32_t)-errno);
                     return true;
                 }
                 if (r == 0) break;
@@ -236,7 +254,7 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
                 total += (size_t)r;
                 if ((size_t)r < chunk) break;
             }
-            cpu->regs[0] = (uint32_t)total;
+            sandbox_set_ret(sys, (uint32_t)total);
             return true;
         }
 
@@ -244,7 +262,7 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             int guest_fd = (int)a1;
             int host_fd = sandbox_get_host_fd(sys, guest_fd);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-EBADF;
+                sandbox_set_ret(sys, (uint32_t)-EBADF);
                 return true;
             }
             size_t len = (size_t)a3;
@@ -257,13 +275,13 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
                 m65832_emu_read_block(cpu, addr + (uint32_t)total, buf, chunk);
                 ssize_t w = write(host_fd, buf, chunk);
                 if (w < 0) {
-                    cpu->regs[0] = (uint32_t)-errno;
+                    sandbox_set_ret(sys, (uint32_t)-errno);
                     return true;
                 }
                 total += (size_t)w;
                 if ((size_t)w < chunk) break;
             }
-            cpu->regs[0] = (uint32_t)total;
+            sandbox_set_ret(sys, (uint32_t)total);
             return true;
         }
 
@@ -271,14 +289,14 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             int guest_fd = (int)a1;
             int host_fd = sandbox_get_host_fd(sys, guest_fd);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-EBADF;
+                sandbox_set_ret(sys, (uint32_t)-EBADF);
                 return true;
             }
             off_t res = lseek(host_fd, (off_t)(int32_t)a2, (int)a3);
             if (res < 0) {
-                cpu->regs[0] = (uint32_t)-errno;
+                sandbox_set_ret(sys, (uint32_t)-errno);
             } else {
-                cpu->regs[0] = (uint32_t)res;
+                sandbox_set_ret(sys, (uint32_t)res);
             }
             return true;
         }
@@ -288,12 +306,12 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             uint32_t stat_addr = a2;
             int host_fd = sandbox_get_host_fd(sys, guest_fd);
             if (host_fd < 0) {
-                cpu->regs[0] = (uint32_t)-EBADF;
+                sandbox_set_ret(sys, (uint32_t)-EBADF);
                 return true;
             }
             struct stat st;
             if (fstat(host_fd, &st) < 0) {
-                cpu->regs[0] = (uint32_t)-errno;
+                sandbox_set_ret(sys, (uint32_t)-errno);
                 return true;
             }
             m65832_stat_t gst;
@@ -307,12 +325,12 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
             gst.st_mtim.tv_sec = (int32_t)st.st_mtime;
             gst.st_ctim.tv_sec = (int32_t)st.st_ctime;
             m65832_emu_write_block(cpu, stat_addr, &gst, sizeof(gst));
-            cpu->regs[0] = 0;
+            sandbox_set_ret(sys, 0);
             return true;
         }
 
         default:
-            cpu->regs[0] = (uint32_t)-ENOSYS;
+            sandbox_set_ret(sys, (uint32_t)-ENOSYS);
             return true;
     }
 }

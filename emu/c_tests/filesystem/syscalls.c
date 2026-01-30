@@ -21,14 +21,14 @@
 
 static inline long __syscall0(long n) {
     register long r0 __asm__("r0") = n;
-    asm volatile("trap #0" : "+r"(r0) : : "memory");
+    asm volatile(".byte 0x02, 0x40, 0x00" : "+r"(r0) : : "memory");
     return r0;
 }
 
 static inline long __syscall1(long n, long a1) {
     register long r0 __asm__("r0") = n;
     register long r1 __asm__("r1") = a1;
-    asm volatile("trap #0" : "+r"(r0) : "r"(r1) : "memory");
+    asm volatile(".byte 0x02, 0x40, 0x00" : "+r"(r0) : "r"(r1) : "memory");
     return r0;
 }
 
@@ -36,7 +36,7 @@ static inline long __syscall2(long n, long a1, long a2) {
     register long r0 __asm__("r0") = n;
     register long r1 __asm__("r1") = a1;
     register long r2 __asm__("r2") = a2;
-    asm volatile("trap #0" : "+r"(r0) : "r"(r1), "r"(r2) : "memory");
+    asm volatile(".byte 0x02, 0x40, 0x00" : "+r"(r0) : "r"(r1), "r"(r2) : "memory");
     return r0;
 }
 
@@ -45,7 +45,7 @@ static inline long __syscall3(long n, long a1, long a2, long a3) {
     register long r1 __asm__("r1") = a1;
     register long r2 __asm__("r2") = a2;
     register long r3 __asm__("r3") = a3;
-    asm volatile("trap #0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r3) : "memory");
+    asm volatile(".byte 0x02, 0x40, 0x00" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r3) : "memory");
     return r0;
 }
 
@@ -58,8 +58,10 @@ static inline long __syscall_ret(long r) {
 }
 
 void __attribute__((noreturn)) _exit(int status) {
+    *(volatile uint32_t *)0xFFFFFFFC = (uint32_t)status;
     __syscall1(M65832_SYS_EXIT_GRP, status);
     __syscall1(M65832_SYS_EXIT, status);
+    asm volatile(".byte 0x00");
     __builtin_unreachable();
 }
 

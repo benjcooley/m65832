@@ -6,6 +6,7 @@
 
 #include "system.h"
 #include "sandbox_filesystem.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,9 +157,11 @@ system_state_t *system_init(const system_config_t *config) {
 
     sandbox_fs_init(sys, config->sandbox_root);
     
+    const platform_config_t *platform = platform_get_config(platform_get_default());
+
     /* Initialize UART */
     if (config->enable_uart) {
-        sys->uart = uart_init(sys->cpu);
+        sys->uart = uart_init(sys->cpu, platform);
         if (!sys->uart) {
             fprintf(stderr, "error: cannot initialize UART\n");
             m65832_emu_close(sys->cpu);
@@ -171,13 +174,13 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: UART at 0x%08X\n", UART_BASE);
+            printf("System: UART at 0x%08X\n", platform->uart_base);
         }
     }
     
     /* Initialize block device */
     if (config->enable_blkdev) {
-        sys->blkdev = blkdev_init(sys->cpu, config->disk_file, config->disk_readonly);
+        sys->blkdev = blkdev_init(sys->cpu, platform, config->disk_file, config->disk_readonly);
         if (!sys->blkdev) {
             fprintf(stderr, "error: cannot initialize block device\n");
             if (sys->uart) uart_destroy(sys->uart);
@@ -187,7 +190,7 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: Block device at 0x%08X", BLKDEV_BASE);
+            printf("System: Block device at 0x%08X", platform->sd_base);
             if (config->disk_file) {
                 printf(" (%s, %llu sectors)\n", 
                        config->disk_file, 
@@ -204,7 +207,7 @@ system_state_t *system_init(const system_config_t *config) {
     sys->boot_params.version = BOOT_PARAMS_VERSION;
     sys->boot_params.mem_base = 0;
     sys->boot_params.mem_size = (uint32_t)config->ram_size;
-    sys->boot_params.uart_base = config->enable_uart ? UART_BASE : 0;
+    sys->boot_params.uart_base = config->enable_uart ? platform->uart_base : 0;
     sys->boot_params.timer_base = SYSREG_TIMER_CTRL;
     
     /* Load kernel if specified */
@@ -466,10 +469,11 @@ void system_print_info(system_state_t *sys) {
     
     printf("M65832 System Configuration:\n");
     printf("  RAM:          %zu MB\n", sys->config.ram_size / (1024 * 1024));
+    const platform_config_t *platform = platform_get_config(platform_get_default());
     printf("  UART:         %s at 0x%08X\n", 
-           sys->uart ? "enabled" : "disabled", UART_BASE);
+           sys->uart ? "enabled" : "disabled", platform->uart_base);
     printf("  Block device: %s at 0x%08X\n",
-           sys->blkdev ? "enabled" : "disabled", BLKDEV_BASE);
+           sys->blkdev ? "enabled" : "disabled", platform->sd_base);
     if (sys->blkdev && blkdev_get_capacity(sys->blkdev) > 0) {
         uint64_t cap_mb = blkdev_get_capacity_bytes(sys->blkdev) / (1024 * 1024);
         printf("    Disk:       %llu MB (%llu sectors)\n",

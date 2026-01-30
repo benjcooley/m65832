@@ -9,6 +9,7 @@
 #include "system.h"
 #include "uart.h"
 #include "blkdev.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -944,7 +945,8 @@ int main(int argc, char *argv[]) {
     }
     
     /* Initialize UART for console I/O (always enabled in legacy mode) */
-    uart_state_t *uart = uart_init(g_cpu);
+    const platform_config_t *platform = platform_get_config(platform_get_default());
+    uart_state_t *uart = uart_init(g_cpu, platform);
     if (!uart && g_verbose) {
         fprintf(stderr, "Warning: Failed to initialize UART\n");
     }
