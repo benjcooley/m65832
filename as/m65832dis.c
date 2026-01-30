@@ -214,7 +214,7 @@ static const OpcodeEntry opcode_table[256] = {
     { "BEQ", AM_REL   }, { "SBC", AM_INDY  }, { "SBC", AM_IND   }, { "SBC", AM_SRIY  },
     { "PEA", AM_ABS   }, { "SBC", AM_DPX   }, { "INC", AM_DPX   }, { "SBC", AM_INDLY },
     { "SED", AM_IMP   }, { "SBC", AM_ABSY  }, { "PLX", AM_IMP   }, { "XCE", AM_IMP   },
-    { "JMP", AM_IND   }, { "SBC", AM_ABSX  }, { "INC", AM_ABSX  }, { "SBC", AM_ABSLX },
+    { "JMP", AM_ABSINDX},{ "SBC", AM_ABSX  }, { "INC", AM_ABSX  }, { "SBC", AM_ABSLX },
 };
 
 /* M65832 Extended opcode table ($02 prefix) */
@@ -274,9 +274,9 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { "TBX",    AM_IMP  }, { "TYB",    AM_IMP  }, { "TBY",    AM_IMP  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "TTA",    AM_IMP  }, { "TAT",    AM_IMP  },
     { "LDQ",    AM_DP   }, { "LDQ",    AM_ABS  }, { "STQ",    AM_DP   }, { "STQ",    AM_ABS  },
-    /* 0xA0-0xAF: LEA, TSPB, JSR indirect (JMP (dp) is now base $FC) */
+    /* 0xA0-0xAF: LEA, TSPB, JMP/JSR (dp) indirect */
     { "LEA",    AM_DP   }, { "LEA",    AM_DPX  }, { "LEA",    AM_ABS  }, { "LEA",    AM_ABSX },
-    { "TSPB",   AM_IMP  }, { NULL,  AM_UNKNOWN }, { "JSR",    AM_IND  }, { NULL,  AM_UNKNOWN },
+    { "TSPB",   AM_IMP  }, { "JMP",    AM_IND  }, { "JSR",    AM_IND  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xB0-0xBF: FPU Load/Store (with register byte) */
@@ -883,9 +883,6 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     if (is_ext && (mode == AM_DP || mode == AM_DPX || mode == AM_DPY || mode == AM_IND ||
                    mode == AM_INDX || mode == AM_INDY || mode == AM_INDL || mode == AM_INDLY)) {
         /* Extended instructions always use 1-byte DP operands (register window) */
-        opsize = 1;
-    } else if (!is_ext && opcode == 0xFC && mode == AM_IND) {
-        /* JMP (dp) at $FC always uses 1-byte DP operand */
         opsize = 1;
     } else if (is_control_flow && m_flag == 2 && mode == AM_ABS) {
         /* Control flow in 32-bit mode uses 4-byte absolute addresses */

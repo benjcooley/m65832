@@ -178,19 +178,32 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 | BRL rel16 | Always (16-bit) | $82 |
 
 ### Jump/Call
-| Instruction | Operation | Opcode | Notes |
+
+**8/16-bit mode:**
+| Instruction | Operation | Opcode | Bytes |
 |-------------|-----------|--------|-------|
-| JMP abs | PC = abs | $4C | 5-byte (opcode + 32-bit addr) in 32-bit mode |
-| JMP (abs) | PC = [B + abs] | $6C | Indirect: address in data memory |
-| JMP (abs,X) | PC = [B + abs + X] | $7C | Indexed indirect: address in data memory |
-| JMP (dp) | PC = [dp] | $FC | DP indirect (register window) |
-| JML long | PC = long | $5C | |
-| JSR abs | PC = abs, push32 PC-1 | $20 | 5-byte (opcode + 32-bit addr) in 32-bit mode |
-| JSR (dp) | PC = [dp], push32 PC-1 | $02 $A6 | DP indirect call (register window) |
-| JSL long | *Reserved* | $22 | **Illegal** in 32-bit mode |
-| RTS | PC = pull32 + 1 | $60 | 32-bit return in 32-bit mode |
-| RTL | *Reserved* | $6B | **Illegal** in 32-bit mode |
-| RTI | P = pull; PC = pull | $40 | |
+| JMP abs | PC = abs16 | $4C | 3 |
+| JMP (abs) | PC = [abs] | $6C | 3 |
+| JMP (abs,X) | PC = [abs + X] | $7C/$FC | 3 |
+| JML long | PC = abs24 | $5C | 4 |
+| JSR abs | push16 PC-1; PC = abs16 | $20 | 3 |
+| JSL long | push24 PC-1; PC = abs24 | $22 | 4 |
+| RTS | PC = pull16 + 1 | $60 | 1 |
+| RTL | PC = pull24 + 1 | $6B | 1 |
+
+**32-bit mode:**
+| Instruction | Operation | Opcode | Bytes |
+|-------------|-----------|--------|-------|
+| JMP abs | PC = abs32 | $4C | 5 |
+| JMP (B+abs) | PC = [B + abs] | $6C | 3 |
+| JMP (B+abs,X) | PC = [B + abs + X] | $7C/$FC | 3 |
+| JMP (Rn) | PC = [Rn] | $02 $A5 | 3 |
+| JSR abs | push32 PC-1; PC = abs32 | $20 | 5 |
+| JSR (Rn) | push32 PC-1; PC = [Rn] | $02 $A6 | 3 |
+| JSL long | **Illegal** | $22 | — |
+| RTS | PC = pull32 + 1 | $60 | 1 |
+| RTL | **Illegal** | $6B | — |
+| RTI | P = pull; PC = pull | $40 | 1 |
 
 ### Stack
 **Note:** In 32-bit mode, ALL stack operations push/pull 32 bits.
@@ -318,7 +331,7 @@ All extended instructions use the `$02` prefix.
 ### DP Indirect Control Flow
 | Instruction | Encoding | Operation | Flags |
 |-------------|----------|-----------|-------|
-| JMP (dp) | $FC dp | PC = [dp] | — |
+| JMP (dp) | $02 $A5 dp | PC = [dp] | — |
 | JSR (dp) | $02 $A6 dp | Push PC, PC = [dp] | — |
 
 ### T Register Transfers

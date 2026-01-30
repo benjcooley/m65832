@@ -2636,7 +2636,12 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Jumps ============ */
         case 0x4C: /* JMP abs */
-            cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
+            /* M65832: In 32-bit mode, JMP is 5 bytes (opcode + 32-bit address) */
+            if (width_m == 4) {
+                cpu->pc = fetch32(cpu);  /* 32-bit absolute address */
+            } else {
+                cpu->pc = (cpu->pc & 0xFFFF0000) | fetch16(cpu);
+            }
             cycles = 3;
             break;
         case 0x5C: /* JMP long (24-bit, keeping for 65816 compat) */
@@ -2645,14 +2650,22 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cpu->pc = addr;
             cycles = 4;
             break;
-        case 0x6C: /* JMP (abs) */
-            addr = addr_abs(cpu);
-            cpu->pc = mem_read16(cpu, addr);
+        case 0x6C: /* JMP (abs) - indirect */
+            addr = addr_abs(cpu);  /* B-relative in 32-bit mode (data memory) */
+            if (width_m == 4) {
+                cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
+            } else {
+                cpu->pc = mem_read16(cpu, addr);
+            }
             cycles = 5;
             break;
-        case 0x7C: /* JMP (abs,X) */
-            addr = addr_absx(cpu);
-            cpu->pc = mem_read16(cpu, addr);
+        case 0x7C: /* JMP (abs,X) - indexed indirect */
+            addr = addr_absx(cpu);  /* B-relative in 32-bit mode (data memory) */
+            if (width_m == 4) {
+                cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
+            } else {
+                cpu->pc = mem_read16(cpu, addr);
+            }
             cycles = 6;
             break;
         case 0xDC: /* JML [abs] */
@@ -2689,14 +2702,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cpu->pc = addr;
             cycles = 8;
             break;
-        case 0xFC: /* JMP (dp) - M65832: indirect jump through DP/register */
-            addr = addr_dp(cpu);
+        case 0xFC: /* JMP (abs,X) - Absolute Indexed Indirect (same as $7C) */
+            addr = addr_absx(cpu);  /* B-relative in 32-bit mode (data memory) */
             if (width_m == 4) {
-                cpu->pc = mem_read32(cpu, addr);
+                cpu->pc = mem_read32(cpu, addr);  /* Read 32-bit target */
             } else {
                 cpu->pc = mem_read16(cpu, addr);
             }
-            cycles = 5;
+            cycles = 6;
             break;
         case 0x60: /* RTS */
             /* M65832: In 32-bit mode, pull full 32-bit return address */

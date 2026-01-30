@@ -50,7 +50,7 @@ const M65_Instruction m65_instructions[] = {
     { "INX",        { 0xE8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
     { "INY",        { 0xC8, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
     { "JML",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x5C, __,   __,   __,   __,   __,   __,   __,   __,   __,   0xDC, __,   __   }, 0 },
-    { "JMP",        { __,   __,   __,   __,   __,   __,   0x4C, __,   __,   0xFC, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x6C, 0x7C, __,   __,   __   }, 0 },
+    { "JMP",        { __,   __,   __,   __,   __,   __,   0x4C, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x6C, 0x7C, __,   __,   __   }, 0 },
     { "JSL",        { __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   0x22, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
     { "JSR",        { __,   __,   __,   __,   __,   __,   0x20, __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __,   __   }, 0 },
     { "LDA",        { __,   __,   0xA9, 0xA5, 0xB5, __,   0xAD, 0xBD, 0xB9, 0xB2, 0xA1, 0xB1, 0xA7, 0xB7, 0xAF, 0xBF, __,   __,   0xA3, 0xB3, __,   __,   __,   __,   __,   __,   __   }, 0 },
@@ -168,7 +168,8 @@ const M65_ExtInstruction m65_ext_instructions[] = {
     { "TBY",    0x96, M65_AM_IMP  },
     /* Stack pointer to B register transfer */
     { "TSPB",   0xA4, M65_AM_IMP  },
-    /* DP indirect call (JMP (dp) is now base opcode $FC) */
+    /* DP indirect jump/call (extended opcodes, NOT base $FC) */
+    { "JMP",    0xA5, M65_AM_IND  },  /* JMP (dp) - indirect jump through DP */
     { "JSR",    0xA6, M65_AM_IND  },  /* JSR (dp) - indirect call through DP */
     /* Temp register transfers */
     { "TTA",    0x9A, M65_AM_IMP  },

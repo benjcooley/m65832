@@ -850,18 +850,38 @@ Traditional (always 32-bit in 32-bit mode).
 ### 8.7 Jump and Subroutine
 
 #### JMP - Jump
-```
-JMP B+$XXXX         PC = B + abs16
-JMP (B+$XXXX)       PC = [B + abs16]
-JMP (B+$XXXX,X)     PC = [B + abs16 + X]
-JML $XXXXXXXX       PC = abs32 (8 hex digits)
-```
+
+**8/16-bit mode (M=00 or M=01):**
+| Syntax | Opcode | Bytes | Description |
+|--------|--------|-------|-------------|
+| JMP $XXXX | $4C | 3 | PC = abs16 |
+| JMP ($XXXX) | $6C | 3 | PC = [abs16] (read 16-bit target) |
+| JMP ($XXXX,X) | $7C | 3 | PC = [abs16 + X] (read 16-bit target) |
+| JML $XXXXXX | $5C | 4 | PC = abs24 (24-bit long jump) |
+
+**32-bit mode (M=10):**
+| Syntax | Opcode | Bytes | Description |
+|--------|--------|-------|-------------|
+| JMP $XXXXXXXX | $4C | 5 | PC = abs32 (32-bit absolute) |
+| JMP (B+$XXXX) | $6C | 3 | PC = [B+abs16] (read 32-bit target from data memory) |
+| JMP (B+$XXXX,X) | $7C/$FC | 3 | PC = [B+abs16+X] (read 32-bit target from data memory) |
+| JMP (Rn) | $02 $A5 | 3 | PC = [Rn] (read 32-bit target from register) |
 
 #### JSR - Jump to Subroutine
-```
-JSR B+$XXXX         Push PC+2; PC = B + abs16
-JSL $XXXXXXXX       Push PC+4; PC = abs32
-```
+
+**8/16-bit mode (M=00 or M=01):**
+| Syntax | Opcode | Bytes | Description |
+|--------|--------|-------|-------------|
+| JSR $XXXX | $20 | 3 | Push PC-1 (16-bit); PC = abs16 |
+| JSL $XXXXXX | $22 | 4 | Push PC-1 (24-bit); PC = abs24 |
+
+**32-bit mode (M=10):**
+| Syntax | Opcode | Bytes | Description |
+|--------|--------|-------|-------------|
+| JSR $XXXXXXXX | $20 | 5 | Push PC-1 (32-bit); PC = abs32 |
+| JSR (Rn) | $02 $A6 | 3 | Push PC-1 (32-bit); PC = [Rn] |
+
+**Note:** JSL ($22) and RTL ($6B) are **illegal** in 32-bit mode (reserved for M65864).
 
 #### RTS - Return from Subroutine
 ```
