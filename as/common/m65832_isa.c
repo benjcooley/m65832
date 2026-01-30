@@ -168,8 +168,9 @@ const M65_ExtInstruction m65_ext_instructions[] = {
     { "TBY",    0x96, M65_AM_IMP  },
     /* Stack pointer to B register transfer */
     { "TSPB",   0xA4, M65_AM_IMP  },
-    { "TSPB",   0xA4, M65_AM_IMP  },  /* Transfer SP to B */
-    { "TBSP",   0xA5, M65_AM_IMP  },  /* Transfer B to SP */
+    /* DP indirect jump/call */
+    { "JMP",    0xA5, M65_AM_IND  },  /* JMP (dp) - indirect through DP */
+    { "JSR",    0xA6, M65_AM_IND  },  /* JSR (dp) - indirect call through DP */
     /* Temp register transfers */
     { "TTA",    0x9A, M65_AM_IMP  },
     { "TAT",    0x9B, M65_AM_IMP  },

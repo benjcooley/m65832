@@ -2663,29 +2663,27 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Subroutines ============ */
         case 0x20: /* JSR abs */
-            /* M65832: In 32-bit mode, JSR is 5 bytes (opcode + 32-bit address) */
+            addr = fetch16(cpu);
+            /* M65832: In 32-bit mode, push full 32-bit return address */
             if (width_m == 4) {
-                addr = fetch32(cpu);  /* 32-bit absolute address */
                 push32(cpu, cpu->pc - 1);
-                cpu->pc = addr;
+                cpu->pc = cpu->b + addr;  /* Use B as base in 32-bit mode */
             } else {
-                addr = fetch16(cpu);  /* 16-bit address in 8/16-bit modes */
                 push16(cpu, (uint16_t)(cpu->pc - 1));
                 cpu->pc = (cpu->pc & 0xFFFF0000) | addr;
             }
             cycles = 6;
             break;
-        case 0x22: /* JSL long - ILLEGAL in 32-bit mode, valid in 8/16-bit modes */
-            if (width_m == 4) {
-                /* JSL is reserved/illegal in 32-bit mode - use JSR instead */
-                cpu->trap = TRAP_ILLEGAL_OP;
-                cycles = 2;
-                break;
-            }
+        case 0x22: /* JSL long */
             addr = fetch16(cpu);
             addr |= (uint32_t)fetch8(cpu) << 16;
-            push8(cpu, (uint8_t)(cpu->pc >> 16));
-            push16(cpu, (uint16_t)(cpu->pc - 1));
+            /* M65832: In 32-bit mode, push full 32-bit return address */
+            if (width_m == 4) {
+                push32(cpu, cpu->pc - 1);
+            } else {
+                push8(cpu, (uint8_t)(cpu->pc >> 16));
+                push16(cpu, (uint16_t)(cpu->pc - 1));
+            }
             cpu->pc = addr;
             cycles = 8;
             break;
@@ -2710,15 +2708,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             }
             cycles = 6;
             break;
-        case 0x6B: /* RTL - ILLEGAL in 32-bit mode, valid in 8/16-bit modes */
+        case 0x6B: /* RTL */
+            /* M65832: In 32-bit mode, pull full 32-bit return address */
             if (width_m == 4) {
-                /* RTL is reserved/illegal in 32-bit mode - use RTS instead */
-                cpu->trap = TRAP_ILLEGAL_OP;
-                cycles = 2;
-                break;
+                cpu->pc = pull32(cpu) + 1;
+            } else {
+                cpu->pc = pull16(cpu) + 1;
+                cpu->pc |= (uint32_t)pull8(cpu) << 16;
             }
-            cpu->pc = pull16(cpu) + 1;
-            cpu->pc |= (uint32_t)pull8(cpu) << 16;
             cycles = 6;
             break;
 
@@ -3235,45 +3232,6 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cpu->vbr = pull32(cpu);
                         cycles = 2;
                         break;
-                    /* === B Register Transfers === */
-                    case 0x91: /* TAB - A to B */
-                        cpu->b = cpu->a;
-                        /* TAB does not affect flags (like TXS) */
-                        cycles = 2;
-                        break;
-                    case 0x92: /* TBA - B to A */
-                        cpu->a = cpu->b;
-                        update_nz32(cpu, cpu->a);
-                        cycles = 2;
-                        break;
-                    case 0x93: /* TXB - X to B */
-                        cpu->b = cpu->x;
-                        /* Does not affect flags */
-                        cycles = 2;
-                        break;
-                    case 0x94: /* TBX - B to X */
-                        cpu->x = cpu->b;
-                        update_nz32(cpu, cpu->x);
-                        cycles = 2;
-                        break;
-                    case 0x95: /* TYB - Y to B */
-                        cpu->b = cpu->y;
-                        /* Does not affect flags */
-                        cycles = 2;
-                        break;
-                    case 0x96: /* TBY - B to Y */
-                        cpu->y = cpu->b;
-                        update_nz32(cpu, cpu->y);
-                        cycles = 2;
-                        break;
-                    
-                    case 0xA4: /* TSPB - SP to B */
-                        cpu->b = cpu->s;
-                        /* Does not affect flags */
-                        cycles = 2;
-                        break;
-                    
-                    /* === T Register Transfers === */
                     case 0x9A: /* TTA - T to A */
                         cpu->a = cpu->t;
                         update_nz32(cpu, cpu->a);
@@ -3526,8 +3484,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (DP-relative: D + rm*4) */
-                        addr = mem_read32(cpu, cpu->d + rm * 4);
+                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
+                        addr = mem_read32(cpu, rm * 4);
                         uint32_t lo = mem_read32(cpu, addr);
                         uint32_t hi = mem_read32(cpu, addr + 4);
                         uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
@@ -3541,8 +3499,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (DP-relative: D + rm*4) */
-                        addr = mem_read32(cpu, cpu->d + rm * 4);
+                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
+                        addr = mem_read32(cpu, rm * 4);
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
@@ -3554,13 +3512,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (DP-relative: D + rm*4) */
-                        addr = mem_read32(cpu, cpu->d + rm * 4);
+                        addr = mem_read32(cpu, rm * 4);
                         uint32_t val32 = mem_read32(cpu, addr);
-                        /* Interpret val32 as float bit pattern, convert to double */
-                        union { uint32_t u; float f; } f_conv;
-                        f_conv.u = val32;
-                        cpu->f[freg] = (double)f_conv.f;
+                        union { uint64_t u; double d; } conv;
+                        conv.u = (uint64_t)val32;
+                        cpu->f[freg] = conv.d;
                         cycles = 4;
                         break;
                     }
@@ -3568,12 +3524,10 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (DP-relative: D + rm*4) */
-                        addr = mem_read32(cpu, cpu->d + rm * 4);
-                        /* Convert double to float, write as 32-bit bit pattern */
-                        union { uint32_t u; float f; } f_conv;
-                        f_conv.f = (float)cpu->f[freg];
-                        mem_write32(cpu, addr, f_conv.u);
+                        addr = mem_read32(cpu, rm * 4);
+                        union { uint64_t u; double d; } conv;
+                        conv.d = cpu->f[freg];
+                        mem_write32(cpu, addr, (uint32_t)conv.u);
                         cycles = 4;
                         break;
                     }
@@ -3609,10 +3563,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert doubles to floats, add, store back as double */
-                        float f_fd = (float)cpu->f[fd];
-                        float f_fs = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)(f_fd + f_fs);
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f + fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 4;
                         break;
                     }
@@ -3620,10 +3577,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert doubles to floats, subtract, store back as double */
-                        float f_fd = (float)cpu->f[fd];
-                        float f_fs = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)(f_fd - f_fs);
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f - fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 4;
                         break;
                     }
@@ -3631,10 +3591,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert doubles to floats, multiply, store back as double */
-                        float f_fd = (float)cpu->f[fd];
-                        float f_fs = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)(f_fd * f_fs);
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f * fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 6;
                         break;
                     }
@@ -3642,10 +3605,13 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert doubles to floats, divide, store back as double */
-                        float f_fd = (float)cpu->f[fd];
-                        float f_fs = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)(f_fd / f_fs);
+                        union { uint32_t u; float f; } fd_s, fs_s, res;
+                        union { uint64_t u; double d; } conv_d, conv_s, conv_r;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fd_s.f / fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 10;
                         break;
                     }
@@ -3653,9 +3619,12 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert double to float, negate, store back as double */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)(-f);
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = -fs_s.f;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 2;
                         break;
                     }
@@ -3663,9 +3632,12 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert double to float, abs, store back as double */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)fabsf(f);
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = fabsf(fs_s.f);
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 2;
                         break;
                     }
@@ -3673,29 +3645,31 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert doubles to floats for comparison */
-                        float f_fd = (float)cpu->f[fd];
-                        float f_fs = (float)cpu->f[fs];
-                        /* TODO: Set flags based on comparison */
-                        (void)f_fd; (void)f_fs;
+                        union { uint32_t u; float f; } fd_s, fs_s;
+                        union { uint64_t u; double d; } conv_d, conv_s;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
                         cycles = 3;
                         break;
                     }
                     case 0xC7: { /* F2I.S Fd - A = (int32)Fd */
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
-                        /* Convert double to float, then to int32 */
-                        float f = (float)cpu->f[fd];
-                        cpu->a = (uint32_t)(int32_t)f;
+                        union { uint32_t u; float f; } fd_s;
+                        union { uint64_t u; double d; } conv_d;
+                        conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
+                        cpu->a = (uint32_t)(int32_t)fd_s.f;
                         cycles = 3;
                         break;
                     }
                     case 0xC8: { /* I2F.S Fd - Fd = (float32)A */
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
-                        /* Convert int32 to float, store as double */
-                        float f = (float)(int32_t)cpu->a;
-                        cpu->f[fd] = (double)f;
+                        union { uint32_t u; float f; } res;
+                        union { uint64_t u; double d; } conv_r;
+                        res.f = (float)(int32_t)cpu->a;
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 3;
                         break;
                     }
@@ -3703,9 +3677,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Copy with single precision (truncate to float, widen back) */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)f;
+                        union { uint32_t u; float f; } fs_s;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        conv_r.u = (uint64_t)fs_s.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 2;
                         break;
                     }
@@ -3713,9 +3689,12 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert to float, sqrt, store back as double */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)sqrtf(f);
+                        union { uint32_t u; float f; } fs_s, res;
+                        union { uint64_t u; double d; } conv_s, conv_r;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        res.f = sqrtf(fs_s.f);
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 15;
                         break;
                     }
@@ -3853,9 +3832,10 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert float to double (widen) */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)f;
+                        union { uint32_t u; float f; } fs_s;
+                        union { uint64_t u; double d; } conv_s;
+                        conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
+                        cpu->f[fd] = (double)fs_s.f;
                         cycles = 3;
                         break;
                     }
@@ -3863,9 +3843,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        /* Convert double to float (narrow), store back as double */
-                        float f = (float)cpu->f[fs];
-                        cpu->f[fd] = (double)f;
+                        union { uint32_t u; float f; } res;
+                        union { uint64_t u; double d; } conv_r;
+                        res.f = (float)cpu->f[fs];
+                        conv_r.u = (uint64_t)res.u;
+                        cpu->f[fd] = conv_r.d;
                         cycles = 3;
                         break;
                     }

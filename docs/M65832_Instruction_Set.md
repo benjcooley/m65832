@@ -225,6 +225,8 @@ After the `$02` prefix byte:
 | $95 | TYB | Transfer Y to B |
 | $96 | TBY | Transfer B to Y |
 | $A4 | TSPB | Transfer SP to B |
+| $A5 | JMP (dp) | Jump indirect through DP |
+| $A6 | JSR (dp) | Call indirect through DP |
 | **Barrel Shifter ($98)** | | |
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
 | **Extend Operations ($99)** | | |
@@ -1548,6 +1550,47 @@ The B register is the base register for absolute addressing. These extended inst
 ```asm
     TSPB              ; B = SP (use stack pointer as base for addressing)
     LDA B+$10         ; Load from SP+$10 using B-relative addressing
+```
+
+---
+
+### DP Indirect Control Flow
+
+#### JMP (dp) - Jump Indirect through DP
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| DP Indirect | JMP (dp) | $02 $A5 dp | 3 |
+| DP Indirect | JMP (Rn) | $02 $A5 nn | 3 |
+
+**Flags Affected:** None
+
+Reads a 32-bit target address from the DP location (or register window register) and jumps to it.
+
+**Example:**
+```asm
+    LDA #target_addr
+    STA R5              ; Store address in R5
+    JMP (R5)            ; Jump through R5
+```
+
+#### JSR (dp) - Call Indirect through DP
+
+| Mode | Syntax | Opcode | Bytes |
+|------|--------|--------|-------|
+| DP Indirect | JSR (dp) | $02 $A6 dp | 3 |
+| DP Indirect | JSR (Rn) | $02 $A6 nn | 3 |
+
+**Flags Affected:** None
+
+Reads a 32-bit target address from the DP location (or register window register), pushes the return address, and calls the subroutine.
+
+**Example:**
+```asm
+    LDA #my_function
+    STA R10             ; Store function pointer in R10
+    JSR (R10)           ; Indirect call through R10
+    ; ... continues after RTS
 ```
 
 ---

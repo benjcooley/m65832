@@ -274,9 +274,9 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { "TBX",    AM_IMP  }, { "TYB",    AM_IMP  }, { "TBY",    AM_IMP  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "TTA",    AM_IMP  }, { "TAT",    AM_IMP  },
     { "LDQ",    AM_DP   }, { "LDQ",    AM_ABS  }, { "STQ",    AM_DP   }, { "STQ",    AM_ABS  },
-    /* 0xA0-0xAF: LEA, TSPB */
+    /* 0xA0-0xAF: LEA, TSPB, JMP/JSR indirect */
     { "LEA",    AM_DP   }, { "LEA",    AM_DPX  }, { "LEA",    AM_ABS  }, { "LEA",    AM_ABSX },
-    { "TSPB",   AM_IMP  }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
+    { "TSPB",   AM_IMP  }, { "JMP",    AM_IND  }, { "JSR",    AM_IND  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { NULL,  AM_UNKNOWN },
     /* 0xB0-0xBF: FPU Load/Store (with register byte) */
@@ -869,7 +869,14 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     }
     
     /* Get operand size */
-    int opsize = get_operand_size(mode, m_flag, x_flag);
+    int opsize;
+    if (is_ext && (mode == AM_DP || mode == AM_DPX || mode == AM_DPY || mode == AM_IND ||
+                   mode == AM_INDX || mode == AM_INDY || mode == AM_INDL || mode == AM_INDLY)) {
+        /* Extended instructions always use 1-byte DP operands (register window) */
+        opsize = 1;
+    } else {
+        opsize = get_operand_size(mode, m_flag, x_flag);
+    }
     
     int total_len = 1 + prefix_len + opsize;
     

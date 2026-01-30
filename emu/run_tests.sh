@@ -444,6 +444,27 @@ EOF
 
 run_test "TXB/TBX transfer" "test/test_txb_tbx.asm" "DEADBEEF" 200
 
+# Test 22: JMP (dp) and JSR (dp) - indirect through DP/register window
+cat > test/test_jmp_jsr_dp.asm << 'EOF'
+; Test JMP (dp) and JSR (dp)
+    .org $1000
+    .M32
+    
+    ; Set up function pointer in register window
+    LDA #subroutine
+    STA R5              ; Store function addr in R5 ($14)
+    
+    ; Call through register
+    JSR (R5)            ; $02 $A6 $14 - indirect call
+    STP
+    
+subroutine:
+    LDA #$CAFEBABE      ; Load a recognizable value
+    RTS
+EOF
+
+run_test "JSR (dp) indirect call" "test/test_jmp_jsr_dp.asm" "CAFEBABE" 300
+
 # Summary
 echo
 echo "=== Results ==="

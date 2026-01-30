@@ -1829,6 +1829,10 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             case AM_ABSX:
                 emit_word(as, op.value & 0xFFFF);
                 break;
+            case AM_IND:
+                /* DP indirect - emit single byte */
+                emit_byte(as, op.value & 0xFF);
+                break;
             default:
                 error(as, "unsupported addressing mode for extended instruction");
                 return 0;

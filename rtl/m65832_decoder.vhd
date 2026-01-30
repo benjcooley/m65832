@@ -301,6 +301,8 @@ begin
                 when x"95" => INSTR_LEN <= "010";  -- TYB (B = Y)
                 when x"96" => INSTR_LEN <= "010";  -- TBY (Y = B)
                 when x"A4" => INSTR_LEN <= "010";  -- TSPB (B = SP)
+                when x"A5" => INSTR_LEN <= "011";  -- JMP (dp) - indirect jump (TODO: core impl)
+                when x"A6" => INSTR_LEN <= "011";  -- JSR (dp) - indirect call (TODO: core impl)
                 
                 -- Transfer T (remainder/temp)
                 when x"9A" => INSTR_LEN <= "010";  -- TTA (A = T)
