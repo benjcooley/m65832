@@ -293,7 +293,8 @@ Internal P Register (14 bits):
 #### Stack Operations and P Register Format
 
 **32-bit Mode:** In 32-bit mode (M=10), ALL stack operations push/pull 32 bits.
-This includes PHP/PLP, PHA/PLA, PHX/PLX, PHY/PLY, PHD/PLD, PHB/PLB, JSR/RTS, RTL.
+This includes PHP/PLP, PHA/PLA, PHX/PLX, PHY/PLY, PHD/PLD, PHB/PLB, JSR/RTS.
+Note: JSL and RTL are **illegal** in 32-bit mode (reserved for M65864).
 
 When pushed to the stack (PHP/PLP), flags are packed as follows:
 
@@ -1102,10 +1103,11 @@ Like SEP but as an extended instruction. Used to modify M65832's width flags.
 - PHA/PLA, PHX/PLX, PHY/PLY: 32-bit
 - PHP/PLP: 32-bit (P is zero-extended to 32 bits)
 - PHD/PLD, PHB/PLB: 32-bit
-- JSR/RTS, RTL: Push/pull 32-bit return address
+- JSR/RTS: Push/pull 32-bit return address; JSR uses 32-bit absolute address
 - PEA/PEI/PER: 32-bit (values zero-extended if smaller)
 
-**JSL is illegal (reserved) in 32-bit mode** - use JSR instead.
+**JSL and RTL are illegal (reserved) in 32-bit mode** - use JSR and RTS instead.
+These opcodes ($22, $6B) are reserved for future M65864 (64-bit) extensions.
 
 #### Explicit 32-bit Stack (Extended Prefix)
 

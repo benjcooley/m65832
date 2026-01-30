@@ -180,14 +180,16 @@ In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit s
 ### Jump/Call
 | Instruction | Operation | Opcode | Notes |
 |-------------|-----------|--------|-------|
-| JMP abs | PC = B + abs | $4C | |
-| JMP (abs) | PC = [B + abs] | $6C | |
-| JMP (abs,X) | PC = [B + abs + X] | $7C | |
+| JMP abs | PC = abs | $4C | 5-byte (opcode + 32-bit addr) in 32-bit mode |
+| JMP (abs) | PC = [B + abs] | $6C | Indirect: address in data memory |
+| JMP (abs,X) | PC = [B + abs + X] | $7C | Indexed indirect: address in data memory |
+| JMP (dp) | PC = [dp] | $FC | DP indirect (register window) |
 | JML long | PC = long | $5C | |
-| JSR abs | push32 PC-1; PC = B + abs | $20 | 32-bit call in 32-bit mode |
-| JSL long | *Reserved* | $22 | Reserved for M65864 (64-bit) |
+| JSR abs | PC = abs, push32 PC-1 | $20 | 5-byte (opcode + 32-bit addr) in 32-bit mode |
+| JSR (dp) | PC = [dp], push32 PC-1 | $02 $A6 | DP indirect call (register window) |
+| JSL long | *Reserved* | $22 | **Illegal** in 32-bit mode |
 | RTS | PC = pull32 + 1 | $60 | 32-bit return in 32-bit mode |
-| RTL | *Reserved* | $6B | Reserved for M65864 (64-bit) |
+| RTL | *Reserved* | $6B | **Illegal** in 32-bit mode |
 | RTI | P = pull; PC = pull | $40 | |
 
 ### Stack

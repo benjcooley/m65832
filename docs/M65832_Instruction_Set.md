@@ -869,9 +869,15 @@ In 32-bit mode, branches use 16-bit signed relative addressing (range: -32768 to
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Absolute | JMP abs | $4C | 3 | 3 |
+| Absolute | JMP abs | $4C | 3 (5 in 32-bit) | 3 |
 | Indirect | JMP (abs) | $6C | 3 | 5 |
 | Indexed Indirect | JMP (abs,X) | $7C | 3 | 6 |
+| DP Indirect | JMP (dp) | $FC | 2 | 5 |
+
+**32-bit mode behavior:**
+- **JMP abs**: Uses 32-bit absolute address (5 bytes total: opcode + 4-byte address)
+- **JMP (abs)** / **(abs,X)**: Address operand is B-relative (data memory); target read is 32-bit
+- **JMP (dp)**: DP operand is 1-byte; reads 32-bit target from register window
 
 #### JML - Jump Long
 
@@ -886,12 +892,13 @@ Pushes return address (PC-1) and jumps.
 
 | Mode | Syntax | Opcode | Bytes | Cycles |
 |------|--------|--------|-------|--------|
-| Absolute | JSR abs | $20 | 3 | 6 |
+| Absolute | JSR abs | $20 | 3 (5 in 32-bit) | 6 |
+| DP Indirect | JSR (dp) | $02 $A6 | 3 | 7 |
 
 **32-bit mode behavior:**
+- **JSR abs**: Uses 32-bit absolute address (5 bytes total: opcode + 4-byte address)
 - Pushes full 32-bit return address (PC-1) to stack
-- Target address is B + abs (32-bit absolute addressing)
-- Use `JSR B+addr` syntax in assembler
+- **JSR (dp)**: DP operand is 1-byte; reads 32-bit target from register window
 
 #### JSL - Jump to Subroutine Long
 
