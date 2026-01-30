@@ -9,7 +9,6 @@
 #define SYSTEM_H
 
 #include "m65832emu.h"
-#include "platform.h"
 #include "uart.h"
 #include "blkdev.h"
 #include <stdbool.h>
@@ -18,21 +17,31 @@
 extern "C" {
 #endif
 
+struct system_state;
+
 /* ============================================================================
  * System Memory Map
- *
- * Memory map is defined by platform headers (platform_de25.h, platform_kv260.h)
- * All platforms use the same logical layout for software compatibility:
- *
- *   0x00000000 - 0x0000FFFF   Boot ROM (64 KB)
- *   0x00010000 - 0x0FFFFFFF   DDR RAM (up to 256 MB)
- *   0x10000000 - 0x100FFFFF   Peripheral MMIO (1 MB)
- *   0xFFFFF000 - 0xFFFFFFFF   System registers (MMU, timer)
  * ========================================================================= */
+
+/*
+ * Memory Map (for Linux-capable system):
+ *
+ *   0x00000000 - 0x00000FFF   Reserved (vectors, zero page)
+ *   0x00001000 - 0x00001FFF   Boot parameters
+ *   0x00002000 - 0x000FFFFF   Available RAM
+ *   0x00100000 - 0x00FFFFFF   Kernel load area (1MB-16MB)
+ *   0x01000000 - 0x0FFFFFFF   initrd / general RAM
+ *   0xFFFF0000 - 0xFFFF0FFF   Boot ROM (4KB)
+ *   0xFFFFF000 - 0xFFFFF0FF   System registers (MMU, timer)
+ *   0xFFFFF100 - 0xFFFFF10F   UART
+ *   0xFFFFF120 - 0xFFFFF13F   Block device
+ */
 
 #define SYSTEM_BOOT_PARAMS      0x00001000
 #define SYSTEM_KERNEL_LOAD      0x00100000
 #define SYSTEM_INITRD_LOAD      0x01000000
+#define SYSTEM_BOOT_ROM         0xFFFF0000
+#define SYSTEM_BOOT_ROM_SIZE    0x1000
 
 /* ============================================================================
  * Boot Parameters Structure
@@ -66,11 +75,8 @@ typedef struct {
  * ========================================================================= */
 
 typedef struct {
-    /* Platform selection */
-    platform_id_t platform;     /* Target platform (DE25, KV260, etc.) */
-    
-    /* Memory configuration (0 = use platform default) */
-    size_t ram_size;            /* RAM size in bytes */
+    /* Memory configuration */
+    size_t ram_size;            /* RAM size in bytes (default 256MB) */
     
     /* Boot configuration */
     const char *kernel_file;    /* Kernel binary to load (NULL = none) */
@@ -91,7 +97,15 @@ typedef struct {
     bool supervisor_mode;       /* Start in supervisor mode */
     bool native32_mode;         /* Start in native 32-bit mode */
     bool verbose;               /* Verbose output */
+
+    /* Syscall handling */
+    const char *sandbox_root;   /* Sandbox root for emulated filesystem */
+    void *syscall_user;         /* User data passed to syscall handler */
+    bool (*syscall_handler)(struct system_state *sys, uint8_t trap_code, void *user);
 } system_config_t;
+
+/* Default configuration values */
+#define SYSTEM_DEFAULT_RAM_SIZE     (256 * 1024 * 1024)  /* 256 MB */
 
 /* ============================================================================
  * System State
@@ -110,7 +124,15 @@ typedef struct system_state {
     
     /* Configuration */
     system_config_t config;
-    const platform_config_t *platform;  /* Active platform configuration */
+
+    /* Syscall handler */
+    bool (*syscall_handler)(struct system_state *sys, uint8_t trap_code, void *user);
+    void *syscall_user;
+    char *sandbox_root;
+
+    /* Emulated file descriptors (guest fd -> host fd) */
+    int host_fds[32];
+    bool fd_used[32];
     
     /* State */
     bool running;
@@ -231,6 +253,17 @@ m65832_cpu_t *system_get_cpu(system_state_t *sys);
  * @param sys       System state
  */
 void system_print_info(system_state_t *sys);
+
+/*
+ * Set a syscall handler callback.
+ *
+ * @param sys       System state
+ * @param handler   Callback for TRAP syscalls (NULL disables handling)
+ * @param user      User pointer passed to handler
+ */
+void system_set_syscall_handler(system_state_t *sys,
+                                bool (*handler)(system_state_t *sys, uint8_t trap_code, void *user),
+                                void *user);
 
 #ifdef __cplusplus
 }

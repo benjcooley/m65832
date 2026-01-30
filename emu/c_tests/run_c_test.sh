@@ -40,6 +40,8 @@ _start:
     ; Initialize Direct Page to $4000
     .byte 0xA9, 0x00, 0x40, 0x00, 0x00   ; LDA #$00004000
     .byte 0x5B                            ; TCD
+    ; Enable register window (RSET)
+    .byte 0x02, 0x30
     ; Initialize Stack Pointer to $FFFF
     .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   ; LDX #$0000FFFF
     .byte 0x9A                            ; TXS

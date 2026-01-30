@@ -5,6 +5,7 @@
  */
 
 #include "system.h"
+#include "sandbox_filesystem.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,8 +19,7 @@ void system_config_init(system_config_t *config) {
     
     memset(config, 0, sizeof(*config));
     
-    config->platform = platform_get_default();
-    config->ram_size = 0;       /* 0 = use platform default */
+    config->ram_size = SYSTEM_DEFAULT_RAM_SIZE;
     config->kernel_file = NULL;
     config->initrd_file = NULL;
     config->cmdline = NULL;
@@ -32,6 +32,41 @@ void system_config_init(system_config_t *config) {
     config->supervisor_mode = true;
     config->native32_mode = true;
     config->verbose = false;
+    config->sandbox_root = NULL;
+    config->syscall_user = NULL;
+    config->syscall_handler = NULL;
+}
+
+/* ============================================================================
+ * Syscall Return Handling
+ * ========================================================================= */
+
+static uint8_t system_pull8(m65832_cpu_t *cpu) {
+    if (cpu->p & P_E) {
+        cpu->s = 0x100 | ((cpu->s + 1) & 0xFF);
+        return cpu->memory[0x100 + (cpu->s & 0xFF)];
+    }
+    cpu->s++;
+    return m65832_emu_read8(cpu, cpu->s);
+}
+
+static void system_rti(m65832_cpu_t *cpu) {
+    uint8_t p_lo = system_pull8(cpu);
+    uint8_t p_hi = system_pull8(cpu);
+    cpu->p = (uint16_t)p_lo | ((uint16_t)p_hi << 8);
+    uint8_t pc0 = system_pull8(cpu);
+    uint8_t pc1 = system_pull8(cpu);
+    uint8_t pc2 = system_pull8(cpu);
+    uint8_t pc3 = system_pull8(cpu);
+    cpu->pc = (uint32_t)pc0 | ((uint32_t)pc1 << 8) |
+              ((uint32_t)pc2 << 16) | ((uint32_t)pc3 << 24);
+}
+
+static bool system_handle_syscall(system_state_t *sys, uint8_t trap_code) {
+    if (sys->syscall_handler) {
+        return sys->syscall_handler(sys, trap_code, sys->syscall_user);
+    }
+    return sandbox_fs_handle_syscall(sys, trap_code);
 }
 
 /* ============================================================================
@@ -104,18 +139,11 @@ system_state_t *system_init(const system_config_t *config) {
     
     /* Copy configuration */
     sys->config = *config;
-    
-    /* Get platform configuration */
-    sys->platform = platform_get_config(config->platform);
-    
-    /* Determine RAM size (use platform default if not specified) */
-    size_t ram_size = config->ram_size;
-    if (ram_size == 0) {
-        ram_size = sys->platform->ram_size;
-    }
+    sys->syscall_handler = config->syscall_handler;
+    sys->syscall_user = config->syscall_user;
     
     /* Create CPU */
-    sys->cpu = m65832_emu_init(ram_size);
+    sys->cpu = m65832_emu_init(config->ram_size);
     if (!sys->cpu) {
         fprintf(stderr, "error: cannot create CPU\n");
         free(sys);
@@ -123,16 +151,14 @@ system_state_t *system_init(const system_config_t *config) {
     }
     
     if (config->verbose) {
-        printf("System: Platform %s (%s)\n", 
-               sys->platform->name, sys->platform->description);
-        printf("System: %zu MB RAM, CPU %u MHz\n", 
-               ram_size / (1024 * 1024),
-               sys->platform->cpu_freq / 1000000);
+        printf("System: %zu MB RAM\n", config->ram_size / (1024 * 1024));
     }
+
+    sandbox_fs_init(sys, config->sandbox_root);
     
     /* Initialize UART */
     if (config->enable_uart) {
-        sys->uart = uart_init(sys->cpu, sys->platform);
+        sys->uart = uart_init(sys->cpu);
         if (!sys->uart) {
             fprintf(stderr, "error: cannot initialize UART\n");
             m65832_emu_close(sys->cpu);
@@ -145,14 +171,13 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: UART at 0x%08X\n", sys->platform->uart_base);
+            printf("System: UART at 0x%08X\n", UART_BASE);
         }
     }
     
     /* Initialize block device */
     if (config->enable_blkdev) {
-        sys->blkdev = blkdev_init(sys->cpu, sys->platform, 
-                                   config->disk_file, config->disk_readonly);
+        sys->blkdev = blkdev_init(sys->cpu, config->disk_file, config->disk_readonly);
         if (!sys->blkdev) {
             fprintf(stderr, "error: cannot initialize block device\n");
             if (sys->uart) uart_destroy(sys->uart);
@@ -162,7 +187,7 @@ system_state_t *system_init(const system_config_t *config) {
         }
         
         if (config->verbose) {
-            printf("System: SD/Block device at 0x%08X", sys->platform->sd_base);
+            printf("System: Block device at 0x%08X", BLKDEV_BASE);
             if (config->disk_file) {
                 printf(" (%s, %llu sectors)\n", 
                        config->disk_file, 
@@ -177,10 +202,10 @@ system_state_t *system_init(const system_config_t *config) {
     memset(&sys->boot_params, 0, sizeof(sys->boot_params));
     sys->boot_params.magic = BOOT_PARAMS_MAGIC;
     sys->boot_params.version = BOOT_PARAMS_VERSION;
-    sys->boot_params.mem_base = sys->platform->ram_base;
-    sys->boot_params.mem_size = (uint32_t)ram_size;
-    sys->boot_params.uart_base = config->enable_uart ? sys->platform->uart_base : 0;
-    sys->boot_params.timer_base = sys->platform->timer_base;
+    sys->boot_params.mem_base = 0;
+    sys->boot_params.mem_size = (uint32_t)config->ram_size;
+    sys->boot_params.uart_base = config->enable_uart ? UART_BASE : 0;
+    sys->boot_params.timer_base = SYSREG_TIMER_CTRL;
     
     /* Load kernel if specified */
     if (config->kernel_file) {
@@ -260,6 +285,8 @@ void system_destroy(system_state_t *sys) {
     if (sys->cpu) {
         m65832_emu_close(sys->cpu);
     }
+
+    sandbox_fs_cleanup(sys);
     
     free(sys);
 }
@@ -305,6 +332,22 @@ uint64_t system_run(system_state_t *sys, uint64_t cycles) {
         int c = m65832_emu_step(sys->cpu);
         if (c < 0) break;
         total += c;
+
+        /* Handle syscalls */
+        if (sys->cpu->trap == TRAP_SYSCALL) {
+            bool handled = false;
+            handled = system_handle_syscall(sys, (uint8_t)sys->cpu->trap_addr);
+            if (handled) {
+                sys->cpu->trap = TRAP_NONE;
+                sys->cpu->trap_addr = 0;
+                system_rti(sys->cpu);
+            } else {
+                if (sys->config.verbose) {
+                    printf("Unhandled syscall trap at %08X\n", sys->cpu->trap_addr);
+                }
+                break;
+            }
+        }
         
         /* Poll devices periodically */
         sys->poll_counter++;
@@ -332,6 +375,14 @@ uint64_t system_run(system_state_t *sys, uint64_t cycles) {
 
 void system_run_until_halt(system_state_t *sys) {
     system_run(sys, 0);
+}
+
+void system_set_syscall_handler(system_state_t *sys,
+                                bool (*handler)(system_state_t *sys, uint8_t trap_code, void *user),
+                                void *user) {
+    if (!sys) return;
+    sys->syscall_handler = handler;
+    sys->syscall_user = user;
 }
 
 void system_stop(system_state_t *sys) {
@@ -411,24 +462,21 @@ m65832_cpu_t *system_get_cpu(system_state_t *sys) {
 }
 
 void system_print_info(system_state_t *sys) {
-    if (!sys || !sys->platform) return;
+    if (!sys) return;
     
     printf("M65832 System Configuration:\n");
-    printf("  Platform:     %s (%s)\n", sys->platform->name, sys->platform->description);
-    printf("  RAM:          %u MB at 0x%08X\n", 
-           sys->boot_params.mem_size / (1024 * 1024), sys->platform->ram_base);
-    printf("  CPU:          %u MHz\n", sys->platform->cpu_freq / 1000000);
+    printf("  RAM:          %zu MB\n", sys->config.ram_size / (1024 * 1024));
     printf("  UART:         %s at 0x%08X\n", 
-           sys->uart ? "enabled" : "disabled", sys->platform->uart_base);
+           sys->uart ? "enabled" : "disabled", UART_BASE);
     printf("  Block device: %s at 0x%08X\n",
-           sys->blkdev ? "enabled" : "disabled", sys->platform->sd_base);
+           sys->blkdev ? "enabled" : "disabled", BLKDEV_BASE);
     if (sys->blkdev && blkdev_get_capacity(sys->blkdev) > 0) {
         uint64_t cap_mb = blkdev_get_capacity_bytes(sys->blkdev) / (1024 * 1024);
         printf("    Disk:       %llu MB (%llu sectors)\n",
                (unsigned long long)cap_mb,
                (unsigned long long)blkdev_get_capacity(sys->blkdev));
     }
-    printf("  Timer:        0x%08X\n", sys->platform->timer_base);
+    printf("  Timer:        0x%08X\n", SYSREG_TIMER_CTRL);
     
     if (sys->boot_params.kernel_size > 0) {
         printf("  Kernel:       0x%08X (%u bytes)\n",

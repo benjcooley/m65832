@@ -47,23 +47,12 @@ sudo dnf install cmake ninja-build python3 meson
 git clone https://github.com/benjcooley/m65832.git
 cd m65832
 
-# Configure the build (validates prerequisites)
-./configure.sh
-
-# Build just the tools (emulator + assembler) - fast
-./build.sh tools
-
-# Run quick tests
-./test.sh --quick
-
-# Build full baremetal toolchain (includes LLVM - slow)
+# Build everything for baremetal
 ./build.sh baremetal
 
-# Run all tests
-./test.sh
+# Run the test suite
+./build.sh test
 ```
-
-For detailed build system documentation, see [M65832_Build_System.md](M65832_Build_System.md).
 
 ## Directory Structure
 
@@ -321,7 +310,7 @@ The default linker script (`m65832.ld`) provides:
 
 ### Adding New Syscalls (Baremetal)
 
-Edit `llvm-m65832/m65832-stdlib/picolibc/syscalls.c` to add new system calls. The file contains POSIX-compatible stubs that can be extended.
+Edit `picolibc-m65832/libc/machine/m65832/syscalls.c` to add new system calls. The file contains POSIX-compatible stubs that can be extended.
 
 ## Version Information
 
@@ -331,7 +320,6 @@ Edit `llvm-m65832/m65832-stdlib/picolibc/syscalls.c` to add new system calls. Th
 
 ## See Also
 
-- [M65832_Build_System.md](M65832_Build_System.md) - Detailed build system reference
 - [M65832_Architecture_Reference.md](M65832_Architecture_Reference.md) - CPU architecture
 - [M65832_Instruction_Set.md](M65832_Instruction_Set.md) - Instruction encoding
 - [M65832_C_ABI.md](M65832_C_ABI.md) - C calling convention

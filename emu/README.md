@@ -113,7 +113,19 @@ sudo make install
 
 # Interactive debugger
 ./m65832emu -i program.bin
+
+# System mode with sandboxed filesystem for TRAP syscalls
+./m65832emu --system --kernel program.bin --sandbox ./sandbox
 ```
+
+### System Mode and Sandbox Syscalls
+
+When running with `--system`, the emulator provides a minimal system
+environment with UART, block device, and a TRAP-based syscall handler.
+If `--sandbox` is provided, file-related syscalls (`open`, `read`, `write`,
+`close`, `lseek`, `fstat`) are serviced against that host directory. Paths
+are constrained to the sandbox root; `..` references are rejected. Without
+`--sandbox`, those file syscalls return `ENOSYS` while exit/getpid still work.
 
 ### Interactive Debugger Commands
 

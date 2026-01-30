@@ -72,7 +72,7 @@ print_summary() {
 }
 
 # Available test groups
-TEST_GROUPS="arithmetic control memory functions bitops types edge algorithms fpu structs switch operators sizeof advanced casts datastructs strings integration"
+TEST_GROUPS="arithmetic control memory functions bitops types edge algorithms fpu structs switch operators sizeof advanced casts datastructs strings integration filesystem"
 
 # Main
 echo "=========================================="
