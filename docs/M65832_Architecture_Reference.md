@@ -882,13 +882,13 @@ Traditional (always 32-bit in 32-bit mode).
 | JSR $XXXXXXXX | $20 | 5 | Push PC-1 (32-bit); PC = abs32 |
 | JSR (Rn) | $02 $A6 | 3 | Push PC-1 (32-bit); PC = [Rn] |
 | JSL | $22 | — | **Illegal** in 32-bit mode |
-
-**Note:** JML ($5C, $DC), JSL ($22), and RTL ($6B) are **illegal** in 32-bit mode (reserved for M65864).
+| RTL | $6B | — | **Illegal** in 32-bit mode |
 
 #### RTS - Return from Subroutine
-```
-RTS             PC = Pull + 1
-```
+
+**8/16-bit mode:** `RTS` pulls 16-bit return address, adds 1.
+
+**32-bit mode:** `RTS` pulls 32-bit return address, adds 1.
 
 #### RTI - Return from Interrupt
 ```
