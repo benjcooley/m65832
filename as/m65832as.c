@@ -1470,8 +1470,18 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     if (ext_alu) {
         const char *p = skip_whitespace(operand);
         int dest_starts_reg = (*p == 'A' || *p == 'a' || *p == 'R' || *p == 'r');
+        int is_immediate = (*p == '#');  /* Immediate addressing doesn't need Extended ALU */
+        /* In 32-bit mode, traditional mnemonics (LDA, STA, etc.) with absolute addresses
+         * must use Extended ALU since standard opcodes only support B-relative.
+         * Immediate mode uses standard opcodes with 4-byte immediate values. */
+        int is_traditional_mnemonic = (strcmp(mnemonic, "LDA") == 0 || strcmp(mnemonic, "STA") == 0 ||
+                                       strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
+                                       strcmp(mnemonic, "AND") == 0 || strcmp(mnemonic, "ORA") == 0 ||
+                                       strcmp(mnemonic, "EOR") == 0 || strcmp(mnemonic, "CMP") == 0 ||
+                                       strcmp(mnemonic, "BIT") == 0);
         int use_ext_alu = (size_code >= 0 || dest_starts_reg ||
-                           strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0);
+                           strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0 ||
+                           (as->m_flag == 2 && is_traditional_mnemonic && !is_immediate));
         if (ext_alu->is_unary && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
             use_ext_alu = 0;
         }
@@ -1540,8 +1550,13 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                     if (!parse_operand(as, dest_str, &mem_op)) {
                         return 0;
                     }
-                    if (as->m_flag == 2 && mem_op.value > 0xFFFF && mem_op.value <= 0xFFFFFF) {
-                        error(as, "32-bit addresses must use 8 hex digits");
+                    /* In 32-bit mode: B+$XXXX for B-relative, otherwise 32-bit absolute */
+                    int dest_is_32bit = (as->m_flag == 2 && !mem_op.b_relative);
+                    /* Reject short hex literals in 32-bit mode - must use 8 digits for absolute */
+                    if (as->m_flag == 2 &&
+                        mem_op.is_hex_literal && mem_op.hex_digits < 8 &&
+                        (mem_op.mode == AM_ABS || mem_op.mode == AM_ABSX || mem_op.mode == AM_ABSY)) {
+                        error(as, "32-bit mode requires 8-digit hex for absolute address ($XXXXXXXX)");
                         return 0;
                     }
                     /* DP addresses must be 4-byte aligned in 32-bit mode */
@@ -1564,23 +1579,24 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                         case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, mem_op.value); break;
                         case AM_ABS:
                         case AM_ABSX:
-                        case AM_ABSY: {
-                            int is_32 = mem_op.value > 0xFFFF;
-                            if (mem_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
-                            else if (mem_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
-                            else addr_mode = is_32 ? 0x12 : 0x0A;
-                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                        case AM_ABSY:
+                        case AM_ABS32: {
+                            int use_32 = dest_is_32bit || (mem_op.mode == AM_ABS32);
+                            if (mem_op.mode == AM_ABS || mem_op.mode == AM_ABS32) addr_mode = use_32 ? 0x10 : 0x08;
+                            else if (mem_op.mode == AM_ABSX) addr_mode = use_32 ? 0x11 : 0x09;
+                            else addr_mode = use_32 ? 0x12 : 0x0A;
+                            if (use_32) append_quad(operand_bytes, &operand_len, mem_op.value);
                             else append_word(operand_bytes, &operand_len, mem_op.value);
                             break;
                         }
                         case AM_ABSIND:
                         case AM_ABSINDX:
                         case AM_ABSLIND: {
-                            int is_32 = mem_op.value > 0xFFFF;
-                            if (mem_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
-                            else if (mem_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
-                            else addr_mode = is_32 ? 0x15 : 0x0D;
-                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            int use_32 = dest_is_32bit || (mem_op.mode == AM_ABS32);
+                            if (mem_op.mode == AM_ABSIND) addr_mode = use_32 ? 0x13 : 0x0B;
+                            else if (mem_op.mode == AM_ABSINDX) addr_mode = use_32 ? 0x14 : 0x0C;
+                            else addr_mode = use_32 ? 0x15 : 0x0D;
+                            if (use_32) append_quad(operand_bytes, &operand_len, mem_op.value);
                             else append_word(operand_bytes, &operand_len, mem_op.value);
                             break;
                         }
@@ -1621,15 +1637,13 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                     if (!parse_operand(as, src_str, &src_op)) {
                         return 0;
                     }
-                    if (as->m_flag == 2 && src_op.value > 0xFFFF && src_op.value <= 0xFFFFFF) {
-                        error(as, "32-bit addresses must use 8 hex digits");
-                        return 0;
-                    }
+                    /* In 32-bit mode: B+$XXXX for B-relative, otherwise 32-bit absolute */
+                    int is_32bit_addr = (as->m_flag == 2 && !src_op.b_relative);
+                    /* Reject short hex literals in 32-bit mode - must use 8 digits for absolute */
                     if (as->m_flag == 2 &&
-                        (src_op.mode == AM_ABS || src_op.mode == AM_ABSX || src_op.mode == AM_ABSY ||
-                         src_op.mode == AM_ABSIND || src_op.mode == AM_ABSINDX || src_op.mode == AM_ABSLIND) &&
-                        src_op.value <= 0xFFFF && !src_op.b_relative) {
-                        error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
+                        src_op.is_hex_literal && src_op.hex_digits < 8 &&
+                        (src_op.mode == AM_ABS || src_op.mode == AM_ABSX || src_op.mode == AM_ABSY)) {
+                        error(as, "32-bit mode requires 8-digit hex for absolute address ($XXXXXXXX)");
                         return 0;
                     }
                     /* DP addresses must be 4-byte aligned in 32-bit mode */
@@ -1652,23 +1666,24 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                         case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, src_op.value); break;
                         case AM_ABS:
                         case AM_ABSX:
-                        case AM_ABSY: {
-                            int is_32 = src_op.value > 0xFFFF;
-                            if (src_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
-                            else if (src_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
-                            else addr_mode = is_32 ? 0x12 : 0x0A;
-                            if (is_32) append_quad(operand_bytes, &operand_len, src_op.value);
+                        case AM_ABSY:
+                        case AM_ABS32: {
+                            /* AM_ABS32 is always 32-bit absolute */
+                            int use_32 = is_32bit_addr || (src_op.mode == AM_ABS32);
+                            if (src_op.mode == AM_ABS || src_op.mode == AM_ABS32) addr_mode = use_32 ? 0x10 : 0x08;
+                            else if (src_op.mode == AM_ABSX) addr_mode = use_32 ? 0x11 : 0x09;
+                            else addr_mode = use_32 ? 0x12 : 0x0A;
+                            if (use_32) append_quad(operand_bytes, &operand_len, src_op.value);
                             else append_word(operand_bytes, &operand_len, src_op.value);
                             break;
                         }
                         case AM_ABSIND:
                         case AM_ABSINDX:
                         case AM_ABSLIND: {
-                            int is_32 = src_op.value > 0xFFFF;
-                            if (src_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
-                            else if (src_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
-                            else addr_mode = is_32 ? 0x15 : 0x0D;
-                            if (is_32) append_quad(operand_bytes, &operand_len, src_op.value);
+                            if (src_op.mode == AM_ABSIND) addr_mode = is_32bit_addr ? 0x13 : 0x0B;
+                            else if (src_op.mode == AM_ABSINDX) addr_mode = is_32bit_addr ? 0x14 : 0x0C;
+                            else addr_mode = is_32bit_addr ? 0x15 : 0x0D;
+                            if (is_32bit_addr) append_quad(operand_bytes, &operand_len, src_op.value);
                             else append_word(operand_bytes, &operand_len, src_op.value);
                             break;
                         }
@@ -1718,15 +1733,13 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                     if (!parse_operand(as, dest_str, &mem_op)) {
                         return 0;
                     }
-                    if (as->m_flag == 2 && mem_op.value > 0xFFFF && mem_op.value <= 0xFFFFFF) {
-                        error(as, "32-bit addresses must use 8 hex digits");
-                        return 0;
-                    }
+                    /* In 32-bit mode: B+$XXXX for B-relative, otherwise 32-bit absolute */
+                    int mem_is_32bit = (as->m_flag == 2 && !mem_op.b_relative);
+                    /* Reject short hex literals in 32-bit mode - must use 8 digits for absolute */
                     if (as->m_flag == 2 &&
-                        (mem_op.mode == AM_ABS || mem_op.mode == AM_ABSX || mem_op.mode == AM_ABSY ||
-                         mem_op.mode == AM_ABSIND || mem_op.mode == AM_ABSINDX || mem_op.mode == AM_ABSLIND) &&
-                        mem_op.value <= 0xFFFF && !mem_op.b_relative) {
-                        error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
+                        mem_op.is_hex_literal && mem_op.hex_digits < 8 &&
+                        (mem_op.mode == AM_ABS || mem_op.mode == AM_ABSX || mem_op.mode == AM_ABSY)) {
+                        error(as, "32-bit mode requires 8-digit hex for absolute address ($XXXXXXXX)");
                         return 0;
                     }
                     switch (mem_op.mode) {
@@ -1740,23 +1753,24 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                         case AM_INDLY:   addr_mode = 0x07; append_byte(operand_bytes, &operand_len, mem_op.value); break;
                         case AM_ABS:
                         case AM_ABSX:
-                        case AM_ABSY: {
-                            int is_32 = mem_op.value > 0xFFFF;
-                            if (mem_op.mode == AM_ABS) addr_mode = is_32 ? 0x10 : 0x08;
-                            else if (mem_op.mode == AM_ABSX) addr_mode = is_32 ? 0x11 : 0x09;
-                            else addr_mode = is_32 ? 0x12 : 0x0A;
-                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                        case AM_ABSY:
+                        case AM_ABS32: {
+                            int use_32 = mem_is_32bit || (mem_op.mode == AM_ABS32);
+                            if (mem_op.mode == AM_ABS || mem_op.mode == AM_ABS32) addr_mode = use_32 ? 0x10 : 0x08;
+                            else if (mem_op.mode == AM_ABSX) addr_mode = use_32 ? 0x11 : 0x09;
+                            else addr_mode = use_32 ? 0x12 : 0x0A;
+                            if (use_32) append_quad(operand_bytes, &operand_len, mem_op.value);
                             else append_word(operand_bytes, &operand_len, mem_op.value);
                             break;
                         }
                         case AM_ABSIND:
                         case AM_ABSINDX:
                         case AM_ABSLIND: {
-                            int is_32 = mem_op.value > 0xFFFF;
-                            if (mem_op.mode == AM_ABSIND) addr_mode = is_32 ? 0x13 : 0x0B;
-                            else if (mem_op.mode == AM_ABSINDX) addr_mode = is_32 ? 0x14 : 0x0C;
-                            else addr_mode = is_32 ? 0x15 : 0x0D;
-                            if (is_32) append_quad(operand_bytes, &operand_len, mem_op.value);
+                            int use_32 = mem_is_32bit || (mem_op.mode == AM_ABS32);
+                            if (mem_op.mode == AM_ABSIND) addr_mode = use_32 ? 0x13 : 0x0B;
+                            else if (mem_op.mode == AM_ABSINDX) addr_mode = use_32 ? 0x14 : 0x0C;
+                            else addr_mode = use_32 ? 0x15 : 0x0D;
+                            if (use_32) append_quad(operand_bytes, &operand_len, mem_op.value);
                             else append_word(operand_bytes, &operand_len, mem_op.value);
                             break;
                         }

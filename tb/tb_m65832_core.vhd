@@ -5602,18 +5602,23 @@ begin
         -- Clear trap marker
         poke(16#0640#, x"00");
         
-        -- Handler at $9400: LDA #$000000A9, STA $0640, RTI
+        -- Handler at $9400: LDA #$000000A9, Extended ST A $0640, RTI
         poke(16#9400#, x"A9");
         poke(16#9401#, x"A9");
         poke(16#9402#, x"00");
         poke(16#9403#, x"00");
         poke(16#9404#, x"00");
-        poke(16#9405#, x"8D");
-        poke(16#9406#, x"40");
-        poke(16#9407#, x"06");
-        poke(16#9408#, x"40");
+        -- Extended ST A, $00000640
+        poke(16#9405#, x"02");  -- EXT prefix
+        poke(16#9406#, x"81");  -- ST opcode
+        poke(16#9407#, x"90");  -- mode: size=2, target=A, addr_mode=abs32
+        poke(16#9408#, x"40");  -- addr low
+        poke(16#9409#, x"06");
+        poke(16#940A#, x"00");
+        poke(16#940B#, x"00");  -- addr high
+        poke(16#940C#, x"40");  -- RTI
         
-        -- Program at $9500: illegal ext op, then LDA #$0000005C, STA $0644, BRK
+        -- Program at $9500: illegal ext op, then LDA #$0000005C, Extended ST A $0644, STP
         poke(16#9500#, x"02");
         poke(16#9501#, x"E7");  -- illegal extended opcode
         poke(16#9502#, x"A9");
@@ -5621,10 +5626,15 @@ begin
         poke(16#9504#, x"00");
         poke(16#9505#, x"00");
         poke(16#9506#, x"00");
-        poke(16#9507#, x"8D");
-        poke(16#9508#, x"44");
-        poke(16#9509#, x"06");
-        poke(16#950A#, x"00");
+        -- Extended ST A, $00000644
+        poke(16#9507#, x"02");  -- EXT prefix
+        poke(16#9508#, x"81");  -- ST opcode
+        poke(16#9509#, x"90");  -- mode
+        poke(16#950A#, x"44");  -- addr low
+        poke(16#950B#, x"06");
+        poke(16#950C#, x"00");
+        poke(16#950D#, x"00");  -- addr high
+        poke(16#950E#, x"DB");  -- STP
         
         -- Supervisor setup: RTI to $9500 with 32-bit P (K ignored)
         poke(16#8000#, x"A9");  -- LDA #$00
@@ -6232,12 +6242,15 @@ begin
         poke(16#8011#, x"00");
         poke(16#8012#, x"02");  -- EXT prefix
         poke(16#8013#, x"92");  -- TBA (A = B, should be $12345678)
-        poke(16#8014#, x"8D");  -- STA abs
-        poke(16#8015#, x"20");
-        poke(16#8016#, x"06");  -- store to $0620
-        poke(16#8017#, x"00");
-        poke(16#8018#, x"00");
-        poke(16#8019#, x"DB");  -- STP
+        -- Extended ST A, $00000620 (32-bit absolute store)
+        poke(16#8014#, x"02");  -- EXT prefix
+        poke(16#8015#, x"81");  -- ST opcode
+        poke(16#8016#, x"90");  -- mode: size=2 (32-bit), target=A, addr_mode=abs32
+        poke(16#8017#, x"20");  -- addr low
+        poke(16#8018#, x"06");
+        poke(16#8019#, x"00");
+        poke(16#801A#, x"00");  -- addr high
+        poke(16#801B#, x"DB");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);
@@ -6270,24 +6283,30 @@ begin
         poke(16#800B#, x"80");  -- B = $80000000
         poke(16#800C#, x"02");  -- EXT prefix
         poke(16#800D#, x"92");  -- TBA (A = B, sets N=1)
-        poke(16#800E#, x"30");  -- BMI +5
-        poke(16#800F#, x"05");
-        poke(16#8010#, x"A9");  -- LDA #$FF (skip if not negative)
-        poke(16#8011#, x"FF");
-        poke(16#8012#, x"00");
+        -- BMI with 16-bit displacement in 32-bit mode
+        -- After fetch PC=$8011, target=$8016, displacement=$8016-$8011=5
+        poke(16#800E#, x"30");  -- BMI 
+        poke(16#800F#, x"05");  -- displacement low byte
+        poke(16#8010#, x"00");  -- displacement high byte
+        poke(16#8011#, x"A9");  -- LDA #$FF (skip if not negative)
+        poke(16#8012#, x"FF");
         poke(16#8013#, x"00");
         poke(16#8014#, x"00");
-        poke(16#8015#, x"A9");  -- LDA #$A5 (marker)
-        poke(16#8016#, x"A5");
-        poke(16#8017#, x"00");
+        poke(16#8015#, x"00");
+        poke(16#8016#, x"A9");  -- LDA #$A5 (marker)
+        poke(16#8017#, x"A5");
         poke(16#8018#, x"00");
         poke(16#8019#, x"00");
-        poke(16#801A#, x"8D");  -- STA $0630
-        poke(16#801B#, x"30");
-        poke(16#801C#, x"06");
-        poke(16#801D#, x"00");
-        poke(16#801E#, x"00");
-        poke(16#801F#, x"DB");  -- STP
+        poke(16#801A#, x"00");
+        -- Extended ST A, $00000630 (32-bit absolute store)
+        poke(16#801B#, x"02");  -- EXT prefix
+        poke(16#801C#, x"81");  -- ST opcode
+        poke(16#801D#, x"90");  -- mode: size=2 (32-bit), target=A, addr_mode=abs32
+        poke(16#801E#, x"30");  -- addr low
+        poke(16#801F#, x"06");
+        poke(16#8020#, x"00");
+        poke(16#8021#, x"00");  -- addr high
+        poke(16#8022#, x"DB");  -- STP
         
         rst_n <= '0';
         wait_cycles(10);

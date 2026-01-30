@@ -347,6 +347,46 @@ test_rtl() {
     fi
 }
 
+# VHDL-to-Emulator compatibility tests
+test_vhdl_emu() {
+    log_section "VHDL-to-Emulator Compatibility Tests"
+    
+    # Ensure emulator is built
+    if ! ensure_tool "emulator" "$EMU" "make -C '$M65832_DIR/emu' -j ${JOBS:-4}"; then
+        TOTAL_SKIP=$((TOTAL_SKIP + 1))
+        log_skip "Emulator not available"
+        return 1
+    fi
+    
+    cd "$M65832_DIR/emu"
+    
+    if [ -x "run_vhdl_tests.sh" ]; then
+        local result
+        result=$(./run_vhdl_tests.sh 2>&1)
+        local exit_code=$?
+        
+        # Extract pass/fail counts from output
+        local passed=$(echo "$result" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+        local failed=$(echo "$result" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
+        
+        echo "$result" | tail -20
+        
+        if [ "$failed" = "0" ]; then
+            log_success "VHDL-to-Emulator tests: $passed passed, 0 failed"
+            TOTAL_PASS=$((TOTAL_PASS + 1))
+            return 0
+        else
+            log_fail "VHDL-to-Emulator tests: $passed passed, $failed failed"
+            TOTAL_FAIL=$((TOTAL_FAIL + 1))
+            return 1
+        fi
+    else
+        TOTAL_SKIP=$((TOTAL_SKIP + 1))
+        log_skip "VHDL-to-Emulator test runner not found"
+        return 1
+    fi
+}
+
 # Quick smoke tests (fast validation)
 test_smoke() {
     log_section "Quick Smoke Tests"
@@ -443,6 +483,7 @@ test_all() {
     
     test_emulator_basic || failed=1
     test_assembler || failed=1
+    test_vhdl_emu || failed=1
     test_compiler_core || failed=1
     test_inline_asm || failed=1
     test_picolibc || failed=1
@@ -468,6 +509,7 @@ Test Selection:
   --emulator, -e        Run emulator tests only
   --assembler, -s       Run assembler tests only
   --rtl, -r             Run RTL/VHDL tests only
+  --vhdl-emu            Run VHDL-to-emulator compatibility tests
   --picolibc, -p        Run picolibc integration tests
   --inline-asm          Run inline assembly tests
 
@@ -480,6 +522,7 @@ Examples:
   $0 --quick            # Quick smoke tests
   $0 --compiler         # Compiler tests only
   $0 -e -s              # Emulator and assembler tests
+  $0 --vhdl-emu         # VHDL-to-emulator compatibility tests
 
 Prerequisites:
   1. Run ./configure.sh first
@@ -490,6 +533,7 @@ Test Suites:
   - Smoke:      Basic tool validation (~5 seconds)
   - Emulator:   Emulator instruction tests (~30 seconds)
   - Assembler:  Assembler syntax tests (~10 seconds)
+  - VHDL-Emu:   VHDL-to-emulator compatibility (~10 seconds)
   - Compiler:   C compiler code generation (~5 minutes)
   - Picolibc:   C library integration (~2 minutes)
   - RTL:        VHDL simulation tests (~10 minutes, requires GHDL)
@@ -547,6 +591,9 @@ main() {
             ;;
         --rtl|-r)
             test_rtl || failed=1
+            ;;
+        --vhdl-emu)
+            test_vhdl_emu || failed=1
             ;;
         --picolibc|-p)
             test_picolibc || failed=1
