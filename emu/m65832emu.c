@@ -2687,17 +2687,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cpu->pc = addr;
             cycles = 8;
             break;
-        case 0xFC: /* JSR (abs,X) */
-            addr = addr_absx(cpu);
-            /* M65832: In 32-bit mode, push full 32-bit return address */
+        case 0xFC: /* JMP (dp) - M65832: indirect jump through DP/register */
+            addr = addr_dp(cpu);
             if (width_m == 4) {
-                push32(cpu, cpu->pc - 1);
                 cpu->pc = mem_read32(cpu, addr);
             } else {
-                push16(cpu, (uint16_t)(cpu->pc - 1));
                 cpu->pc = mem_read16(cpu, addr);
             }
-            cycles = 8;
+            cycles = 5;
             break;
         case 0x60: /* RTS */
             /* M65832: In 32-bit mode, pull full 32-bit return address */
@@ -3232,6 +3229,67 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         cpu->vbr = pull32(cpu);
                         cycles = 2;
                         break;
+                    /* === B Register Transfers === */
+                    case 0x91: /* TAB - A to B */
+                        cpu->b = cpu->a;
+                        /* TAB does not affect flags (like TXS) */
+                        cycles = 2;
+                        break;
+                    case 0x92: /* TBA - B to A */
+                        cpu->a = cpu->b;
+                        update_nz32(cpu, cpu->a);
+                        cycles = 2;
+                        break;
+                    case 0x93: /* TXB - X to B */
+                        cpu->b = cpu->x;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
+                    case 0x94: /* TBX - B to X */
+                        cpu->x = cpu->b;
+                        update_nz32(cpu, cpu->x);
+                        cycles = 2;
+                        break;
+                    case 0x95: /* TYB - Y to B */
+                        cpu->b = cpu->y;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
+                    case 0x96: /* TBY - B to Y */
+                        cpu->y = cpu->b;
+                        update_nz32(cpu, cpu->y);
+                        cycles = 2;
+                        break;
+                    
+                    case 0xA4: /* TSPB - SP to B */
+                        cpu->b = cpu->s;
+                        /* Does not affect flags */
+                        cycles = 2;
+                        break;
+                    
+                    /* === DP Indirect Jump/Call === */
+                    case 0xA5: /* JMP (dp) - Jump indirect through DP */
+                        addr = addr_dp(cpu);
+                        if (width_m == 4) {
+                            cpu->pc = mem_read32(cpu, addr);
+                        } else {
+                            cpu->pc = mem_read16(cpu, addr);
+                        }
+                        cycles = 5;
+                        break;
+                    case 0xA6: /* JSR (dp) - Call indirect through DP */
+                        addr = addr_dp(cpu);
+                        if (width_m == 4) {
+                            push32(cpu, cpu->pc - 1);
+                            cpu->pc = mem_read32(cpu, addr);
+                        } else {
+                            push16(cpu, (uint16_t)(cpu->pc - 1));
+                            cpu->pc = mem_read16(cpu, addr);
+                        }
+                        cycles = 7;
+                        break;
+
+                    /* === T Register Transfers === */
                     case 0x9A: /* TTA - T to A */
                         cpu->a = cpu->t;
                         update_nz32(cpu, cpu->a);

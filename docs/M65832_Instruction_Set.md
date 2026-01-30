@@ -225,8 +225,9 @@ After the `$02` prefix byte:
 | $95 | TYB | Transfer Y to B |
 | $96 | TBY | Transfer B to Y |
 | $A4 | TSPB | Transfer SP to B |
-| $A5 | JMP (dp) | Jump indirect through DP |
 | $A6 | JSR (dp) | Call indirect through DP |
+
+**Note:** JMP (dp) is now base opcode $FC for better code density.
 | **Barrel Shifter ($98)** | | |
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
 | **Extend Operations ($99)** | | |
@@ -1560,18 +1561,18 @@ The B register is the base register for absolute addressing. These extended inst
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
-| DP Indirect | JMP (dp) | $02 $A5 dp | 3 |
-| DP Indirect | JMP (Rn) | $02 $A5 nn | 3 |
+| DP Indirect | JMP (dp) | $FC dp | 2 |
+| DP Indirect | JMP (Rn) | $FC nn | 2 |
 
 **Flags Affected:** None
 
-Reads a 32-bit target address from the DP location (or register window register) and jumps to it.
+Reads a 32-bit target address from the DP location (or register window register) and jumps to it. This is a base opcode (not extended) for better code density.
 
 **Example:**
 ```asm
     LDA #target_addr
     STA R5              ; Store address in R5
-    JMP (R5)            ; Jump through R5
+    JMP (R5)            ; Jump through R5 ($FC $14)
 ```
 
 #### JSR (dp) - Call Indirect through DP

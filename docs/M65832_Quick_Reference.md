@@ -316,7 +316,7 @@ All extended instructions use the `$02` prefix.
 ### DP Indirect Control Flow
 | Instruction | Encoding | Operation | Flags |
 |-------------|----------|-----------|-------|
-| JMP (dp) | $02 $A5 dp | PC = [dp] | — |
+| JMP (dp) | $FC dp | PC = [dp] | — |
 | JSR (dp) | $02 $A6 dp | Push PC, PC = [dp] | — |
 
 ### T Register Transfers
