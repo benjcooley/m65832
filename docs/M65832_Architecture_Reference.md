@@ -881,6 +881,7 @@ Traditional (always 32-bit in 32-bit mode).
 |--------|--------|-------|-------------|
 | JSR $XXXXXXXX | $20 | 5 | Push PC-1 (32-bit); PC = abs32 |
 | JSR (Rn) | $02 $A6 | 3 | Push PC-1 (32-bit); PC = [Rn] |
+| JSL | $22 | — | **Illegal** in 32-bit mode |
 
 **Note:** JML ($5C, $DC), JSL ($22), and RTL ($6B) are **illegal** in 32-bit mode (reserved for M65864).
 
