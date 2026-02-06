@@ -3026,12 +3026,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         update_nz(cpu, cpu->a, width_m);
                         cycles = 8;
                         break;
-                    case 0x04: /* DIV dp */
+                    case 0x04: /* DIV dp (signed) */
                         addr = addr_dp(cpu);
                         val = read_val(cpu, addr, width_m);
                         if (val != 0) {
-                            cpu->t = cpu->a % val;
-                            cpu->a = cpu->a / val;
+                            int32_t dividend = (int32_t)cpu->a;
+                            int32_t divisor = (int32_t)val;
+                            cpu->t = (uint32_t)(dividend % divisor);
+                            cpu->a = (uint32_t)(dividend / divisor);
                         }
                         update_nz(cpu, cpu->a, width_m);
                         cycles = 16;

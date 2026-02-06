@@ -10,15 +10,20 @@ int atoi_neg(const char *s) {
         s++;
     }
     
-    while (*s >= '0' && *s <= '9') {
-        result = result * 10 + (*s - '0');
+    while (1) {
+        char c = *s;
+        if (c < '0') break;
+        if (c > '9') break;
+        result = result * 10 + (c - '0');
         s++;
     }
     
-    return neg ? -result : result;
+    if (neg) return -result;
+    return result;
 }
 
 int main(void) {
     int x = atoi_neg("-50");
-    return x < 0 ? -x : x;  // Return 50
+    if (x < 0) return -x;
+    return x;  // Return 50
 }

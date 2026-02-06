@@ -3,8 +3,11 @@
 
 int atoi_simple(const char *s) {
     int result = 0;
-    while (*s >= '0' && *s <= '9') {
-        result = result * 10 + (*s - '0');
+    while (1) {
+        char c = *s;
+        if (c < '0') break;
+        if (c > '9') break;
+        result = result * 10 + (c - '0');
         s++;
     }
     return result;

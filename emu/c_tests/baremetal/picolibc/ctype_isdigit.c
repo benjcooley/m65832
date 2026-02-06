@@ -2,7 +2,10 @@
 // Expected: count of digits in "a1b2c3" = 3
 
 int isdigit(int c) {
-    return c >= '0' && c <= '9';
+    if (c >= '0') {
+        if (c <= '9') return 1;
+    }
+    return 0;
 }
 
 int main(void) {

@@ -68,7 +68,7 @@ run_test() {
         "$SYSROOT/lib/crt0.o" \
         "$WORKDIR/${name}.o" \
         $extra_obj \
-        -L"$SYSROOT/lib" -lc -lsys \
+        -L"$SYSROOT/lib" -lc -lsys -lcompiler_rt \
         -o "$WORKDIR/${name}.elf" 2>/dev/null; then
         echo "SKIP: $name (link failed)"
         SKIP=$((SKIP + 1))

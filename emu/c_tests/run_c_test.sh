@@ -15,7 +15,10 @@ else
 fi
 CLANG="$LLVM_BUILD/bin/clang"
 LLD="$LLVM_BUILD/bin/ld.lld"
-EMU="../m65832emu"
+COMPILER_RT_DIR="$LLVM_ROOT/m65832-stdlib/compiler-rt"
+COMPILER_RT="$COMPILER_RT_DIR/libcompiler_rt.a"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+EMU="$SCRIPT_DIR/../m65832emu"
 
 TEST_FILE="$1"
 EXPECTED="$2"
@@ -62,9 +65,9 @@ ENTRY(_start)
 SECTIONS {
     . = 0x1000;
     .text : { *(.text*) }
-    . = 0x2000;
+    . = ALIGN(0x1000);
     .data : { *(.data*) *(.rodata*) }
-    . = 0x3000;
+    . = ALIGN(0x1000);
     .bss : { *(.bss*) }
 }
 EOF
@@ -97,7 +100,12 @@ if [ ! -f "$LLD" ]; then
     echo "FAIL: lld not found at $LLD"
     exit 1
 fi
-if ! $LLD -T "$LDSCRIPT" --oformat=binary "$WORKDIR/${BASE}_crt0.o" "$WORKDIR/${BASE}.o" -o "$WORKDIR/${BASE}.bin" 2>&1; then
+# Include compiler_rt if available (needed for 64-bit operations)
+EXTRA_LIBS=""
+if [ -f "$COMPILER_RT" ]; then
+    EXTRA_LIBS="$COMPILER_RT"
+fi
+if ! $LLD -T "$LDSCRIPT" --oformat=binary "$WORKDIR/${BASE}_crt0.o" "$WORKDIR/${BASE}.o" $EXTRA_LIBS -o "$WORKDIR/${BASE}.bin" 2>&1; then
     echo "FAIL: Linking failed"
     exit 1
 fi
@@ -112,10 +120,11 @@ ELAPSED=$((END_TIME - START_TIME))
 A_VALUE=$(echo "$OUTPUT" | grep "PC:.*A:.*X:" | sed 's/.*A: \([0-9A-Fa-f]*\).*/\1/')
 
 if [ -n "$EXPECTED" ]; then
-    A_UPPER=$(echo "$A_VALUE" | tr 'a-f' 'A-F')
-    EXP_UPPER=$(echo "$EXPECTED" | tr 'a-f' 'A-F')
+    # Convert both to integers for comparison (handles leading zeros)
+    A_INT=$(printf "%d" "0x$A_VALUE" 2>/dev/null || echo "-1")
+    EXP_INT=$(printf "%d" "0x$EXPECTED" 2>/dev/null || printf "%d" "$EXPECTED" 2>/dev/null || echo "-2")
     
-    if [ "$A_UPPER" = "$EXP_UPPER" ]; then
+    if [ "$A_INT" = "$EXP_INT" ]; then
         echo "PASS: $BASE (A=$A_VALUE, ${ELAPSED}s)"
         rm -f "$CRT0" "$LDSCRIPT" "$WORKDIR/${BASE}_crt0.o" "$WORKDIR/${BASE}.o"
         exit 0

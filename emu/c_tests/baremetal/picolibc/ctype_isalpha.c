@@ -2,7 +2,13 @@
 // Expected: count of letters in "a1b2c3" = 3
 
 int isalpha(int c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    if (c >= 'A') {
+        if (c <= 'Z') return 1;
+    }
+    if (c >= 'a') {
+        if (c <= 'z') return 1;
+    }
+    return 0;
 }
 
 int main(void) {

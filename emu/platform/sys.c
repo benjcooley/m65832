@@ -4,6 +4,7 @@
  */
 
 #include "sys.h"
+#include <stdint.h>
 
 /* Heap boundaries - provided by linker script */
 extern char __heap_start[];
@@ -15,15 +16,18 @@ void *sys_sbrk(int incr) {
     if (heap_brk == 0) {
         heap_brk = __heap_start;
     }
-    
-    char *prev = heap_brk;
-    
-    if (heap_brk + incr > __heap_end || heap_brk + incr < __heap_start) {
+
+    uintptr_t cur = (uintptr_t)heap_brk;
+    uintptr_t start = (uintptr_t)__heap_start;
+    uintptr_t end = (uintptr_t)__heap_end;
+    uintptr_t next = cur + (uintptr_t)incr;
+
+    if ((incr >= 0 && next > end) || (incr < 0 && next < start)) {
         return (void *)-1;  /* Out of memory */
     }
-    
-    heap_brk += incr;
-    return prev;
+
+    heap_brk = (char *)next;
+    return (void *)cur;
 }
 
 /* Note: Without inline asm support, we can't emit STP directly.

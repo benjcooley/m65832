@@ -17,6 +17,9 @@ run_test "Sign extend half"     "tests/type_sext_half.c"       "FFFF8000"
 run_test "Zero extend byte"     "tests/type_zext_byte.c"       "00000080"
 run_test "Zero extend half"     "tests/type_zext_half.c"       "00008000"
 
+# 64-bit comparisons
+run_test "64-bit compare"       "tests/test_64bit_compare.c"   "00000000" 500000
+
 # Original tests (backward compat)
 run_test "Char arithmetic"      "tests/type_char.c"            "00000042"
 run_test "Unsigned compare"     "tests/type_unsigned.c"        "00000001"

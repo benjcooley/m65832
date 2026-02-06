@@ -16,3 +16,8 @@ run_test "Divide truncate"    "tests/arith_div_round.c"  "00000002"
 run_test "Negative multiply"  "tests/arith_neg_mul.c"    "FFFFFFF1"
 run_test "Compound expr"      "tests/arith_compound.c"   "00000016"
 run_test "Precedence"         "tests/arith_precedence.c" "0000000E"
+
+# 64-bit arithmetic
+run_test "64-bit basic"       "tests/test_64bit_basic.c"    "00000000" 500000
+run_test "64-bit multiply"    "tests/test_64bit_multiply.c" "00000000" 500000
+run_test "64-bit divide"      "tests/test_64bit_divide.c"   "00000000" 500000

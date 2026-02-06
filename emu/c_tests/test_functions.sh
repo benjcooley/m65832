@@ -6,6 +6,9 @@ run_test "Byte arguments"       "tests/func_args_byte.c"       "00000055"
 run_test "Half arguments"       "tests/func_args_half.c"       "00003333"
 run_test "Mixed arguments"      "tests/func_args_mixed.c"      "00000001"
 
+# 64-bit function returns
+run_test "64-bit returns"       "tests/test_64bit_returns.c"   "00000000" 500000
+
 # Original tests (backward compat)
 run_test "Simple call"          "tests/func_simple_call.c"     "0000002A"
 run_test "With args"            "tests/func_args.c"            "00000039"

@@ -5,8 +5,18 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+PASSED=0
+FAILED=0
+
 run_test() {
-    ./run_c_test.sh "regression/$1" "$2" "${3:-5000}"
+    local output
+    output=$(./run_c_test.sh "regression/$1" "$2" "${3:-5000}" 2>&1)
+    echo "$output"
+    if echo "$output" | grep -q "^PASS:"; then
+        PASSED=$((PASSED + 1))
+    else
+        FAILED=$((FAILED + 1))
+    fi
 }
 
 echo "======================================"
@@ -30,11 +40,18 @@ echo "Bug: JSR overwrote local variables because call frame space wasn't reserve
 run_test "regress_call_frame.c" "0000006C"             # 108 = 0x6C
 
 echo ""
+echo "--- Pointer Arithmetic Bug (2026-01-30) ---"
+echo "Bug: stack-local pointer arithmetic selected @<noreg> address"
+run_test "regress_ptr_arith.c" "00000063"              # 'c' = 0x63
+
+echo ""
 echo "--- Branch Offset Bug (2026-01-27) ---"
 echo "Bug: Branch instructions with immediate offsets weren't adjusted for PC-relative"
 run_test "regress_branch_offset.c" "00000532"          # 1330 = 0x532
 
 echo ""
-echo "======================================"
-echo "Regression Tests Complete"
-echo "======================================"
+echo "=========================================="
+echo "Results: $PASSED passed, $FAILED failed, 0 skipped"
+echo "=========================================="
+
+exit $FAILED

@@ -126,16 +126,16 @@ static void trace_callback(m65832_cpu_t *cpu, uint32_t pc,
     char disasm[64];
     int inst_len = m65832_disassemble(cpu, pc, disasm, sizeof(disasm));
     
-    /* Show hex bytes for instruction */
-    char hexbuf[16];
+    /* Show hex bytes for instruction (up to 12 bytes for largest extended ops) */
+    char hexbuf[48];
     int hpos = 0;
-    for (int i = 0; i < inst_len && i < 4; i++) {
+    for (int i = 0; i < inst_len && i < 12; i++) {
         hpos += snprintf(hexbuf + hpos, sizeof(hexbuf) - hpos, "%02X ", 
                          m65832_emu_read8(cpu, pc + i));
     }
     
     /* Trace format: PC: BYTES  DISASM  | A=... X=... Y=... S=... P=... */
-    printf("%08X: %-12s %-20s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
+    printf("%08X: %-36s %-24s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
            pc, hexbuf, disasm,
            m65832_get_a(cpu), m65832_get_x(cpu), m65832_get_y(cpu),
            m65832_get_s(cpu), m65832_get_p(cpu));
