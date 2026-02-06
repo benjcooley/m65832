@@ -65,19 +65,18 @@ attic/
 rag/chroma_db/
 rag/chroma_db_m65832/
 # Build artifacts
+emu/c_tests/build/
 emu/c_tests/inline_asm/*.ld
 .m65832_config
 
 # Emulator temp build/debug artifacts
 emu/tmp.*/
-emu/*.elf
+*.elf
 emu/*.ll
 emu/*.s
 
 # Auto-generated test artifacts (crt0, linker scripts from run_c_test.sh)
+emu/c_tests/**/*_crt0.s
 emu/c_tests/baremetal/**/*.ld
-emu/c_tests/baremetal/**/*_crt0.s
 emu/c_tests/regression/*.ld
-emu/c_tests/regression/*_crt0.s
 emu/c_tests/tests/*.ld
-emu/c_tests/tests/*_crt0.s
