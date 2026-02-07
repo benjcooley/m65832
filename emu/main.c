@@ -7,6 +7,7 @@
 
 #include "m65832emu.h"
 #include "system.h"
+#include "elf_loader.h"
 #include "uart.h"
 #include "blkdev.h"
 #include "platform.h"
@@ -16,74 +17,9 @@
 #include <ctype.h>
 #include <signal.h>
 #include <time.h>
+#include <unistd.h>
 
-/* ============================================================================
- * ELF32 Definitions (bare minimum for loading)
- * ========================================================================= */
-
-#define ELF_MAGIC       0x464C457F  /* "\x7FELF" */
-#define ET_EXEC         2           /* Executable */
-#define EM_M65832       0x6583      /* M65832 machine type (custom) */
-#define PT_LOAD         1           /* Loadable segment */
-#define PT_NULL         0           /* Unused */
-
-typedef struct {
-    uint32_t e_magic;       /* ELF magic */
-    uint8_t  e_class;       /* 1=32-bit, 2=64-bit */
-    uint8_t  e_data;        /* 1=LE, 2=BE */
-    uint8_t  e_version;     /* 1 */
-    uint8_t  e_osabi;       /* OS/ABI */
-    uint8_t  e_pad[8];      /* Padding */
-    uint16_t e_type;        /* Object type */
-    uint16_t e_machine;     /* Machine type */
-    uint32_t e_version2;    /* Version */
-    uint32_t e_entry;       /* Entry point */
-    uint32_t e_phoff;       /* Program header offset */
-    uint32_t e_shoff;       /* Section header offset */
-    uint32_t e_flags;       /* Flags */
-    uint16_t e_ehsize;      /* ELF header size */
-    uint16_t e_phentsize;   /* Program header entry size */
-    uint16_t e_phnum;       /* Number of program headers */
-    uint16_t e_shentsize;   /* Section header entry size */
-    uint16_t e_shnum;       /* Number of section headers */
-    uint16_t e_shstrndx;    /* Section name string table index */
-} Elf32_Ehdr;
-
-typedef struct {
-    uint32_t p_type;        /* Segment type */
-    uint32_t p_offset;      /* File offset */
-    uint32_t p_vaddr;       /* Virtual address */
-    uint32_t p_paddr;       /* Physical address */
-    uint32_t p_filesz;      /* Size in file */
-    uint32_t p_memsz;       /* Size in memory */
-    uint32_t p_flags;       /* Flags */
-    uint32_t p_align;       /* Alignment */
-} Elf32_Phdr;
-
-typedef struct {
-    uint32_t st_name;       /* Symbol name (string table index) */
-    uint32_t st_value;      /* Symbol value */
-    uint32_t st_size;       /* Symbol size */
-    uint8_t  st_info;       /* Type and binding */
-    uint8_t  st_other;      /* Visibility */
-    uint16_t st_shndx;      /* Section index */
-} Elf32_Sym;
-
-typedef struct {
-    uint32_t sh_name;       /* Section name */
-    uint32_t sh_type;       /* Section type */
-    uint32_t sh_flags;      /* Section flags */
-    uint32_t sh_addr;       /* Virtual address */
-    uint32_t sh_offset;     /* File offset */
-    uint32_t sh_size;       /* Section size */
-    uint32_t sh_link;       /* Link to another section */
-    uint32_t sh_info;       /* Additional info */
-    uint32_t sh_addralign;  /* Alignment */
-    uint32_t sh_entsize;    /* Entry size if table */
-} Elf32_Shdr;
-
-#define SHT_SYMTAB  2
-#define SHT_STRTAB  3
+/* ELF loader is in elf_loader.h/c (shared with system.c) */
 
 /* ============================================================================
  * Globals
@@ -111,6 +47,34 @@ static void signal_handler(int sig) {
     } else if (g_cpu) {
         m65832_stop(g_cpu);
     }
+}
+
+/* Minimal async-signal-safe hex printer */
+static void write_hex(int fd, uint32_t val) {
+    char buf[9];
+    for (int i = 7; i >= 0; i--) {
+        int d = val & 0xF;
+        buf[i] = (d < 10) ? ('0' + d) : ('A' + d - 10);
+        val >>= 4;
+    }
+    buf[8] = ' ';
+    (void)write(fd, buf, 9);
+}
+static void crash_handler(int sig) {
+    const char msg[] = "\n*** EMU CRASH ***\nPC=";
+    (void)write(STDERR_FILENO, msg, sizeof(msg)-1);
+    if (g_cpu) {
+        write_hex(STDERR_FILENO, g_cpu->pc);
+        const char sp_msg[] = "SP=";
+        (void)write(STDERR_FILENO, sp_msg, 3);
+        write_hex(STDERR_FILENO, g_cpu->s);
+        const char ip_msg[] = "ipc=";
+        (void)write(STDERR_FILENO, ip_msg, 4);
+        write_hex(STDERR_FILENO, g_cpu->inst_pc);
+        (void)write(STDERR_FILENO, "\n", 1);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
 }
 
 /* ============================================================================
@@ -208,123 +172,7 @@ static void hex_dump(m65832_cpu_t *cpu, uint32_t addr, int lines) {
     }
 }
 
-/* ============================================================================
- * ELF Loader
- * ========================================================================= */
-
-/* Check if file is ELF format */
-static int is_elf_file(const char *filename) {
-    FILE *f = fopen(filename, "rb");
-    if (!f) return 0;
-    
-    uint32_t magic;
-    size_t n = fread(&magic, 1, 4, f);
-    fclose(f);
-    
-    return (n == 4 && magic == ELF_MAGIC);
-}
-
-/* Load ELF executable into emulator memory
- * Returns entry point address, or 0 on error */
-static uint32_t load_elf(m65832_cpu_t *cpu, const char *filename, int verbose) {
-    FILE *f = fopen(filename, "rb");
-    if (!f) {
-        fprintf(stderr, "error: cannot open '%s'\n", filename);
-        return 0;
-    }
-    
-    /* Read ELF header */
-    Elf32_Ehdr ehdr;
-    if (fread(&ehdr, sizeof(ehdr), 1, f) != 1) {
-        fprintf(stderr, "error: cannot read ELF header\n");
-        fclose(f);
-        return 0;
-    }
-    
-    /* Validate ELF header */
-    if (ehdr.e_magic != ELF_MAGIC) {
-        fprintf(stderr, "error: not an ELF file\n");
-        fclose(f);
-        return 0;
-    }
-    
-    if (ehdr.e_class != 1) {
-        fprintf(stderr, "error: not a 32-bit ELF (class=%d)\n", ehdr.e_class);
-        fclose(f);
-        return 0;
-    }
-    
-    if (ehdr.e_data != 1) {
-        fprintf(stderr, "error: not little-endian ELF\n");
-        fclose(f);
-        return 0;
-    }
-    
-    if (ehdr.e_type != ET_EXEC) {
-        fprintf(stderr, "warning: ELF type is %d (expected executable)\n", ehdr.e_type);
-    }
-    
-    if (verbose) {
-        printf("ELF: entry=0x%08X, %d program headers\n", 
-               ehdr.e_entry, ehdr.e_phnum);
-    }
-    
-    /* Load program segments */
-    uint32_t total_loaded = 0;
-    for (int i = 0; i < ehdr.e_phnum; i++) {
-        Elf32_Phdr phdr;
-        
-        fseek(f, ehdr.e_phoff + i * ehdr.e_phentsize, SEEK_SET);
-        if (fread(&phdr, sizeof(phdr), 1, f) != 1) {
-            fprintf(stderr, "error: cannot read program header %d\n", i);
-            fclose(f);
-            return 0;
-        }
-        
-        if (phdr.p_type != PT_LOAD) continue;
-        if (phdr.p_filesz == 0 && phdr.p_memsz == 0) continue;
-        
-        if (verbose) {
-            printf("  LOAD: vaddr=0x%08X filesz=%u memsz=%u\n",
-                   phdr.p_vaddr, phdr.p_filesz, phdr.p_memsz);
-        }
-        
-        /* Check bounds */
-        if (phdr.p_vaddr + phdr.p_memsz > cpu->memory_size) {
-            fprintf(stderr, "error: segment exceeds memory (0x%X + %u > %zu)\n",
-                    phdr.p_vaddr, phdr.p_memsz, cpu->memory_size);
-            fclose(f);
-            return 0;
-        }
-        
-        /* Zero the memory region first (for .bss) */
-        for (uint32_t j = 0; j < phdr.p_memsz; j++) {
-            m65832_emu_write8(cpu, phdr.p_vaddr + j, 0);
-        }
-        
-        /* Load file contents */
-        if (phdr.p_filesz > 0) {
-            fseek(f, phdr.p_offset, SEEK_SET);
-            for (uint32_t j = 0; j < phdr.p_filesz; j++) {
-                int c = fgetc(f);
-                if (c == EOF) {
-                    fprintf(stderr, "error: unexpected end of file\n");
-                    fclose(f);
-                    return 0;
-                }
-                m65832_emu_write8(cpu, phdr.p_vaddr + j, (uint8_t)c);
-            }
-            total_loaded += phdr.p_filesz;
-        }
-    }
-    
-    if (verbose) {
-        printf("Loaded %u bytes from ELF\n", total_loaded);
-    }
-    
-    fclose(f);
-    return ehdr.e_entry;
-}
+/* ELF loading functions: elf_is_elf_file(), elf_load() - see elf_loader.h */
 
 /* ============================================================================
  * Interactive Debugger
@@ -844,6 +692,8 @@ int main(int argc, char *argv[]) {
     
     /* Set up signal handler */
     signal(SIGINT, signal_handler);
+    signal(SIGSEGV, crash_handler);
+    signal(SIGBUS, crash_handler);
     
     /* ========================================================================
      * SYSTEM MODE - Use system layer with UART and boot support
@@ -957,9 +807,9 @@ int main(int argc, char *argv[]) {
     
     if (filename) {
         /* Auto-detect ELF format */
-        if (is_elf_file(filename)) {
+        if (elf_is_elf_file(filename)) {
             is_elf = 1;
-            elf_entry = load_elf(g_cpu, filename, g_verbose);
+            elf_entry = elf_load(g_cpu, filename, g_verbose);
             if (elf_entry == 0) {
                 fprintf(stderr, "Failed to load ELF %s\n", filename);
                 m65832_emu_close(g_cpu);

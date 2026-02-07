@@ -3133,7 +3133,17 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     when x"C4" => s_res := -fs_s;        -- FNEG.S Fd, Fs
                     when x"C5" => s_res := abs(fs_s);    -- FABS.S Fd, Fs
                     when x"C6" =>                        -- FCMP.S Fd, Fs
-                        null;
+                        fpu_flag_load <= '1';
+                        if fd_s < fs_s then
+                            fpu_flag_n <= '1';
+                            fpu_flag_z <= '0';
+                        elsif fd_s = fs_s then
+                            fpu_flag_n <= '0';
+                            fpu_flag_z <= '1';
+                        else
+                            fpu_flag_n <= '0';
+                            fpu_flag_z <= '0';
+                        end if;
                     when x"C7" =>                        -- F2I.S Fd
                         int32_res := to_signed(to_integer(fd_s, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
@@ -3164,7 +3174,17 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
                     when x"D4" => d_res := -fs_d;        -- FNEG.D Fd, Fs
                     when x"D5" => d_res := abs(fs_d);    -- FABS.D Fd, Fs
                     when x"D6" =>                        -- FCMP.D Fd, Fs
-                        null;
+                        fpu_flag_load <= '1';
+                        if fd_d < fs_d then
+                            fpu_flag_n <= '1';
+                            fpu_flag_z <= '0';
+                        elsif fd_d = fs_d then
+                            fpu_flag_n <= '0';
+                            fpu_flag_z <= '1';
+                        else
+                            fpu_flag_n <= '0';
+                            fpu_flag_z <= '0';
+                        end if;
                     when x"D7" =>                        -- F2I.D Fd
                         int32_res := to_signed(to_integer(fd_d, IEEE.fixed_float_types.round_zero), 32);
                         fpu_int_result <= std_logic_vector(int32_res);
@@ -3609,8 +3629,10 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     
     T_in <= ext_remainder when ext_rem_valid = '1'
             else ldq_high_buffer when ext_ldq = '1'
+            else fp_regs(to_integer(fpu_dest))(63 downto 32) when (ext_fpu_xfer = '1' and IR_EXT = x"E1")
             else A_reg;
-    T_load <= '1' when state = ST_EXECUTE and (ext_rem_valid = '1' or ext_tat = '1' or ext_ldq = '1') else '0';
+    T_load <= '1' when state = ST_EXECUTE and (ext_rem_valid = '1' or ext_tat = '1' or ext_ldq = '1' or
+              (ext_fpu_xfer = '1' and IR_EXT = x"E1")) else '0';
 
     ---------------------------------------------------------------------------
     -- Register Window Access (DP-as-registers)

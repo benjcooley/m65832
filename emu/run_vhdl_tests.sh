@@ -42,6 +42,7 @@ get_category_range() {
         timer)      echo "128" ;;
         illegal)    echo "124-126" ;;
         privilege)  echo "122-123" ;;
+        fpu)        echo "100G 100H 100I 100J 100K 100L 100M 100N 100O 100P 100Q 100R 100S 100T 100U 100V 100W" ;;
         *)          echo "" ;;
     esac
 }
@@ -79,6 +80,7 @@ usage() {
     echo "  timer       Tests 128       (timer hardware)"
     echo "  illegal     Tests 124-126   (illegal opcode handling)"
     echo "  privilege   Tests 122-123   (privilege traps)"
+    echo "  fpu         Tests 100G-100W (FPU instructions)"
     echo ""
     echo "Examples:"
     echo "  $0                    # Run all tests"
@@ -110,6 +112,7 @@ list_categories() {
     echo "  timer       Tests 128       (timer hardware)"
     echo "  illegal     Tests 124-126   (illegal opcode handling)"
     echo "  privilege   Tests 122-123   (privilege traps)"
+    echo "  fpu         Tests 100G-100W (FPU instructions)"
 }
 
 build_emulator() {
@@ -188,8 +191,8 @@ for spec in $TEST_SPECS; do
     # Check if it's a category
     range=$(get_category_range "$spec")
     if [ -n "$range" ]; then
-        # It's a category
-        if echo "$range" | grep -q '-'; then
+        # It's a category - check if it's a numeric range or space-separated list
+        if echo "$range" | grep -q '^[0-9]*-[0-9]*$'; then
             start="${range%-*}"
             end="${range#*-}"
             i=$start
@@ -198,9 +201,12 @@ for spec in $TEST_SPECS; do
                 i=$((i + 1))
             done
         else
-            TEST_ARGS="$TEST_ARGS --test $range"
+            # Space-separated list of test IDs (e.g., fpu category)
+            for tid in $range; do
+                TEST_ARGS="$TEST_ARGS --test $tid"
+            done
         fi
-    # Check if it's a range
+    # Check if it's a numeric range
     elif echo "$spec" | grep -q '^[0-9]*-[0-9]*$'; then
         start="${spec%-*}"
         end="${spec#*-}"
@@ -213,8 +219,8 @@ for spec in $TEST_SPECS; do
     elif [ "$spec" = "all" ]; then
         TEST_ARGS=""
         break
-    # Otherwise it's a single test number
-    elif echo "$spec" | grep -q '^[0-9]*$'; then
+    # Otherwise it's a single test ID (number or alphanumeric like 100G)
+    elif echo "$spec" | grep -q '^[0-9]*[A-Za-z]*$'; then
         TEST_ARGS="$TEST_ARGS --test $spec"
     else
         echo "Unknown test spec: $spec"

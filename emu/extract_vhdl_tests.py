@@ -39,7 +39,8 @@ class Phase:
 class Test:
     """Represents a single test case extracted from VHDL"""
     def __init__(self, number, name):
-        self.number = number
+        # number can be int or string (e.g., "100G")
+        self.number = str(number) if not isinstance(number, str) else number
         self.name = name
         self.phases = []     # List of Phase objects
         self.reset_vector = 0x8000  # Default
@@ -93,9 +94,9 @@ def parse_vhdl_testbench(filepath):
     with open(filepath, 'r') as f:
         content = f.read()
     
-    # Find test blocks (marked by "TEST N:" comments)
+    # Find test blocks (marked by "TEST N:" or "TEST 100G:" comments)
     test_pattern = re.compile(
-        r'--+\s*TEST\s+(\d+):\s*([^\n]+)',
+        r'--+\s*TEST\s+(\d+[A-Za-z]?):\s*([^\n]+)',
         re.IGNORECASE
     )
     
@@ -148,9 +149,9 @@ def parse_vhdl_testbench(filepath):
                     current_test.phases.append(current_phase)
                 tests.append(current_test)
             
-            test_num = int(test_match.group(1))
+            test_id = test_match.group(1)
             test_name = test_match.group(2).strip()
-            current_test = Test(test_num, test_name)
+            current_test = Test(test_id, test_name)
             current_phase = Phase()
             phase_has_reset = False
             pending_pokes = []
@@ -538,7 +539,7 @@ def run_emulator_test_v2(test, verbose=False):
 def main():
     parser = argparse.ArgumentParser(description='Extract and run VHDL tests on emulator')
     parser.add_argument('--vhdl-only', action='store_true', help='Just parse and show tests')
-    parser.add_argument('--test', type=int, action='append', help='Run specific test number(s)')
+    parser.add_argument('--test', type=str, action='append', help='Run specific test ID(s), e.g. 122 or 100G')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     parser.add_argument('--list', '-l', action='store_true', help='List all tests')
     args = parser.parse_args()
@@ -570,7 +571,7 @@ def main():
                 print()
             else:
                 phase_info = f" ({len(test.phases)} phases)" if len(test.phases) > 1 else ""
-                print(f"  {test.number:3d}  {test.name}{phase_info}")
+                print(f"  {test.number:>5s}  {test.name}{phase_info}")
         return  # Exit after listing
     
     # Run tests

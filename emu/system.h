@@ -134,6 +134,9 @@ typedef struct system_state {
     int host_fds[32];
     bool fd_used[32];
     
+    /* ELF loading */
+    uint32_t elf_entry;         /* Entry point from ELF (0 if raw binary) */
+    
     /* State */
     bool running;
     uint64_t poll_interval;     /* Instructions between device polls */

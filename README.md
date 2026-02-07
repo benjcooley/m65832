@@ -66,25 +66,35 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 
 - [x] **Assembler** - Full two-pass assembler with macros, includes, sections, and complete instruction set support
 - [x] **Disassembler** - Standalone tool and library API for binary analysis
-- [x] **Emulator** - High-performance emulator with FPU, MMU, timer, and 100% VHDL test compatibility (366/366 tests passing)
-- [x] **Experimental C Compiler** - LCC-based backend for C compilation (experimental)
+- [x] **Emulator** - High-performance emulator with FPU, MMU, timer, ELF loader, and 100% VHDL test compatibility (383/383 tests passing)
+- [x] **LLVM C Compiler** - Full LLVM backend with clang/lld support for C compilation
+- [x] **C Standard Library (picolibc)** - Full picolibc port with automated build and test infrastructure (162/181 tests passing, 19 expected skips, 0 failures)
+- [x] **Compiler Runtime** - compiler-rt with soft-float/soft-int support
 
 ### RTL Implementation
 
 - [x] Feature complete for the current RTL milestone
 - [x] Integer core (ALU, decode, wide data paths)
 - [x] 32-bit architectural extensions (addressing, width controls)
-- [x] Floating-point unit integration path
+- [x] Floating-point unit with FCMP flag setting (N/Z flags, IEEE 754 NaN handling)
+- [x] FPU register-indirect load/store (LDF/STF via Rm with RSET support)
 - [x] MMU with page-table walk + TLB
 - [x] Cycle-accurate 6502 coprocessor and interleaving
 - [x] Privilege model, exceptions, and interrupt entry/exit
+- [x] Barrel shifter with pure rotate (ROL/ROR)
+
+### Test Infrastructure
+
+- [x] **164 C compiler tests** - Core types, arithmetic, FP, pointers, structs, strings, regression tests (all passing)
+- [x] **383 VHDL/emulator tests** - Full instruction set coverage including FPU addressing modes and comparisons
+- [x] **181 picolibc tests** - Comprehensive C library test suite with automated clean-rebuild pipeline (162 pass, 19 expected skip)
+- [x] **Automated test runner** - `run_picolibc_gtest.py` with full clean rebuild of compiler-rt + picolibc from source, timestamped results, regression diffing
 
 ### In Progress
 
-- [ ] Expanded regression and corner-case validation
 - [ ] Hardware bring-up on target FPGA
 - [ ] Performance characterization and tuning
-- [ ] C compiler optimization and standard library
+- [ ] C compiler optimization (some codegen workarounds still active at -O1)
 - [ ] Linux boot and userland enablement
 
 ## Building & Testing

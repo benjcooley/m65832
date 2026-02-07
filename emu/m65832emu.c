@@ -43,11 +43,12 @@
  * ========================================================================= */
 
 static inline bool is_sysreg(uint32_t addr) {
-    /* VHDL: mmu_bypass when mem_addr_virt(15 downto 8) = x"F0"
-     * This means addresses $F000-$F0FF are MMIO (system registers).
-     * Also support the full 32-bit address $FFFFF000-$FFFFF0FF. */
-    uint32_t low16 = addr & 0xFFFF;
-    return (low16 >= 0xF000 && low16 < 0xF100) ||
+    /* System registers at $F000-$F0FF in the 16-bit address space,
+     * and at SYSREG_BASE ($00FFF000) in the full 32-bit address space.
+     * NOTE: The original VHDL checked only bits 15:8 == 0xF0, but that
+     * causes false matches for any address whose low 16 bits are in
+     * $F000-$F0FF (e.g., $0002F0E0). Use full 32-bit comparison instead. */
+    return (addr >= 0xF000 && addr < 0xF100) ||
            (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
 }
 
@@ -511,7 +512,7 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
     if (cpu->mem_read) {
         return (uint16_t)cpu->mem_read(cpu, addr, 2, MEM_READ, cpu->mem_user);
     }
-    if (cpu->memory && addr + 1 < cpu->memory_size) {
+    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 1 < cpu->memory_size) {
         return cpu->memory[addr] | ((uint16_t)cpu->memory[addr + 1] << 8);
     }
     return 0xFFFF;
@@ -534,7 +535,7 @@ static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
         cpu->mem_write(cpu, addr, val, 2, cpu->mem_user);
         return;
     }
-    if (cpu->memory && addr + 1 < cpu->memory_size) {
+    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 1 < cpu->memory_size) {
         cpu->memory[addr] = val & 0xFF;
         cpu->memory[addr + 1] = (val >> 8) & 0xFF;
     }
@@ -560,7 +561,7 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
     if (cpu->mem_read) {
         return cpu->mem_read(cpu, addr, 4, MEM_READ, cpu->mem_user);
     }
-    if (cpu->memory && addr + 3 < cpu->memory_size) {
+    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 3 < cpu->memory_size) {
         return cpu->memory[addr] | 
                ((uint32_t)cpu->memory[addr + 1] << 8) |
                ((uint32_t)cpu->memory[addr + 2] << 16) |
@@ -592,7 +593,7 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
         cpu->mem_write(cpu, addr, val, 4, cpu->mem_user);
         return;
     }
-    if (cpu->memory && addr + 3 < cpu->memory_size) {
+    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 3 < cpu->memory_size) {
         cpu->memory[addr] = val & 0xFF;
         cpu->memory[addr + 1] = (val >> 8) & 0xFF;
         cpu->memory[addr + 2] = (val >> 16) & 0xFF;
@@ -3409,28 +3410,30 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                                     FLAG_PUT(cpu, P_C, (count > 0) && ((src_val >> (count - 1)) & 1));
                                 }
                                 break;
-                            case 3: /* ROL - Rotate left through carry */
+                            case 3: /* ROL - Pure rotate left (barrel shifter) */
                                 {
-                                    uint32_t c = FLAG_TST(cpu, P_C) ? 1 : 0;
-                                    for (int i = 0; i < count; i++) {
-                                        uint32_t new_c = (src_val >> sign_bit) & 1;
-                                        src_val = ((src_val << 1) | c) & mask;
-                                        c = new_c;
+                                    int width = sign_bit + 1;
+                                    uint8_t cnt = (width < 32) ? (count % width) : count;
+                                    if (cnt == 0) {
+                                        result = src_val;
+                                    } else {
+                                        result = ((src_val << cnt) | (src_val >> (width - cnt))) & mask;
                                     }
-                                    result = src_val;
-                                    FLAG_PUT(cpu, P_C, c);
+                                    /* Carry = bit 0 of result (last bit rotated around) */
+                                    if (count > 0) FLAG_PUT(cpu, P_C, result & 1);
                                 }
                                 break;
-                            case 4: /* ROR - Rotate right through carry */
+                            case 4: /* ROR - Pure rotate right (barrel shifter) */
                                 {
-                                    uint32_t c = FLAG_TST(cpu, P_C) ? 1 : 0;
-                                    for (int i = 0; i < count; i++) {
-                                        uint32_t new_c = src_val & 1;
-                                        src_val = ((src_val >> 1) | (c << sign_bit)) & mask;
-                                        c = new_c;
+                                    int width = sign_bit + 1;
+                                    uint8_t cnt = (width < 32) ? (count % width) : count;
+                                    if (cnt == 0) {
+                                        result = src_val;
+                                    } else {
+                                        result = ((src_val >> cnt) | (src_val << (width - cnt))) & mask;
                                     }
-                                    result = src_val;
-                                    FLAG_PUT(cpu, P_C, c);
+                                    /* Carry = MSB of result (last bit rotated around) */
+                                    if (count > 0) FLAG_PUT(cpu, P_C, (result >> sign_bit) & 1);
                                 }
                                 break;
                             default:
@@ -3575,8 +3578,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
-                        addr = mem_read32(cpu, rm * 4);
+                        /* Get address from GPR Rm - use register window when RSET active */
+                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
+                        addr = mem_read32(cpu, reg_addr);
                         uint32_t lo = mem_read32(cpu, addr);
                         uint32_t hi = mem_read32(cpu, addr + 4);
                         uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
@@ -3590,8 +3594,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm (R0=$00, R1=$04, etc.) */
-                        addr = mem_read32(cpu, rm * 4);
+                        /* Get address from GPR Rm - use register window when RSET active */
+                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
+                        addr = mem_read32(cpu, reg_addr);
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
@@ -3603,7 +3608,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        addr = mem_read32(cpu, rm * 4);
+                        /* Get address from GPR Rm - use register window when RSET active */
+                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
+                        addr = mem_read32(cpu, reg_addr);
                         uint32_t val32 = mem_read32(cpu, addr);
                         union { uint64_t u; double d; } conv;
                         conv.u = (uint64_t)val32;
@@ -3615,7 +3622,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        addr = mem_read32(cpu, rm * 4);
+                        /* Get address from GPR Rm - use register window when RSET active */
+                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
+                        addr = mem_read32(cpu, reg_addr);
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
@@ -3740,10 +3749,19 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         union { uint64_t u; double d; } conv_d, conv_s;
                         conv_d.d = cpu->f[fd]; fd_s.u = (uint32_t)conv_d.u;
                         conv_s.d = cpu->f[fs]; fs_s.u = (uint32_t)conv_s.u;
-                        /* Set N flag if Fd < Fs, Z flag if Fd == Fs */
+                        /* Check for NaN using integer bit patterns */
+                        int fd_is_nan = ((fd_s.u & 0x7F800000) == 0x7F800000) &&
+                                        ((fd_s.u & 0x007FFFFF) != 0);
+                        int fs_is_nan = ((fs_s.u & 0x7F800000) == 0x7F800000) &&
+                                        ((fs_s.u & 0x007FFFFF) != 0);
+                        /* Set N flag if Fd < Fs, Z flag if Fd == Fs.
+                         * For NaN: both conditions are false, so N=0, Z=0. */
                         FLAG_CLR(cpu, P_N | P_Z);
-                        if (fd_s.f < fs_s.f) FLAG_SET(cpu, P_N);
-                        if (fd_s.f == fs_s.f) FLAG_SET(cpu, P_Z);
+                        if (!fd_is_nan && !fs_is_nan) {
+                            if (fd_s.f < fs_s.f) FLAG_SET(cpu, P_N);
+                            if (fd_s.f == fs_s.f) FLAG_SET(cpu, P_Z);
+                        }
+                        /* If either is NaN, both N and Z stay cleared (unordered) */
                         cycles = 3;
                         break;
                     }
@@ -3847,12 +3865,22 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int fd = (reg_byte >> 4) & 0x0F;
                         int fs = reg_byte & 0x0F;
-                        double fd_d = cpu->f[fd];
-                        double fs_d = cpu->f[fs];
-                        /* Set N flag if Fd < Fs, Z flag if Fd == Fs */
+                        /* Use bit patterns for NaN detection to avoid host compiler
+                         * optimizing away NaN == NaN (which is false per IEEE 754) */
+                        union { double d; uint64_t u; } fd_u, fs_u;
+                        fd_u.d = cpu->f[fd];
+                        fs_u.d = cpu->f[fs];
+                        int fd_is_nan = ((fd_u.u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) &&
+                                        ((fd_u.u & 0x000FFFFFFFFFFFFFULL) != 0);
+                        int fs_is_nan = ((fs_u.u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) &&
+                                        ((fs_u.u & 0x000FFFFFFFFFFFFFULL) != 0);
                         FLAG_CLR(cpu, P_N | P_Z);
-                        if (fd_d < fs_d) FLAG_SET(cpu, P_N);
-                        if (fd_d == fs_d) FLAG_SET(cpu, P_Z);
+                        if (!fd_is_nan && !fs_is_nan) {
+                            if (fd_u.d < fs_u.d) FLAG_SET(cpu, P_N);
+                            if (fd_u.d == fs_u.d) FLAG_SET(cpu, P_Z);
+                        }
+                        /* When either operand is NaN, both N and Z stay cleared
+                         * (unordered result per IEEE 754) */
                         cycles = 3;
                         break;
                     }

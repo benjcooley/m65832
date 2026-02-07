@@ -4213,6 +4213,759 @@ begin
         check_mem(16#0729#, x"01", "FCMP.S equal sets Z");
 
         -----------------------------------------------------------------------
+        -- TEST 100G: LDF/STF (Rm) register-indirect double (B4/B5)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100G: LDF/STF (Rm) register-indirect";
+        
+        -- Pre-load double 1.5 (0x3FF8000000000000) at $0A00 (little-endian)
+        poke(16#0A00#, x"00");
+        poke(16#0A01#, x"00");
+        poke(16#0A02#, x"00");
+        poke(16#0A03#, x"00");
+        poke(16#0A04#, x"00");
+        poke(16#0A05#, x"00");
+        poke(16#0A06#, x"F8");
+        poke(16#0A07#, x"3F");
+        -- Clear destination area
+        for i in 16#0A20# to 16#0A27# loop
+            poke(i, x"00");
+        end loop;
+        
+        -- Program: set 32-bit mode, RSET, load address into R0/R1, LDF F0,(R0), STF F0,(R1)
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");  -- clear M0
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- set M1 -> 32-bit
+        poke(16#8004#, x"02");  -- EXT prefix
+        poke(16#8005#, x"30");  -- RSET
+        poke(16#8006#, x"A9");  -- LDA #$00000A00
+        poke(16#8007#, x"00");
+        poke(16#8008#, x"0A");
+        poke(16#8009#, x"00");
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"85");  -- STA dp $00 (R0)
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"A9");  -- LDA #$00000A20
+        poke(16#800E#, x"20");
+        poke(16#800F#, x"0A");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"85");  -- STA dp $04 (R1)
+        poke(16#8013#, x"04");
+        poke(16#8014#, x"02");  -- EXT prefix
+        poke(16#8015#, x"B4");  -- LDF Fn, (Rm)
+        poke(16#8016#, x"00");  -- F0, R0
+        poke(16#8017#, x"02");  -- EXT prefix
+        poke(16#8018#, x"B5");  -- STF Fn, (Rm)
+        poke(16#8019#, x"01");  -- F0, R1
+        poke(16#801A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(1500);
+        
+        -- 1.5 double should be at $0A20
+        check_mem(16#0A20#, x"00", "LDF/STF (Rm) byte0");
+        check_mem(16#0A21#, x"00", "LDF/STF (Rm) byte1");
+        check_mem(16#0A22#, x"00", "LDF/STF (Rm) byte2");
+        check_mem(16#0A23#, x"00", "LDF/STF (Rm) byte3");
+        check_mem(16#0A24#, x"00", "LDF/STF (Rm) byte4");
+        check_mem(16#0A25#, x"00", "LDF/STF (Rm) byte5");
+        check_mem(16#0A26#, x"F8", "LDF/STF (Rm) byte6");
+        check_mem(16#0A27#, x"3F", "LDF/STF (Rm) byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100H: LDF.S/STF.S (Rm) register-indirect single (BA/BB)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100H: LDF.S/STF.S (Rm) register-indirect";
+        
+        -- Pre-load single 2.25 (0x40100000) at $0A40
+        poke(16#0A40#, x"00");
+        poke(16#0A41#, x"00");
+        poke(16#0A42#, x"10");
+        poke(16#0A43#, x"40");
+        -- Clear destination
+        poke(16#0A50#, x"00");
+        poke(16#0A51#, x"00");
+        poke(16#0A52#, x"00");
+        poke(16#0A53#, x"00");
+        
+        -- Program: set 32-bit, RSET, R0=$0A40, R1=$0A50, LDF.S F0,(R0), STF.S F0,(R1)
+        poke(16#8000#, x"C2");  -- REP
+        poke(16#8001#, x"40");
+        poke(16#8002#, x"E2");  -- SEP
+        poke(16#8003#, x"80");  -- 32-bit
+        poke(16#8004#, x"02");  -- RSET
+        poke(16#8005#, x"30");
+        poke(16#8006#, x"A9");  -- LDA #$00000A40
+        poke(16#8007#, x"40");
+        poke(16#8008#, x"0A");
+        poke(16#8009#, x"00");
+        poke(16#800A#, x"00");
+        poke(16#800B#, x"85");  -- STA dp $00 (R0)
+        poke(16#800C#, x"00");
+        poke(16#800D#, x"A9");  -- LDA #$00000A50
+        poke(16#800E#, x"50");
+        poke(16#800F#, x"0A");
+        poke(16#8010#, x"00");
+        poke(16#8011#, x"00");
+        poke(16#8012#, x"85");  -- STA dp $04 (R1)
+        poke(16#8013#, x"04");
+        poke(16#8014#, x"02");  -- EXT prefix
+        poke(16#8015#, x"BA");  -- LDF.S Fn, (Rm)
+        poke(16#8016#, x"00");  -- F0, R0
+        poke(16#8017#, x"02");  -- EXT prefix
+        poke(16#8018#, x"BB");  -- STF.S Fn, (Rm)
+        poke(16#8019#, x"01");  -- F0, R1
+        poke(16#801A#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(1500);
+        
+        -- 2.25 single should be at $0A50
+        check_mem(16#0A50#, x"00", "LDF.S/STF.S (Rm) byte0");
+        check_mem(16#0A51#, x"00", "LDF.S/STF.S (Rm) byte1");
+        check_mem(16#0A52#, x"10", "LDF.S/STF.S (Rm) byte2");
+        check_mem(16#0A53#, x"40", "LDF.S/STF.S (Rm) byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100I: LDF/STF abs32 (B6/B7)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100I: LDF/STF abs32";
+        
+        -- Pre-load double 2.25 (0x4002000000000000) at $0A60
+        poke(16#0A60#, x"00");
+        poke(16#0A61#, x"00");
+        poke(16#0A62#, x"00");
+        poke(16#0A63#, x"00");
+        poke(16#0A64#, x"00");
+        poke(16#0A65#, x"00");
+        poke(16#0A66#, x"02");
+        poke(16#0A67#, x"40");
+        -- Clear destination
+        for i in 16#0A80# to 16#0A87# loop
+            poke(i, x"00");
+        end loop;
+        
+        -- Program: LDF F0, abs32 $00000A60, STF F0, abs32 $00000A80, BRK
+        poke(16#8000#, x"02");  -- EXT prefix
+        poke(16#8001#, x"B6");  -- LDF abs32
+        poke(16#8002#, x"00");  -- reg byte: F0
+        poke(16#8003#, x"60");  -- addr byte 0
+        poke(16#8004#, x"0A");  -- addr byte 1
+        poke(16#8005#, x"00");  -- addr byte 2
+        poke(16#8006#, x"00");  -- addr byte 3
+        poke(16#8007#, x"02");  -- EXT prefix
+        poke(16#8008#, x"B7");  -- STF abs32
+        poke(16#8009#, x"00");  -- reg byte: F0
+        poke(16#800A#, x"80");  -- addr byte 0
+        poke(16#800B#, x"0A");  -- addr byte 1
+        poke(16#800C#, x"00");  -- addr byte 2
+        poke(16#800D#, x"00");  -- addr byte 3
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(800);
+        
+        check_mem(16#0A80#, x"00", "LDF/STF abs32 byte0");
+        check_mem(16#0A81#, x"00", "LDF/STF abs32 byte1");
+        check_mem(16#0A82#, x"00", "LDF/STF abs32 byte2");
+        check_mem(16#0A83#, x"00", "LDF/STF abs32 byte3");
+        check_mem(16#0A84#, x"00", "LDF/STF abs32 byte4");
+        check_mem(16#0A85#, x"00", "LDF/STF abs32 byte5");
+        check_mem(16#0A86#, x"02", "LDF/STF abs32 byte6");
+        check_mem(16#0A87#, x"40", "LDF/STF abs32 byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100J: FSUB.S (C1) - 3.75 - 1.5 = 2.25
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100J: FSUB.S";
+        
+        -- F0 = 3.75 (0x40700000), F1 = 1.5 (0x3FC00000)
+        poke(16#0B00#, x"00"); poke(16#0B01#, x"00");
+        poke(16#0B02#, x"70"); poke(16#0B03#, x"40");
+        poke(16#0B04#, x"00"); poke(16#0B05#, x"00");
+        poke(16#0B06#, x"00"); poke(16#0B07#, x"00");
+        poke(16#0B08#, x"00"); poke(16#0B09#, x"00");
+        poke(16#0B0A#, x"C0"); poke(16#0B0B#, x"3F");
+        poke(16#0B0C#, x"00"); poke(16#0B0D#, x"00");
+        poke(16#0B0E#, x"00"); poke(16#0B0F#, x"00");
+        
+        -- Program: LDF F0,$0B00, LDF F1,$0B08, FSUB.S F0,F1, STF F0,$0B20, BRK
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0B");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0B");
+        poke(16#800A#, x"02"); poke(16#800B#, x"C1");  -- FSUB.S
+        poke(16#800C#, x"01");  -- F0 = F0 - F1
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"20"); poke(16#8011#, x"0B");
+        poke(16#8012#, x"00");  -- BRK
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 2.25 = 0x40100000
+        check_mem(16#0B20#, x"00", "FSUB.S byte0");
+        check_mem(16#0B21#, x"00", "FSUB.S byte1");
+        check_mem(16#0B22#, x"10", "FSUB.S byte2");
+        check_mem(16#0B23#, x"40", "FSUB.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100K: FMUL.S (C2) - 1.5 * 2.0 = 3.0
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100K: FMUL.S";
+        
+        -- F0 = 1.5 (0x3FC00000), F1 = 2.0 (0x40000000)
+        poke(16#0B00#, x"00"); poke(16#0B01#, x"00");
+        poke(16#0B02#, x"C0"); poke(16#0B03#, x"3F");
+        poke(16#0B04#, x"00"); poke(16#0B05#, x"00");
+        poke(16#0B06#, x"00"); poke(16#0B07#, x"00");
+        poke(16#0B08#, x"00"); poke(16#0B09#, x"00");
+        poke(16#0B0A#, x"00"); poke(16#0B0B#, x"40");
+        poke(16#0B0C#, x"00"); poke(16#0B0D#, x"00");
+        poke(16#0B0E#, x"00"); poke(16#0B0F#, x"00");
+        
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0B");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0B");
+        poke(16#800A#, x"02"); poke(16#800B#, x"C2");  -- FMUL.S
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"30"); poke(16#8011#, x"0B");
+        poke(16#8012#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 3.0 = 0x40400000
+        check_mem(16#0B30#, x"00", "FMUL.S byte0");
+        check_mem(16#0B31#, x"00", "FMUL.S byte1");
+        check_mem(16#0B32#, x"40", "FMUL.S byte2");
+        check_mem(16#0B33#, x"40", "FMUL.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100L: FDIV.S (C3) - 6.0 / 2.0 = 3.0
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100L: FDIV.S";
+        
+        -- F0 = 6.0 (0x40C00000), F1 = 2.0 (0x40000000)
+        poke(16#0B00#, x"00"); poke(16#0B01#, x"00");
+        poke(16#0B02#, x"C0"); poke(16#0B03#, x"40");
+        poke(16#0B04#, x"00"); poke(16#0B05#, x"00");
+        poke(16#0B06#, x"00"); poke(16#0B07#, x"00");
+        poke(16#0B08#, x"00"); poke(16#0B09#, x"00");
+        poke(16#0B0A#, x"00"); poke(16#0B0B#, x"40");
+        poke(16#0B0C#, x"00"); poke(16#0B0D#, x"00");
+        poke(16#0B0E#, x"00"); poke(16#0B0F#, x"00");
+        
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0B");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0B");
+        poke(16#800A#, x"02"); poke(16#800B#, x"C3");  -- FDIV.S
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"40"); poke(16#8011#, x"0B");
+        poke(16#8012#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 3.0 = 0x40400000
+        check_mem(16#0B40#, x"00", "FDIV.S byte0");
+        check_mem(16#0B41#, x"00", "FDIV.S byte1");
+        check_mem(16#0B42#, x"40", "FDIV.S byte2");
+        check_mem(16#0B43#, x"40", "FDIV.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100M: FNEG.S (C4) / FABS.S (C5)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100M: FNEG.S / FABS.S";
+        
+        -- F1 = 3.0 (0x40400000) in 64-bit slot
+        poke(16#0B00#, x"00"); poke(16#0B01#, x"00");
+        poke(16#0B02#, x"40"); poke(16#0B03#, x"40");
+        poke(16#0B04#, x"00"); poke(16#0B05#, x"00");
+        poke(16#0B06#, x"00"); poke(16#0B07#, x"00");
+        
+        -- Program: LDF F1,$0B00, FNEG.S F0,F1, STF F0,$0B50,
+        --          FABS.S F2,F0, STF F2,$0B58, BRK
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"01"); poke(16#8003#, x"00"); poke(16#8004#, x"0B");
+        poke(16#8005#, x"02"); poke(16#8006#, x"C4");  -- FNEG.S F0, F1
+        poke(16#8007#, x"01");  -- dest=F0, src=F1
+        poke(16#8008#, x"02"); poke(16#8009#, x"B3");
+        poke(16#800A#, x"00"); poke(16#800B#, x"50"); poke(16#800C#, x"0B");
+        poke(16#800D#, x"02"); poke(16#800E#, x"C5");  -- FABS.S F2, F0
+        poke(16#800F#, x"20");  -- dest=F2, src=F0
+        poke(16#8010#, x"02"); poke(16#8011#, x"B3");
+        poke(16#8012#, x"02"); poke(16#8013#, x"58"); poke(16#8014#, x"0B");
+        poke(16#8015#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- FNEG: -3.0 = 0xC0400000
+        check_mem(16#0B50#, x"00", "FNEG.S byte0");
+        check_mem(16#0B51#, x"00", "FNEG.S byte1");
+        check_mem(16#0B52#, x"40", "FNEG.S byte2");
+        check_mem(16#0B53#, x"C0", "FNEG.S byte3");
+        -- FABS: |(-3.0)| = 3.0 = 0x40400000
+        check_mem(16#0B58#, x"00", "FABS.S byte0");
+        check_mem(16#0B59#, x"00", "FABS.S byte1");
+        check_mem(16#0B5A#, x"40", "FABS.S byte2");
+        check_mem(16#0B5B#, x"40", "FABS.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100N: FMOV.S (C9) / FSQRT.S (CA)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100N: FMOV.S / FSQRT.S";
+        
+        -- F1 = 4.0 (0x40800000)
+        poke(16#0B00#, x"00"); poke(16#0B01#, x"00");
+        poke(16#0B02#, x"80"); poke(16#0B03#, x"40");
+        poke(16#0B04#, x"00"); poke(16#0B05#, x"00");
+        poke(16#0B06#, x"00"); poke(16#0B07#, x"00");
+        
+        -- Program: LDF F1,$0B00, FMOV.S F0,F1, STF F0,$0B60,
+        --          FSQRT.S F2,F1, STF F2,$0B68, BRK
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"01"); poke(16#8003#, x"00"); poke(16#8004#, x"0B");
+        poke(16#8005#, x"02"); poke(16#8006#, x"C9");  -- FMOV.S F0, F1
+        poke(16#8007#, x"01");
+        poke(16#8008#, x"02"); poke(16#8009#, x"B3");
+        poke(16#800A#, x"00"); poke(16#800B#, x"60"); poke(16#800C#, x"0B");
+        poke(16#800D#, x"02"); poke(16#800E#, x"CA");  -- FSQRT.S F2, F1
+        poke(16#800F#, x"21");  -- dest=F2, src=F1
+        poke(16#8010#, x"02"); poke(16#8011#, x"B3");
+        poke(16#8012#, x"02"); poke(16#8013#, x"68"); poke(16#8014#, x"0B");
+        poke(16#8015#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- FMOV: 4.0 = 0x40800000
+        check_mem(16#0B60#, x"00", "FMOV.S byte0");
+        check_mem(16#0B61#, x"00", "FMOV.S byte1");
+        check_mem(16#0B62#, x"80", "FMOV.S byte2");
+        check_mem(16#0B63#, x"40", "FMOV.S byte3");
+        -- FSQRT: sqrt(4.0) = 2.0 = 0x40000000
+        check_mem(16#0B68#, x"00", "FSQRT.S byte0");
+        check_mem(16#0B69#, x"00", "FSQRT.S byte1");
+        check_mem(16#0B6A#, x"00", "FSQRT.S byte2");
+        check_mem(16#0B6B#, x"40", "FSQRT.S byte3");
+
+        -----------------------------------------------------------------------
+        -- TEST 100O: FSUB.D (D1) - 3.75 - 1.5 = 2.25
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100O: FSUB.D";
+        
+        -- F0 = 3.75 (0x400E000000000000), F1 = 1.5 (0x3FF8000000000000)
+        poke(16#0C00#, x"00"); poke(16#0C01#, x"00"); poke(16#0C02#, x"00"); poke(16#0C03#, x"00");
+        poke(16#0C04#, x"00"); poke(16#0C05#, x"00"); poke(16#0C06#, x"0E"); poke(16#0C07#, x"40");
+        poke(16#0C08#, x"00"); poke(16#0C09#, x"00"); poke(16#0C0A#, x"00"); poke(16#0C0B#, x"00");
+        poke(16#0C0C#, x"00"); poke(16#0C0D#, x"00"); poke(16#0C0E#, x"F8"); poke(16#0C0F#, x"3F");
+        
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0C");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0C");
+        poke(16#800A#, x"02"); poke(16#800B#, x"D1");  -- FSUB.D
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"20"); poke(16#8011#, x"0C");
+        poke(16#8012#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 2.25 = 0x4002000000000000
+        check_mem(16#0C20#, x"00", "FSUB.D byte0");
+        check_mem(16#0C21#, x"00", "FSUB.D byte1");
+        check_mem(16#0C22#, x"00", "FSUB.D byte2");
+        check_mem(16#0C23#, x"00", "FSUB.D byte3");
+        check_mem(16#0C24#, x"00", "FSUB.D byte4");
+        check_mem(16#0C25#, x"00", "FSUB.D byte5");
+        check_mem(16#0C26#, x"02", "FSUB.D byte6");
+        check_mem(16#0C27#, x"40", "FSUB.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100P: FMUL.D (D2) - 1.5 * 2.0 = 3.0
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100P: FMUL.D";
+        
+        -- F0 = 1.5, F1 = 2.0
+        poke(16#0C00#, x"00"); poke(16#0C01#, x"00"); poke(16#0C02#, x"00"); poke(16#0C03#, x"00");
+        poke(16#0C04#, x"00"); poke(16#0C05#, x"00"); poke(16#0C06#, x"F8"); poke(16#0C07#, x"3F");
+        poke(16#0C08#, x"00"); poke(16#0C09#, x"00"); poke(16#0C0A#, x"00"); poke(16#0C0B#, x"00");
+        poke(16#0C0C#, x"00"); poke(16#0C0D#, x"00"); poke(16#0C0E#, x"00"); poke(16#0C0F#, x"40");
+        
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0C");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0C");
+        poke(16#800A#, x"02"); poke(16#800B#, x"D2");  -- FMUL.D
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"30"); poke(16#8011#, x"0C");
+        poke(16#8012#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 3.0 = 0x4008000000000000
+        check_mem(16#0C30#, x"00", "FMUL.D byte0");
+        check_mem(16#0C31#, x"00", "FMUL.D byte1");
+        check_mem(16#0C32#, x"00", "FMUL.D byte2");
+        check_mem(16#0C33#, x"00", "FMUL.D byte3");
+        check_mem(16#0C34#, x"00", "FMUL.D byte4");
+        check_mem(16#0C35#, x"00", "FMUL.D byte5");
+        check_mem(16#0C36#, x"08", "FMUL.D byte6");
+        check_mem(16#0C37#, x"40", "FMUL.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100Q: FDIV.D (D3) - 6.0 / 2.0 = 3.0
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100Q: FDIV.D";
+        
+        -- F0 = 6.0 (0x4018000000000000), F1 = 2.0
+        poke(16#0C00#, x"00"); poke(16#0C01#, x"00"); poke(16#0C02#, x"00"); poke(16#0C03#, x"00");
+        poke(16#0C04#, x"00"); poke(16#0C05#, x"00"); poke(16#0C06#, x"18"); poke(16#0C07#, x"40");
+        poke(16#0C08#, x"00"); poke(16#0C09#, x"00"); poke(16#0C0A#, x"00"); poke(16#0C0B#, x"00");
+        poke(16#0C0C#, x"00"); poke(16#0C0D#, x"00"); poke(16#0C0E#, x"00"); poke(16#0C0F#, x"40");
+        
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"00"); poke(16#8003#, x"00"); poke(16#8004#, x"0C");
+        poke(16#8005#, x"02"); poke(16#8006#, x"B1");
+        poke(16#8007#, x"01"); poke(16#8008#, x"08"); poke(16#8009#, x"0C");
+        poke(16#800A#, x"02"); poke(16#800B#, x"D3");  -- FDIV.D
+        poke(16#800C#, x"01");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B3");
+        poke(16#800F#, x"00"); poke(16#8010#, x"40"); poke(16#8011#, x"0C");
+        poke(16#8012#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- 3.0 = 0x4008000000000000
+        check_mem(16#0C40#, x"00", "FDIV.D byte0");
+        check_mem(16#0C41#, x"00", "FDIV.D byte1");
+        check_mem(16#0C42#, x"00", "FDIV.D byte2");
+        check_mem(16#0C43#, x"00", "FDIV.D byte3");
+        check_mem(16#0C44#, x"00", "FDIV.D byte4");
+        check_mem(16#0C45#, x"00", "FDIV.D byte5");
+        check_mem(16#0C46#, x"08", "FDIV.D byte6");
+        check_mem(16#0C47#, x"40", "FDIV.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100R: FNEG.D (D4) / FABS.D (D5)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100R: FNEG.D / FABS.D";
+        
+        -- F1 = 3.0 (0x4008000000000000)
+        poke(16#0C00#, x"00"); poke(16#0C01#, x"00"); poke(16#0C02#, x"00"); poke(16#0C03#, x"00");
+        poke(16#0C04#, x"00"); poke(16#0C05#, x"00"); poke(16#0C06#, x"08"); poke(16#0C07#, x"40");
+        
+        -- LDF F1,$0C00, FNEG.D F0,F1, STF F0,$0C50, FABS.D F2,F0, STF F2,$0C58
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"01"); poke(16#8003#, x"00"); poke(16#8004#, x"0C");
+        poke(16#8005#, x"02"); poke(16#8006#, x"D4");  -- FNEG.D F0, F1
+        poke(16#8007#, x"01");
+        poke(16#8008#, x"02"); poke(16#8009#, x"B3");
+        poke(16#800A#, x"00"); poke(16#800B#, x"50"); poke(16#800C#, x"0C");
+        poke(16#800D#, x"02"); poke(16#800E#, x"D5");  -- FABS.D F2, F0
+        poke(16#800F#, x"20");
+        poke(16#8010#, x"02"); poke(16#8011#, x"B3");
+        poke(16#8012#, x"02"); poke(16#8013#, x"58"); poke(16#8014#, x"0C");
+        poke(16#8015#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- FNEG: -3.0 = 0xC008000000000000
+        check_mem(16#0C50#, x"00", "FNEG.D byte0");
+        check_mem(16#0C51#, x"00", "FNEG.D byte1");
+        check_mem(16#0C52#, x"00", "FNEG.D byte2");
+        check_mem(16#0C53#, x"00", "FNEG.D byte3");
+        check_mem(16#0C54#, x"00", "FNEG.D byte4");
+        check_mem(16#0C55#, x"00", "FNEG.D byte5");
+        check_mem(16#0C56#, x"08", "FNEG.D byte6");
+        check_mem(16#0C57#, x"C0", "FNEG.D byte7");
+        -- FABS: 3.0 = 0x4008000000000000
+        check_mem(16#0C58#, x"00", "FABS.D byte0");
+        check_mem(16#0C59#, x"00", "FABS.D byte1");
+        check_mem(16#0C5A#, x"00", "FABS.D byte2");
+        check_mem(16#0C5B#, x"00", "FABS.D byte3");
+        check_mem(16#0C5C#, x"00", "FABS.D byte4");
+        check_mem(16#0C5D#, x"00", "FABS.D byte5");
+        check_mem(16#0C5E#, x"08", "FABS.D byte6");
+        check_mem(16#0C5F#, x"40", "FABS.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100S: FCMP.D flags (D6)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100S: FCMP.D flags";
+        
+        -- F0 = 1.0 (0x3FF0000000000000), F1 = 2.0 (0x4000000000000000)
+        poke(16#0C60#, x"00"); poke(16#0C61#, x"00"); poke(16#0C62#, x"00"); poke(16#0C63#, x"00");
+        poke(16#0C64#, x"00"); poke(16#0C65#, x"00"); poke(16#0C66#, x"F0"); poke(16#0C67#, x"3F");
+        poke(16#0C68#, x"00"); poke(16#0C69#, x"00"); poke(16#0C6A#, x"00"); poke(16#0C6B#, x"00");
+        poke(16#0C6C#, x"00"); poke(16#0C6D#, x"00"); poke(16#0C6E#, x"00"); poke(16#0C6F#, x"40");
+        
+        -- Program: clear markers, load F0/F1, FCMP.D, BMI->store1, then equal, BEQ->store1
+        poke(16#8000#, x"A9"); poke(16#8001#, x"00");  -- LDA #$00
+        poke(16#8002#, x"8D"); poke(16#8003#, x"70"); poke(16#8004#, x"0C");  -- STA $0C70
+        poke(16#8005#, x"8D"); poke(16#8006#, x"71"); poke(16#8007#, x"0C");  -- STA $0C71
+        poke(16#8008#, x"02"); poke(16#8009#, x"B1");
+        poke(16#800A#, x"00"); poke(16#800B#, x"60"); poke(16#800C#, x"0C");  -- LDF F0, $0C60
+        poke(16#800D#, x"02"); poke(16#800E#, x"B1");
+        poke(16#800F#, x"01"); poke(16#8010#, x"68"); poke(16#8011#, x"0C");  -- LDF F1, $0C68
+        poke(16#8012#, x"02"); poke(16#8013#, x"D6"); poke(16#8014#, x"01"); -- FCMP.D F0, F1
+        poke(16#8015#, x"30"); poke(16#8016#, x"03");  -- BMI +3 -> $801A
+        poke(16#8017#, x"4C"); poke(16#8018#, x"1F"); poke(16#8019#, x"80");  -- JMP $801F
+        poke(16#801A#, x"A9"); poke(16#801B#, x"01");  -- LDA #$01 (less path)
+        poke(16#801C#, x"8D"); poke(16#801D#, x"70"); poke(16#801E#, x"0C");  -- STA $0C70
+        -- Now test equal: load same value into F0
+        poke(16#801F#, x"02"); poke(16#8020#, x"B1");
+        poke(16#8021#, x"00"); poke(16#8022#, x"68"); poke(16#8023#, x"0C");  -- LDF F0, $0C68 (=2.0)
+        poke(16#8024#, x"02"); poke(16#8025#, x"D6"); poke(16#8026#, x"01"); -- FCMP.D F0, F1
+        poke(16#8027#, x"F0"); poke(16#8028#, x"03");  -- BEQ +3 -> $802C
+        poke(16#8029#, x"4C"); poke(16#802A#, x"31"); poke(16#802B#, x"80");  -- JMP $8031
+        poke(16#802C#, x"A9"); poke(16#802D#, x"01");  -- LDA #$01 (equal path)
+        poke(16#802E#, x"8D"); poke(16#802F#, x"71"); poke(16#8030#, x"0C");  -- STA $0C71
+        poke(16#8031#, x"00");  -- BRK
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(1000);
+        
+        check_mem(16#0C70#, x"01", "FCMP.D less sets N");
+        check_mem(16#0C71#, x"01", "FCMP.D equal sets Z");
+
+        -----------------------------------------------------------------------
+        -- TEST 100T: F2I.D (D7) / I2F.D (D8)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100T: F2I.D / I2F.D";
+        
+        -- F0 = 5.5 (0x4016000000000000)
+        poke(16#0C80#, x"00"); poke(16#0C81#, x"00"); poke(16#0C82#, x"00"); poke(16#0C83#, x"00");
+        poke(16#0C84#, x"00"); poke(16#0C85#, x"00"); poke(16#0C86#, x"16"); poke(16#0C87#, x"40");
+        
+        -- Program: set 32-bit M, LDF F0,$0C80, F2I.D F0, STA $0C90,
+        --          LDA #7, I2F.D F0, STF F0,$0C98, BRK
+        poke(16#8000#, x"C2"); poke(16#8001#, x"40");  -- REP
+        poke(16#8002#, x"E2"); poke(16#8003#, x"80");  -- SEP -> 32-bit
+        poke(16#8004#, x"02"); poke(16#8005#, x"B1");
+        poke(16#8006#, x"00"); poke(16#8007#, x"80"); poke(16#8008#, x"0C");
+        poke(16#8009#, x"02"); poke(16#800A#, x"D7");  -- F2I.D F0
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"8D"); poke(16#800D#, x"90"); poke(16#800E#, x"0C");  -- STA $0C90
+        poke(16#800F#, x"A9"); poke(16#8010#, x"07");  -- LDA #$00000007
+        poke(16#8011#, x"00"); poke(16#8012#, x"00"); poke(16#8013#, x"00");
+        poke(16#8014#, x"02"); poke(16#8015#, x"D8");  -- I2F.D F0
+        poke(16#8016#, x"00");
+        poke(16#8017#, x"02"); poke(16#8018#, x"B3");
+        poke(16#8019#, x"00"); poke(16#801A#, x"98"); poke(16#801B#, x"0C");
+        poke(16#801C#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(800);
+        
+        -- F2I.D of 5.5 -> A = 5 (truncates)
+        check_mem(16#0C90#, x"05", "F2I.D result low byte");
+        -- I2F.D of 7 -> 7.0 = 0x401C000000000000
+        check_mem(16#0C98#, x"00", "I2F.D byte0");
+        check_mem(16#0C99#, x"00", "I2F.D byte1");
+        check_mem(16#0C9A#, x"00", "I2F.D byte2");
+        check_mem(16#0C9B#, x"00", "I2F.D byte3");
+        check_mem(16#0C9C#, x"00", "I2F.D byte4");
+        check_mem(16#0C9D#, x"00", "I2F.D byte5");
+        check_mem(16#0C9E#, x"1C", "I2F.D byte6");
+        check_mem(16#0C9F#, x"40", "I2F.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100U: FMOV.D (D9) / FSQRT.D (DA)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100U: FMOV.D / FSQRT.D";
+        
+        -- F1 = 4.0 (0x4010000000000000)
+        poke(16#0C00#, x"00"); poke(16#0C01#, x"00"); poke(16#0C02#, x"00"); poke(16#0C03#, x"00");
+        poke(16#0C04#, x"00"); poke(16#0C05#, x"00"); poke(16#0C06#, x"10"); poke(16#0C07#, x"40");
+        
+        -- LDF F1,$0C00, FMOV.D F0,F1, STF F0,$0CA0, FSQRT.D F2,F1, STF F2,$0CA8
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"01"); poke(16#8003#, x"00"); poke(16#8004#, x"0C");
+        poke(16#8005#, x"02"); poke(16#8006#, x"D9");  -- FMOV.D F0, F1
+        poke(16#8007#, x"01");
+        poke(16#8008#, x"02"); poke(16#8009#, x"B3");
+        poke(16#800A#, x"00"); poke(16#800B#, x"A0"); poke(16#800C#, x"0C");
+        poke(16#800D#, x"02"); poke(16#800E#, x"DA");  -- FSQRT.D F2, F1
+        poke(16#800F#, x"21");
+        poke(16#8010#, x"02"); poke(16#8011#, x"B3");
+        poke(16#8012#, x"02"); poke(16#8013#, x"A8"); poke(16#8014#, x"0C");
+        poke(16#8015#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- FMOV: 4.0 = 0x4010000000000000
+        check_mem(16#0CA0#, x"00", "FMOV.D byte0");
+        check_mem(16#0CA1#, x"00", "FMOV.D byte1");
+        check_mem(16#0CA2#, x"00", "FMOV.D byte2");
+        check_mem(16#0CA3#, x"00", "FMOV.D byte3");
+        check_mem(16#0CA4#, x"00", "FMOV.D byte4");
+        check_mem(16#0CA5#, x"00", "FMOV.D byte5");
+        check_mem(16#0CA6#, x"10", "FMOV.D byte6");
+        check_mem(16#0CA7#, x"40", "FMOV.D byte7");
+        -- FSQRT: sqrt(4.0) = 2.0 = 0x4000000000000000
+        check_mem(16#0CA8#, x"00", "FSQRT.D byte0");
+        check_mem(16#0CA9#, x"00", "FSQRT.D byte1");
+        check_mem(16#0CAA#, x"00", "FSQRT.D byte2");
+        check_mem(16#0CAB#, x"00", "FSQRT.D byte3");
+        check_mem(16#0CAC#, x"00", "FSQRT.D byte4");
+        check_mem(16#0CAD#, x"00", "FSQRT.D byte5");
+        check_mem(16#0CAE#, x"00", "FSQRT.D byte6");
+        check_mem(16#0CAF#, x"40", "FSQRT.D byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100V: FTOA / FTOT / ATOF / TTOF (E0-E3)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100V: FTOA / FTOT / ATOF / TTOF";
+        
+        -- F0 loaded with known 64-bit pattern: 0x4002000000000000 (2.25)
+        -- low 32 bits = 0x00000000, high 32 bits = 0x40020000
+        poke(16#0D00#, x"00"); poke(16#0D01#, x"00"); poke(16#0D02#, x"00"); poke(16#0D03#, x"00");
+        poke(16#0D04#, x"00"); poke(16#0D05#, x"00"); poke(16#0D06#, x"02"); poke(16#0D07#, x"40");
+        
+        -- Program: set 32-bit M, LDF F0,$0D00,
+        --   FTOA F0 -> A = F0[31:0], STA $0D10,
+        --   FTOT F0 -> T = F0[63:32], TTA -> A=T, STA $0D14,
+        --   LDA #$AABBCCDD, ATOF F1, -> F1[31:0] = $AABBCCDD
+        --   LDA #$11223344, TTA -> T doesn't exist... need TAT/ATT
+        -- Actually: TTOF F1 -> F1[63:32] = T. Need to set T first.
+        -- Use: LDA #$11223344, TAT (transfer A to T, but that's $02 $AB)
+        -- Wait, let me check: is TAT available? Let me use MUL to set T, or just
+        -- test FTOA/FTOT since they're simplest.
+        poke(16#8000#, x"C2"); poke(16#8001#, x"40");
+        poke(16#8002#, x"E2"); poke(16#8003#, x"80");  -- 32-bit M
+        poke(16#8004#, x"02"); poke(16#8005#, x"B1");
+        poke(16#8006#, x"00"); poke(16#8007#, x"00"); poke(16#8008#, x"0D");  -- LDF F0, $0D00
+        poke(16#8009#, x"02"); poke(16#800A#, x"E0");  -- FTOA F0
+        poke(16#800B#, x"00");
+        poke(16#800C#, x"8D"); poke(16#800D#, x"10"); poke(16#800E#, x"0D");  -- STA $0D10
+        poke(16#800F#, x"02"); poke(16#8010#, x"E1");  -- FTOT F0
+        poke(16#8011#, x"00");
+        -- TTA: transfer T to A = $02 $9A
+        poke(16#8012#, x"02"); poke(16#8013#, x"9A");  -- TTA
+        poke(16#8014#, x"8D"); poke(16#8015#, x"14"); poke(16#8016#, x"0D");  -- STA $0D14
+        -- Now test ATOF: LDA #$DEADBEEF, ATOF F1 -> F1[31:0] = $DEADBEEF
+        poke(16#8017#, x"A9"); poke(16#8018#, x"EF"); poke(16#8019#, x"BE");
+        poke(16#801A#, x"AD"); poke(16#801B#, x"DE");  -- LDA #$DEADBEEF
+        poke(16#801C#, x"02"); poke(16#801D#, x"E2");  -- ATOF F1
+        poke(16#801E#, x"10");  -- reg byte: F1
+        -- TTOF F1: F1[63:32] = T (T still = $40020000 from FTOT above)
+        poke(16#801F#, x"02"); poke(16#8020#, x"E3");  -- TTOF F1
+        poke(16#8021#, x"10");  -- reg byte: F1
+        -- STF F1 to $0D20 to verify both halves
+        poke(16#8022#, x"02"); poke(16#8023#, x"B3");
+        poke(16#8024#, x"01"); poke(16#8025#, x"20"); poke(16#8026#, x"0D");
+        poke(16#8027#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(1000);
+        
+        -- FTOA: A = F0[31:0] = 0x00000000
+        check_mem(16#0D10#, x"00", "FTOA low byte");
+        check_mem(16#0D11#, x"00", "FTOA byte1");
+        check_mem(16#0D12#, x"00", "FTOA byte2");
+        check_mem(16#0D13#, x"00", "FTOA byte3");
+        -- FTOT->TTA: A = F0[63:32] = 0x40020000
+        check_mem(16#0D14#, x"00", "FTOT low byte");
+        check_mem(16#0D15#, x"00", "FTOT byte1");
+        check_mem(16#0D16#, x"02", "FTOT byte2");
+        check_mem(16#0D17#, x"40", "FTOT byte3");
+        -- F1 should be: low=$DEADBEEF (ATOF), high=$40020000 (TTOF)
+        check_mem(16#0D20#, x"EF", "ATOF/TTOF byte0");
+        check_mem(16#0D21#, x"BE", "ATOF/TTOF byte1");
+        check_mem(16#0D22#, x"AD", "ATOF/TTOF byte2");
+        check_mem(16#0D23#, x"DE", "ATOF/TTOF byte3");
+        check_mem(16#0D24#, x"00", "ATOF/TTOF byte4");
+        check_mem(16#0D25#, x"00", "ATOF/TTOF byte5");
+        check_mem(16#0D26#, x"02", "ATOF/TTOF byte6");
+        check_mem(16#0D27#, x"40", "ATOF/TTOF byte7");
+
+        -----------------------------------------------------------------------
+        -- TEST 100W: FCVT.DS (E4) / FCVT.SD (E5)
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 100W: FCVT.DS / FCVT.SD";
+        
+        -- F1 = 1.5 single (0x3FC00000) - load as 64-bit with upper 0s
+        poke(16#0D30#, x"00"); poke(16#0D31#, x"00");
+        poke(16#0D32#, x"C0"); poke(16#0D33#, x"3F");
+        poke(16#0D34#, x"00"); poke(16#0D35#, x"00");
+        poke(16#0D36#, x"00"); poke(16#0D37#, x"00");
+        -- F2 = 2.0 double (0x4000000000000000)
+        poke(16#0D38#, x"00"); poke(16#0D39#, x"00"); poke(16#0D3A#, x"00"); poke(16#0D3B#, x"00");
+        poke(16#0D3C#, x"00"); poke(16#0D3D#, x"00"); poke(16#0D3E#, x"00"); poke(16#0D3F#, x"40");
+        
+        -- LDF F1,$0D30, FCVT.DS F0,F1, STF F0,$0D40,
+        -- LDF F2,$0D38, FCVT.SD F3,F2, STF F3,$0D48, BRK
+        poke(16#8000#, x"02"); poke(16#8001#, x"B1");
+        poke(16#8002#, x"01"); poke(16#8003#, x"30"); poke(16#8004#, x"0D");
+        poke(16#8005#, x"02"); poke(16#8006#, x"E4");  -- FCVT.DS F0, F1
+        poke(16#8007#, x"01");  -- dest=F0, src=F1
+        poke(16#8008#, x"02"); poke(16#8009#, x"B3");
+        poke(16#800A#, x"00"); poke(16#800B#, x"40"); poke(16#800C#, x"0D");
+        poke(16#800D#, x"02"); poke(16#800E#, x"B1");
+        poke(16#800F#, x"02"); poke(16#8010#, x"38"); poke(16#8011#, x"0D");
+        poke(16#8012#, x"02"); poke(16#8013#, x"E5");  -- FCVT.SD F3, F2
+        poke(16#8014#, x"32");  -- dest=F3, src=F2
+        poke(16#8015#, x"02"); poke(16#8016#, x"B3");
+        poke(16#8017#, x"03"); poke(16#8018#, x"48"); poke(16#8019#, x"0D");
+        poke(16#801A#, x"00");
+        
+        rst_n <= '0'; wait_cycles(10);
+        rst_n <= '1'; wait_cycles(620);
+        
+        -- FCVT.DS: 1.5 single -> 1.5 double = 0x3FF8000000000000
+        check_mem(16#0D40#, x"00", "FCVT.DS byte0");
+        check_mem(16#0D41#, x"00", "FCVT.DS byte1");
+        check_mem(16#0D42#, x"00", "FCVT.DS byte2");
+        check_mem(16#0D43#, x"00", "FCVT.DS byte3");
+        check_mem(16#0D44#, x"00", "FCVT.DS byte4");
+        check_mem(16#0D45#, x"00", "FCVT.DS byte5");
+        check_mem(16#0D46#, x"F8", "FCVT.DS byte6");
+        check_mem(16#0D47#, x"3F", "FCVT.DS byte7");
+        -- FCVT.SD: 2.0 double -> 2.0 single = 0x40000000 (low 32 of 64-bit reg)
+        check_mem(16#0D48#, x"00", "FCVT.SD byte0");
+        check_mem(16#0D49#, x"00", "FCVT.SD byte1");
+        check_mem(16#0D4A#, x"00", "FCVT.SD byte2");
+        check_mem(16#0D4B#, x"40", "FCVT.SD byte3");
+
+        -----------------------------------------------------------------------
         -- TEST 100: TRAP vector + RTI
         -----------------------------------------------------------------------
         report "";

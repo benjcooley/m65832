@@ -7,6 +7,7 @@
 #include "system.h"
 #include "sandbox_filesystem.h"
 #include "platform.h"
+#include "elf_loader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -256,8 +257,11 @@ system_state_t *system_init(const system_config_t *config) {
         m65832_set_p(sys->cpu, p);
     }
     
-    /* Set entry point */
+    /* Set entry point: explicit > ELF > default kernel load address */
     uint32_t entry = config->entry_point;
+    if (entry == 0 && sys->elf_entry != 0) {
+        entry = sys->elf_entry;
+    }
     if (entry == 0 && config->kernel_file) {
         entry = SYSTEM_KERNEL_LOAD;
     }
@@ -352,6 +356,11 @@ uint64_t system_run(system_state_t *sys, uint64_t cycles) {
             }
         }
         
+        /* Stop on BRK trap - the program has crashed or hit an unhandled exception */
+        if (sys->cpu->trap == TRAP_BRK) {
+            break;
+        }
+        
         /* Poll devices periodically */
         sys->poll_counter++;
         if (sys->poll_counter >= sys->poll_interval) {
@@ -420,6 +429,18 @@ void system_poll_devices(system_state_t *sys) {
 int system_load_kernel(system_state_t *sys, const char *filename, uint32_t addr) {
     if (!sys || !sys->cpu || !filename) return -1;
     
+    /* Auto-detect ELF format */
+    if (elf_is_elf_file(filename)) {
+        uint32_t entry = elf_load(sys->cpu, filename, sys->config.verbose);
+        if (entry == 0) return -1;
+        
+        /* ELF provides its own load addresses and entry point */
+        sys->boot_params.kernel_start = entry;
+        sys->elf_entry = entry;
+        return 1;  /* Success (actual size tracked by ELF loader) */
+    }
+    
+    /* Fall back to raw binary loading */
     if (addr == 0) {
         addr = SYSTEM_KERNEL_LOAD;
     }

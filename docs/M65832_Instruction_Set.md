@@ -1756,7 +1756,7 @@ Two-operand destructive format: `Fd = Fd op Fs` (binary) or `Fd = op(Fs)` (unary
 | FDIV.S Fd, Fs | $02 $C3 $ds | Fd = Fd / Fs |
 | FNEG.S Fd, Fs | $02 $C4 $ds | Fd = -Fs |
 | FABS.S Fd, Fs | $02 $C5 $ds | Fd = \|Fs\| |
-| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd to Fs (flags unaffected) |
+| FCMP.S Fd, Fs | $02 $C6 $ds | Compare Fd to Fs (sets N, Z flags) |
 | F2I.S Fd | $02 $C7 $d0 | A = (int32)Fd |
 | I2F.S Fd | $02 $C8 $d0 | Fd = (float32)A |
 | FMOV.S Fd, Fs | $02 $C9 $ds | Fd = Fs (copy) |
@@ -1785,7 +1785,7 @@ Same format as single-precision, using $D0-$DA opcodes:
 | FDIV.D Fd, Fs | $02 $D3 $ds | Fd = Fd / Fs |
 | FNEG.D Fd, Fs | $02 $D4 $ds | Fd = -Fs |
 | FABS.D Fd, Fs | $02 $D5 $ds | Fd = \|Fs\| |
-| FCMP.D Fd, Fs | $02 $D6 $ds | Compare Fd to Fs (flags unaffected) |
+| FCMP.D Fd, Fs | $02 $D6 $ds | Compare Fd to Fs (sets N, Z flags) |
 | F2I.D Fd | $02 $D7 $d0 | A = (int64)Fd (low 32 bits) |
 | I2F.D Fd | $02 $D8 $d0 | Fd = (float64)A |
 | FMOV.D Fd, Fs | $02 $D9 $ds | Fd = Fs (copy) |
@@ -1800,7 +1800,17 @@ FSQRT.D F4, F4     ; $02 $DA $44 - F4 = √F4 (in place)
 
 #### FCMP Flags
 
-FCMP.S and FCMP.D do not modify processor flags.
+FCMP.S and FCMP.D set the N and Z processor flags based on the comparison result:
+
+| Condition | N | Z |
+|-----------|---|---|
+| Fd < Fs   | 1 | 0 |
+| Fd = Fs   | 0 | 1 |
+| Fd > Fs   | 0 | 0 |
+| NaN       | 0 | 0 |
+
+Use BMI to branch if less-than, BEQ to branch if equal, BPL+BNE for greater-than.
+For NaN (unordered), both N and Z are cleared.
 
 #### FPU Register Transfers
 
