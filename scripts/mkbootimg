@@ -1,0 +1,155 @@
+#!/bin/bash
+#
+# mkbootimg - Create a bootable M65832 disk image
+#
+# Writes a disk image with:
+#   Sector 0:    Boot header (32 bytes: magic, kernel location, size, etc.)
+#   Sectors 1-2047: Reserved (future bootloader, partition table)
+#   Sector 2048+: Kernel flat binary (vmlinux.bin)
+#   After kernel: Optional rootfs (appended with --rootfs)
+#
+# Usage:
+#   mkbootimg --kernel vmlinux.bin -o boot.img
+#   mkbootimg --kernel vmlinux.bin --rootfs rootfs.img -o boot.img
+#   mkbootimg --kernel vmlinux.bin --rootfs rootfs.img --size 128M -o boot.img
+#
+
+set -e
+
+# Defaults
+KERNEL_SECTOR=2048          # 1MB offset
+LOAD_ADDR=0x00100000        # Physical load address
+SECTOR_SIZE=512
+DISK_SIZE=""                # Auto-calculated if not specified
+OUTPUT=""
+KERNEL=""
+ROOTFS=""
+ROOTFS_SECTOR=""            # Auto: after kernel
+
+usage() {
+    echo "mkbootimg - Create a bootable M65832 disk image"
+    echo ""
+    echo "Usage: $0 --kernel <vmlinux.bin> -o <output.img> [options]"
+    echo ""
+    echo "Options:"
+    echo "  --kernel FILE    Kernel flat binary (required)"
+    echo "  --rootfs FILE    Root filesystem image (ext2/ext4)"
+    echo "  --load-addr ADDR Kernel load address (default: 0x00100000)"
+    echo "  --sector OFFSET  Kernel start sector (default: 2048)"
+    echo "  --size SIZE      Disk image size (e.g., 64M, 128M, 1G)"
+    echo "  -o FILE          Output disk image (required)"
+    echo "  -v               Verbose output"
+    echo "  -h               Show this help"
+    exit 1
+}
+
+VERBOSE=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kernel)   KERNEL="$2"; shift 2 ;;
+        --rootfs)   ROOTFS="$2"; shift 2 ;;
+        --load-addr) LOAD_ADDR="$2"; shift 2 ;;
+        --sector)   KERNEL_SECTOR="$2"; shift 2 ;;
+        --size)     DISK_SIZE="$2"; shift 2 ;;
+        -o)         OUTPUT="$2"; shift 2 ;;
+        -v)         VERBOSE=1; shift ;;
+        -h|--help)  usage ;;
+        *)          echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+if [ -z "$KERNEL" ] || [ -z "$OUTPUT" ]; then
+    echo "Error: --kernel and -o are required"
+    usage
+fi
+
+if [ ! -f "$KERNEL" ]; then
+    echo "Error: kernel file not found: $KERNEL"
+    exit 1
+fi
+
+# Get kernel size
+KERNEL_SIZE=$(stat -f %z "$KERNEL" 2>/dev/null || stat -c %s "$KERNEL" 2>/dev/null)
+KERNEL_SECTORS=$(( (KERNEL_SIZE + SECTOR_SIZE - 1) / SECTOR_SIZE ))
+
+# Calculate rootfs sector (after kernel, aligned to 2048-sector boundary for partition alignment)
+ROOTFS_SECTOR=$(( KERNEL_SECTOR + KERNEL_SECTORS ))
+ROOTFS_SECTOR=$(( (ROOTFS_SECTOR + 2047) / 2048 * 2048 ))  # Align to 1MB
+
+# Calculate total disk size
+if [ -z "$DISK_SIZE" ]; then
+    TOTAL_SECTORS=$ROOTFS_SECTOR
+    if [ -n "$ROOTFS" ] && [ -f "$ROOTFS" ]; then
+        ROOTFS_SIZE=$(stat -f %z "$ROOTFS" 2>/dev/null || stat -c %s "$ROOTFS" 2>/dev/null)
+        ROOTFS_SECTORS=$(( (ROOTFS_SIZE + SECTOR_SIZE - 1) / SECTOR_SIZE ))
+        TOTAL_SECTORS=$(( ROOTFS_SECTOR + ROOTFS_SECTORS ))
+    fi
+    # Round up to nearest MB
+    TOTAL_SECTORS=$(( (TOTAL_SECTORS + 2047) / 2048 * 2048 ))
+    # Minimum 64MB
+    if [ $TOTAL_SECTORS -lt 131072 ]; then
+        TOTAL_SECTORS=131072
+    fi
+else
+    # Parse size string (e.g., 64M, 128M, 1G)
+    case "$DISK_SIZE" in
+        *G|*g) TOTAL_SECTORS=$(( ${DISK_SIZE%[Gg]} * 1024 * 1024 * 1024 / SECTOR_SIZE )) ;;
+        *M|*m) TOTAL_SECTORS=$(( ${DISK_SIZE%[Mm]} * 1024 * 1024 / SECTOR_SIZE )) ;;
+        *K|*k) TOTAL_SECTORS=$(( ${DISK_SIZE%[Kk]} * 1024 / SECTOR_SIZE )) ;;
+        *)     TOTAL_SECTORS=$(( DISK_SIZE / SECTOR_SIZE )) ;;
+    esac
+fi
+
+if [ $VERBOSE -eq 1 ]; then
+    echo "=== mkbootimg ==="
+    echo "Kernel:       $KERNEL ($KERNEL_SIZE bytes, $KERNEL_SECTORS sectors)"
+    echo "Load address: $LOAD_ADDR"
+    echo "Kernel sector: $KERNEL_SECTOR"
+    if [ -n "$ROOTFS" ]; then
+        echo "Rootfs:       $ROOTFS (starts at sector $ROOTFS_SECTOR)"
+    fi
+    echo "Disk size:    $(( TOTAL_SECTORS * SECTOR_SIZE / 1024 / 1024 )) MB ($TOTAL_SECTORS sectors)"
+    echo "Output:       $OUTPUT"
+fi
+
+# Create sparse disk image
+dd if=/dev/zero of="$OUTPUT" bs=$SECTOR_SIZE count=0 seek=$TOTAL_SECTORS 2>/dev/null
+
+# Write boot header at sector 0 (32 bytes)
+# Format: magic(4) version(4) kernel_sector(4) kernel_size(4)
+#         load_addr(4) entry_offset(4) flags(4) reserved(4)
+python3 -c "
+import struct, sys
+header = struct.pack('<IIIIIIII',
+    0x4236354D,         # magic: 'M65B' little-endian
+    1,                  # version
+    $KERNEL_SECTOR,     # kernel_sector
+    $KERNEL_SIZE,       # kernel_size
+    $LOAD_ADDR,         # kernel_load_addr
+    0,                  # kernel_entry_offset
+    0,                  # flags
+    0                   # reserved
+)
+# Pad to 512 bytes (full sector)
+header += b'\x00' * ($SECTOR_SIZE - len(header))
+sys.stdout.buffer.write(header)
+" | dd of="$OUTPUT" bs=$SECTOR_SIZE seek=0 conv=notrunc 2>/dev/null
+
+# Write kernel at kernel_sector
+dd if="$KERNEL" of="$OUTPUT" bs=$SECTOR_SIZE seek=$KERNEL_SECTOR conv=notrunc 2>/dev/null
+
+# Write rootfs if provided
+if [ -n "$ROOTFS" ] && [ -f "$ROOTFS" ]; then
+    dd if="$ROOTFS" of="$OUTPUT" bs=$SECTOR_SIZE seek=$ROOTFS_SECTOR conv=notrunc 2>/dev/null
+    if [ $VERBOSE -eq 1 ]; then
+        echo "Rootfs written at sector $ROOTFS_SECTOR"
+    fi
+fi
+
+echo "Created $OUTPUT: $(( TOTAL_SECTORS * SECTOR_SIZE / 1024 / 1024 )) MB"
+echo "  Boot header at sector 0"
+echo "  Kernel at sector $KERNEL_SECTOR ($KERNEL_SECTORS sectors, $(( KERNEL_SIZE / 1024 )) KB)"
+if [ -n "$ROOTFS" ] && [ -f "$ROOTFS" ]; then
+    echo "  Rootfs at sector $ROOTFS_SECTOR"
+fi
