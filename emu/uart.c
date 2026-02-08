@@ -127,7 +127,8 @@ static void uart_mmio_write(m65832_cpu_t *cpu, uint32_t addr,
     uart_state_t *uart = (uart_state_t *)user;
     
     switch (offset) {
-        case UART_TX_DATA:
+        case UART_DATA:             /* Combined TX/RX data register */
+        case UART_TX_DATA:          /* Dedicated TX data register */
             /* Transmit byte to stdout */
             if (uart->loopback) {
                 /* Loopback mode: send to RX */
