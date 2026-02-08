@@ -85,43 +85,110 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 
 ### Test Infrastructure
 
-- [x] **164 C compiler tests** - Core types, arithmetic, FP, pointers, structs, strings, regression tests (all passing)
+- [x] **164 C compiler tests** - Core types, arithmetic, FP, pointers, structs, strings, regression tests (all passing at O2)
+- [x] **16 inline assembly tests** - GPR constraints, memory operands, clobbers, syscalls, atomics (all passing)
 - [x] **383 VHDL/emulator tests** - Full instruction set coverage including FPU addressing modes and comparisons
-- [x] **181 picolibc tests** - Comprehensive C library test suite with automated clean-rebuild pipeline (162 pass, 19 expected skip)
-- [x] **Automated test runner** - `run_picolibc_gtest.py` with full clean rebuild of compiler-rt + picolibc from source, timestamped results, regression diffing
+- [x] **181 picolibc tests** - Comprehensive C library test suite (162 pass, 19 expected skip, 0 fail)
+- [x] **Automated test runner** - `run_picolibc_gtest.py` with full clean rebuild of compiler-rt + picolibc from source, timestamped results
 
 ### In Progress
 
 - [ ] Hardware bring-up on target FPGA
 - [ ] Performance characterization and tuning
-- [ ] C compiler optimization (some codegen workarounds still active at -O1)
 - [ ] Linux boot and userland enablement
 
 ## Building & Testing
 
+The m65832 repository is the top-level project. All other repositories (LLVM backend,
+picolibc, etc.) are automatically cloned as sibling directories during build.
+
+### Prerequisites
+
+- cmake, ninja, python3, meson, git, make
+- A C/C++ compiler (clang or gcc) for building host tools
+- GHDL (optional, for RTL/VHDL simulation tests)
+
+### Quick Start
+
 ```bash
-# Quick start
-./configure.sh           # Configure (validates prerequisites)
-./build.sh tools         # Build emulator + assembler (fast)
-./test.sh --quick        # Quick smoke tests
-
-# Full build
-./build.sh baremetal     # Build full toolchain (includes LLVM - slow)
-./test.sh                # Run all tests
-
-# Individual test suites
-./test.sh --emulator     # Emulator tests
-./test.sh --assembler    # Assembler tests
-./test.sh --compiler     # C compiler tests
-./test.sh --rtl          # RTL/VHDL tests (requires GHDL)
-
-# Check build status
-./build.sh status
+git clone https://github.com/benjcooley/m65832.git
+cd m65832
+./configure.sh              # Detect host, validate prereqs, generate config
+./build.sh tools            # Build emulator + assembler (~30 seconds)
+./test.sh --quick           # Quick smoke test
 ```
 
-See [Build System Reference](docs/M65832_Build_System.md) for complete documentation.
+### Full Toolchain Build
+
+```bash
+./build.sh baremetal        # Clone deps + build LLVM + picolibc + tools
+./test.sh                   # Run all test suites
+```
+
+This auto-clones sibling repositories as needed:
+
+```
+projects/
+├── m65832/                 # This repo (main project)
+├── llvm-m65832/            # LLVM/Clang with M65832 backend (auto-cloned)
+├── picolibc-m65832/        # Picolibc C library port (auto-cloned)
+└── (musl-m65832/)          # musl libc for Linux target (future)
+```
+
+Build outputs (`m65832-sysroot/`, `picolibc-build-m65832/`, etc.) are created
+automatically and can be removed with `./build.sh clean`.
+
+### Individual Build Targets
+
+```bash
+./build.sh tools            # Emulator + assembler only (~30 seconds)
+./build.sh llvm             # LLVM/Clang cross compiler (~20 minutes first time)
+./build.sh baremetal        # Full baremetal toolchain (LLVM + picolibc + tools)
+./build.sh clone            # Clone all dependency repos without building
+./build.sh status           # Show what's built and what's missing
+./build.sh clean            # Clean all build artifacts
+```
+
+### Test Suites
+
+```bash
+./test.sh                   # Run all tests
+./test.sh --quick           # Quick smoke tests (~5 seconds)
+./test.sh --compiler        # C compiler tests: 164 tests
+./test.sh --inline-asm      # Inline assembly tests: 16 tests
+./test.sh --picolibc        # Picolibc sysroot validation: 15 tests
+./test.sh --emulator        # Emulator instruction tests
+./test.sh --assembler       # Assembler syntax tests
+./test.sh --rtl             # RTL/VHDL simulation (requires GHDL)
+```
+
+### Full Picolibc Regression Suite
+
+The comprehensive 181-test picolibc suite (math, stdio, string, ctype, malloc, etc.)
+is run from the picolibc-m65832 repo:
+
+```bash
+cd ../picolibc-m65832
+./build_and_test.sh             # Full rebuild + test
+./build_and_test.sh --skip-build  # Re-run tests only (use existing build)
+```
+
+Current status: 162 pass, 0 fail, 19 skip (features not applicable to baremetal).
 
 ## Architecture Highlights
+
+### ZP Instructions as 64 Hardware Registers
+
+When processor flag R=1, Direct Page maps to 64×32-bit registers (R0-R63):
+
+```asm
+RSET                    ; Enable register window
+LD    R0, #$1000        ; R0 = $1000
+LD    R1, (R0)          ; R1 = [R0] (indirect through register)
+LD    R2, (R0),Y        ; R2 = [R0 + Y]
+ADD   R3, R1            ; R3 += R1
+ST    R3, result        ; Store to memory
+```
 
 ### Extended ALU with Register Targeting
 
@@ -146,19 +213,6 @@ INC   R0                ; R0++
 ASL   R1                ; R1 <<= 1
 ```
 
-### 64 Hardware Registers
-
-When R=1, Direct Page maps to 64×32-bit registers (R0-R63):
-
-```asm
-RSET                    ; Enable register window
-LD    R0, #$1000        ; R0 = $1000
-LD    R1, (R0)          ; R1 = [R0] (indirect through register)
-LD    R2, (R0),Y        ; R2 = [R0 + Y]
-ADD   R3, R1            ; R3 += R1
-ST    R3, result        ; Store to memory
-```
-
 ### Hardware Multiply/Divide
 
 ```asm
@@ -169,7 +223,7 @@ DIV   R0, R1            ; R0 = R0 / R1, T = remainder
 TTA                     ; A = T (get high word or remainder)
 ```
 
-### 64-bit Operations
+### 64-bit Move Operations
 
 ```asm
 LDQ   R0                ; Load 64-bit: A = low, T = high
@@ -214,9 +268,9 @@ SD    #$00010000        ; Set direct page base
 LDA   R0                ; Access register window at $10000
 ```
 
-### Virtual 6502 Mode
+### Complete 6502/65816 Compatibility
 
-Run unmodified 6502 code anywhere in the 32-bit address space:
+Run unmodified 6502/65816 code anywhere in the 64-bit address space:
 
 ```asm
 SVBR  #$10000000        ; 6502 sees $0000-$FFFF at VA $10000000-$1000FFFF
@@ -311,13 +365,18 @@ See [Classic Coprocessor](docs/M65832_Classic_Coprocessor.md) for complete detai
 
 ```
 m65832/
+├── configure.sh    # Configure build environment
+├── build.sh        # Build toolchain (auto-clones dependencies)
+├── test.sh         # Run test suites
+├── scripts/        # Build/clone/test helper scripts
 ├── docs/           # Architecture and tool documentation
-├── as/             # Assembler and disassembler (run: make && ./run_tests.sh)
-├── emu/            # Emulator with debugger (run: make && ./run_tests.sh)
+├── as/             # Assembler and disassembler
+├── emu/            # Emulator with debugger, FPU, MMU, ELF loader
+│   └── c_tests/    # C compiler and picolibc test suites
 ├── rtl/            # M65832 VHDL implementation
-├── tb/             # GHDL testbenches (run: ./run_core_tests.sh)
+├── tb/             # GHDL testbenches
 ├── cores/          # Reference cores (MX65 6502, MiSTer 65816)
-└── software/       # Example code (planned)
+└── syn/            # FPGA synthesis files (DE2-115, KV260)
 ```
 
 ## Target FPGA

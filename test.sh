@@ -241,8 +241,8 @@ test_compiler_core() {
     
     cd "$test_dir"
     
-    if [ -x "./run_core_tests.sh" ]; then
-        if ./run_core_tests.sh; then
+    if [ -x "./run_c_tests.sh" ]; then
+        if ./run_c_tests.sh; then
             TOTAL_PASS=$((TOTAL_PASS + 1))
             return 0
         else
@@ -251,7 +251,7 @@ test_compiler_core() {
         fi
     else
         TOTAL_SKIP=$((TOTAL_SKIP + 1))
-        log_skip "Core test runner not found"
+        log_skip "C test runner not found"
         return 1
     fi
 }
@@ -302,9 +302,9 @@ test_picolibc() {
     
     local test_dir="$M65832_DIR/emu/c_tests"
     
-    if [ -x "$test_dir/run_picolibc_suite.sh" ]; then
+    if [ -x "$test_dir/run_all_picolibc_tests.sh" ]; then
         cd "$test_dir"
-        if ./run_picolibc_suite.sh; then
+        if ./run_all_picolibc_tests.sh; then
             TOTAL_PASS=$((TOTAL_PASS + 1))
             return 0
         else
