@@ -33,8 +33,8 @@ extern "C" {
 #define M65832_REG_WINDOW_SIZE  64              /* R0-R63 */
 
 /* System register addresses (MMIO at $00FFF0xx - 24-bit addressable) */
-#define SYSREG_BASE       0x00FFF000
-#define SYSREG_MMUCR      0x00FFF000  /* MMU Control Register */
+#define SYSREG_BASE       0xFFFFF000  /* DE25: system regs at 0xFFFFF000 */
+#define SYSREG_MMUCR      0xFFFFF000  /* MMU Control Register */
 #define SYSREG_TLBINVAL   0x00FFF004  /* TLB Invalidate (by VA) */
 #define SYSREG_ASID       0x00FFF008  /* Address Space ID */
 #define SYSREG_ASIDINVAL  0x00FFF00C  /* TLB Invalidate (by ASID) */

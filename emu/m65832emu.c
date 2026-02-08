@@ -48,8 +48,7 @@ static inline bool is_sysreg(uint32_t addr) {
      * NOTE: The original VHDL checked only bits 15:8 == 0xF0, but that
      * causes false matches for any address whose low 16 bits are in
      * $F000-$F0FF (e.g., $0002F0E0). Use full 32-bit comparison instead. */
-    return (addr >= 0xF000 && addr < 0xF100) ||
-           (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
+    return (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
 }
 
 /* Forward declarations for exception handling (defined after stack functions) */
@@ -583,7 +582,18 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
         addr = addr & 0xFF;
     }
     
-    /* Check MMIO regions first */
+    /* System registers bypass MMU (handle 32-bit writes) */
+    if (is_sysreg(addr)) {
+        if (!FLAG_TST(cpu, P_S)) {
+            privilege_violation(cpu);
+            return;
+        }
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
+        sysreg_write(cpu, reg_addr, val);
+        return;
+    }
+
+    /* Check MMIO regions */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->write) {
         r->write(cpu, addr, addr - r->base, val, 4, r->user);
@@ -629,6 +639,7 @@ static inline uint8_t fetch8(m65832_cpu_t *cpu) {
             cpu->pc++;
             return 0xFF;
         }
+        
     }
 
     /* Custom memory callback */
