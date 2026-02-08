@@ -76,6 +76,7 @@ extern "C" {
 #define PTE_ACCESSED      (1ULL << 9)
 #define PTE_DIRTY         (1ULL << 10)
 #define PTE_GLOBAL        (1ULL << 11)
+#define PTE_NO_EXEC       (1ULL << 63)   /* Page is NOT executable */
 #define PTE_PPN_SHIFT     12
 #define PTE_PPN_MASK      0xFFFFFFFFFFFFF000ULL
 

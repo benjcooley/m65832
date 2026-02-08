@@ -348,7 +348,8 @@ static bool mmu_translate(m65832_cpu_t *cpu, uint32_t va, uint64_t *pa,
     if (l2_pte & PTE_PRESENT) flags |= TLB_PRESENT;
     if (l2_pte & PTE_WRITABLE) flags |= TLB_WRITABLE;
     if (l2_pte & PTE_USER) flags |= TLB_USER;
-    if (l2_pte & PTE_GLOBAL) flags |= TLB_EXECUTABLE;  /* Reuse for now */
+    /* Pages are executable unless _PAGE_NO_EXEC (bit 63) is set */
+    if (!(l2_pte & PTE_NO_EXEC)) flags |= TLB_EXECUTABLE;
     tlb_insert(cpu, va >> 12, ppn, flags);
     
     return true;
@@ -601,22 +602,44 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
     }
 }
 
-/* Fetch instruction byte */
+/* Fetch instruction byte (with MMU translation) */
 static inline uint8_t fetch8(m65832_cpu_t *cpu) {
+    uint32_t va = cpu->pc;
     uint8_t val;
-    if (cpu->mem_read) {
-        val = (uint8_t)cpu->mem_read(cpu, cpu->pc, 1, MEM_FETCH, cpu->mem_user);
-    } else if (cpu->memory && cpu->pc < cpu->memory_size) {
-        val = cpu->memory[cpu->pc];
-    } else {
-        /* Check MMIO regions for fetch (e.g., boot ROM at 0xFFFF0000) */
-        m65832_mmio_region_t *r = mmio_find_region(cpu, cpu->pc);
-        if (r && r->read) {
-            val = (uint8_t)r->read(cpu, cpu->pc, cpu->pc - r->base, 1, r->user);
-        } else {
-            val = 0;
+
+    /* System registers bypass MMU (boot ROM at 0xFFFF0000) */
+    if (is_sysreg(va)) {
+        /* Should not normally fetch from sysregs, but boot ROM is nearby */
+    }
+
+    /* Check MMIO regions first (e.g., boot ROM at 0xFFFF0000 bypasses MMU) */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, va);
+    if (r && r->read) {
+        val = (uint8_t)r->read(cpu, va, va - r->base, 1, r->user);
+        cpu->pc++;
+        return val;
+    }
+
+    /* MMU translation for instruction fetch (access_type=2 for execute) */
+    uint64_t pa = va;
+    if (cpu->mmucr & MMUCR_PG) {
+        if (!mmu_translate(cpu, va, &pa, 2, !FLAG_TST(cpu, P_S))) {
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, va, fault_type);
+            cpu->pc++;
+            return 0xFF;
         }
     }
+
+    /* Custom memory callback */
+    if (cpu->mem_read) {
+        val = (uint8_t)cpu->mem_read(cpu, (uint32_t)pa, 1, MEM_FETCH, cpu->mem_user);
+    } else if (cpu->memory && pa < cpu->memory_size) {
+        val = cpu->memory[pa];
+    } else {
+        val = 0xFF;
+    }
+
     cpu->pc++;
     return val;
 }
