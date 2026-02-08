@@ -498,46 +498,84 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
 }
 
 static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window mode */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
         addr = addr & 0xFF;
     }
     
-    /* Check MMIO regions first */
+    /* System registers bypass MMU */
+    if (is_sysreg(addr)) {
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
+        uint32_t val = sysreg_read(cpu, reg_addr);
+        return (val >> ((addr & 2) * 8)) & 0xFFFF;
+    }
+
+    /* MMIO regions bypass MMU */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->read) {
         return (uint16_t)r->read(cpu, addr, addr - r->base, 2, r->user);
     }
     
-    if (cpu->mem_read) {
-        return (uint16_t)cpu->mem_read(cpu, addr, 2, MEM_READ, cpu->mem_user);
+    /* MMU translation */
+    uint64_t pa = addr;
+    if (cpu->mmucr & MMUCR_PG) {
+        if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
+            return 0xFFFF;
+        }
     }
-    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 1 < cpu->memory_size) {
-        return cpu->memory[addr] | ((uint16_t)cpu->memory[addr + 1] << 8);
+
+    if (cpu->mem_read) {
+        return (uint16_t)cpu->mem_read(cpu, (uint32_t)pa, 2, MEM_READ, cpu->mem_user);
+    }
+    if (cpu->memory && pa < cpu->memory_size && pa + 1 < cpu->memory_size) {
+        return cpu->memory[pa] | ((uint16_t)cpu->memory[pa + 1] << 8);
     }
     return 0xFFFF;
 }
 
 static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window mode */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
         addr = addr & 0xFF;
     }
     
-    /* Check MMIO regions first */
+    /* System registers bypass MMU */
+    if (is_sysreg(addr)) {
+        if (!FLAG_TST(cpu, P_S)) { privilege_violation(cpu); return; }
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
+        uint32_t old = sysreg_read(cpu, reg_addr);
+        int shift = (addr & 2) * 8;
+        uint32_t mask = 0xFFFF << shift;
+        sysreg_write(cpu, reg_addr, (old & ~mask) | ((uint32_t)val << shift));
+        return;
+    }
+
+    /* MMIO regions bypass MMU */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->write) {
         r->write(cpu, addr, addr - r->base, val, 2, r->user);
         return;
     }
     
+    /* MMU translation */
+    uint64_t pa = addr;
+    if (cpu->mmucr & MMUCR_PG) {
+        if (!mmu_translate(cpu, addr, &pa, 1, !FLAG_TST(cpu, P_S))) {
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
+            return;
+        }
+    }
+
     if (cpu->mem_write) {
-        cpu->mem_write(cpu, addr, val, 2, cpu->mem_user);
+        cpu->mem_write(cpu, (uint32_t)pa, val, 2, cpu->mem_user);
         return;
     }
-    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 1 < cpu->memory_size) {
-        cpu->memory[addr] = val & 0xFF;
-        cpu->memory[addr + 1] = (val >> 8) & 0xFF;
+    if (cpu->memory && pa < cpu->memory_size && pa + 1 < cpu->memory_size) {
+        cpu->memory[pa] = val & 0xFF;
+        cpu->memory[pa + 1] = (val >> 8) & 0xFF;
     }
 }
 
@@ -552,20 +590,36 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
         addr = addr & 0xFF;
     }
     
-    /* Check MMIO regions first */
+    /* System registers bypass MMU */
+    if (is_sysreg(addr)) {
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
+        return sysreg_read(cpu, reg_addr);
+    }
+
+    /* Check MMIO regions (bypass MMU) */
     m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
     if (r && r->read) {
         return r->read(cpu, addr, addr - r->base, 4, r->user);
     }
     
-    if (cpu->mem_read) {
-        return cpu->mem_read(cpu, addr, 4, MEM_READ, cpu->mem_user);
+    /* MMU translation */
+    uint64_t pa = addr;
+    if (cpu->mmucr & MMUCR_PG) {
+        if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
+            return 0xFFFFFFFF;
+        }
     }
-    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 3 < cpu->memory_size) {
-        return cpu->memory[addr] | 
-               ((uint32_t)cpu->memory[addr + 1] << 8) |
-               ((uint32_t)cpu->memory[addr + 2] << 16) |
-               ((uint32_t)cpu->memory[addr + 3] << 24);
+
+    if (cpu->mem_read) {
+        return cpu->mem_read(cpu, (uint32_t)pa, 4, MEM_READ, cpu->mem_user);
+    }
+    if (cpu->memory && pa < cpu->memory_size && pa + 3 < cpu->memory_size) {
+        return cpu->memory[pa] | 
+               ((uint32_t)cpu->memory[pa + 1] << 8) |
+               ((uint32_t)cpu->memory[pa + 2] << 16) |
+               ((uint32_t)cpu->memory[pa + 3] << 24);
     }
     return 0xFFFFFFFF;
 }
@@ -1326,9 +1380,17 @@ static bool ext_read_source(m65832_cpu_t *cpu, uint8_t addr_mode, int width, uin
 static int execute_instruction(m65832_cpu_t *cpu) {
     uint8_t opcode = fetch8(cpu);
     int cycles = 2;  /* Base cycles */
-    /* M65832: In native-32 mode, widths are fixed to 32-bit for standard ops */
-    int width_m = SIZE_M(cpu);
-    int width_x = SIZE_X(cpu);
+    /* M65832: In native-32 mode, ALL standard ops are 32-bit.
+     * The M/X width flags are only used by Extended ALU (.B/.W suffixes).
+     * In native mode (E=0), standard instruction widths are always 32-bit. */
+    int width_m, width_x;
+    if (!IS_EMU(cpu)) {
+        width_m = 4;  /* 32-bit accumulator for all standard ops */
+        width_x = 4;  /* 32-bit index for all standard ops */
+    } else {
+        width_m = SIZE_M(cpu);
+        width_x = SIZE_X(cpu);
+    }
     uint32_t addr, val;
     int8_t rel8;
     int16_t rel16;
@@ -4769,8 +4831,14 @@ int m65832_step(m65832_cpu_t *cpu) {
     if (cpu->tracing && cpu->trace_fn) {
         uint8_t buf[8];
         uint32_t pc = cpu->pc;
-        for (int i = 0; i < 8 && pc + i < cpu->memory_size; i++) {
-            buf[i] = cpu->memory[pc + i];
+        for (int i = 0; i < 8; i++) {
+            /* Read through MMU like fetch8 does */
+            uint64_t pa = pc + i;
+            if (cpu->mmucr & MMUCR_PG) {
+                if (!mmu_translate(cpu, pc + i, &pa, 0, false))
+                    pa = pc + i;  /* Fallback on fault */
+            }
+            buf[i] = (pa < cpu->memory_size) ? cpu->memory[pa] : 0xFF;
         }
         cpu->trace_fn(cpu, pc, buf, 1, cpu->trace_user);  /* Simplified */
     }
@@ -4980,10 +5048,15 @@ void m65832_print_state(m65832_cpu_t *cpu) {
 #include "../as/m65832dis.c"
 
 int m65832_disassemble(m65832_cpu_t *cpu, uint32_t addr, char *buf, size_t bufsize) {
-    /* Read instruction bytes from memory */
+    /* Read instruction bytes through MMU translation */
     uint8_t instbuf[8];
     for (int i = 0; i < 8; i++) {
-        instbuf[i] = (addr + i < cpu->memory_size) ? cpu->memory[addr + i] : 0;
+        uint64_t pa = addr + i;
+        if (cpu->mmucr & MMUCR_PG) {
+            if (!mmu_translate(cpu, addr + i, &pa, 0, false))
+                pa = addr + i;
+        }
+        instbuf[i] = (pa < cpu->memory_size) ? cpu->memory[pa] : 0;
     }
     
     /* Set up context based on CPU state */
