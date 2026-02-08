@@ -111,6 +111,10 @@ echo "--- Memory Constraint (m) ---"
 run_inline_asm_test "inline_asm_m_constraint" "inline_asm/test_inline_asm_m_constraint.c"
 
 echo ""
+echo "--- Transfer Instructions ---"
+run_inline_asm_test "inline_asm_transfers" "inline_asm/test_inline_asm_transfers.c"
+
+echo ""
 echo "========================================"
 echo "Summary: $PASS passed, $FAIL failed, $SKIP skipped"
 echo "========================================"
