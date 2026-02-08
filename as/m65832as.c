@@ -1897,7 +1897,10 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                     if (as->pass == 2) {
                         error(as, "branch target out of range (%d bytes)", offset);
                     }
-                    return 0;
+                    /* Still emit placeholder bytes on pass 1 to keep PC in sync */
+                    emit_byte(as, inst->opcodes[AM_REL]);
+                    emit_word(as, 0);
+                    return 1;
                 }
                 emit_byte(as, inst->opcodes[AM_REL]);
                 emit_word(as, offset & 0xFFFF);
