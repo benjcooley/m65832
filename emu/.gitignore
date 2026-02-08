@@ -1,5 +1,6 @@
 # Build artifacts
 m65832emu
+m65832emu_dbg
 libm65832emu.a
 *.o
 
