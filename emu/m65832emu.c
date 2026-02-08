@@ -395,9 +395,9 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
         check_watchpoint(cpu, addr, false);
     }
     
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window: internal register file, never touches memory */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;  /* Map to page zero */
+        return cpu->regfile[addr & 0xFF];
     }
     
     /* System registers bypass MMU */
@@ -417,7 +417,6 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
-            /* mmu_translate already set faultva and fault type in mmucr */
             uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
             page_fault_exception(cpu, addr, fault_type);
             return 0xFF;
@@ -442,9 +441,10 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
         check_watchpoint(cpu, addr, true);
     }
     
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window: internal register file, never touches memory */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;  /* Map to page zero */
+        cpu->regfile[addr & 0xFF] = val;
+        return;
     }
     
     /* Invalidate LL/SC reservation if writing to linked address */
@@ -498,9 +498,10 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
 }
 
 static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
-    /* Register window mode */
+    /* Register window: internal register file */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;
+        uint8_t off = addr & 0xFF;
+        return cpu->regfile[off] | ((uint16_t)cpu->regfile[off + 1] << 8);
     }
     
     /* System registers bypass MMU */
@@ -536,9 +537,12 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
 }
 
 static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
-    /* Register window mode */
+    /* Register window: internal register file */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;
+        uint8_t off = addr & 0xFF;
+        cpu->regfile[off] = val & 0xFF;
+        cpu->regfile[off + 1] = (val >> 8) & 0xFF;
+        return;
     }
     
     /* System registers bypass MMU */
@@ -585,9 +589,13 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
         return cpu->exit_code;
     }
 
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window: internal register file */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;
+        uint8_t off = addr & 0xFF;
+        return cpu->regfile[off] |
+               ((uint32_t)cpu->regfile[off + 1] << 8) |
+               ((uint32_t)cpu->regfile[off + 2] << 16) |
+               ((uint32_t)cpu->regfile[off + 3] << 24);
     }
     
     /* System registers bypass MMU */
@@ -631,9 +639,14 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
 
-    /* Register window mode: marker 0xFFFFFF00 | offset maps to page zero */
+    /* Register window: internal register file */
     if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        addr = addr & 0xFF;
+        uint8_t off = addr & 0xFF;
+        cpu->regfile[off] = val & 0xFF;
+        cpu->regfile[off + 1] = (val >> 8) & 0xFF;
+        cpu->regfile[off + 2] = (val >> 16) & 0xFF;
+        cpu->regfile[off + 3] = (val >> 24) & 0xFF;
+        return;
     }
     
     /* System registers bypass MMU (handle 32-bit writes) */

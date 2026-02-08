@@ -423,6 +423,9 @@ struct m65832_cpu {
     m65832_trap_t trap;
     uint32_t      trap_addr;
     
+    /* Register window (internal CPU register file, NOT memory-mapped) */
+    uint8_t regfile[256];   /* R0-R63 as bytes (64 x 4 = 256 bytes) */
+    
     /* Memory interface */
     uint8_t *memory;        /* Flat memory array (simple mode) */
     size_t   memory_size;   /* Size of flat memory */
