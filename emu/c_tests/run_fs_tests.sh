@@ -2,18 +2,28 @@
 # Run sandbox filesystem tests in system mode
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
-LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
-LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
-if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
-    LLVM_BUILD="$LLVM_BUILD_FAST"
+M65832_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+PROJECTS_DIR="$(dirname "$M65832_DIR")"
+TOOLCHAIN_BIN="$M65832_DIR/bin"
+
+if [ -x "$TOOLCHAIN_BIN/clang" ]; then
+    CLANG="$TOOLCHAIN_BIN/clang"
+    LLD="$TOOLCHAIN_BIN/ld.lld"
+    EMU="$TOOLCHAIN_BIN/m65832emu"
 else
-    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+    LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
+    LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+    LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+    if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+        LLVM_BUILD="$LLVM_BUILD_FAST"
+    else
+        LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+    fi
+    CLANG="$LLVM_BUILD/bin/clang"
+    LLD="$LLVM_BUILD/bin/ld.lld"
+    EMU="$SCRIPT_DIR/../m65832emu"
 fi
-CLANG="$LLVM_BUILD/bin/clang"
-LLD="$LLVM_BUILD_DEFAULT/bin/ld.lld"
-EMU="$SCRIPT_DIR/../m65832emu"
-SYSROOT="/Users/benjamincooley/projects/m65832-sysroot"
+SYSROOT="$PROJECTS_DIR/m65832-sysroot"
 
 TEST_DIR="$SCRIPT_DIR/filesystem"
 LINKER_SCRIPT="$TEST_DIR/m65832_sys.ld"

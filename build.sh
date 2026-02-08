@@ -287,6 +287,7 @@ print_usage() {
     echo "  clone                 Clone all dependencies only"
     echo ""
     echo "Utilities:"
+    echo "  install               Install toolchain binaries to bin/"
     echo "  test                  Run test suites"
     echo "  clean                 Clean all build directories"
     echo "  status                Show build status"
@@ -348,6 +349,9 @@ main() {
             ;;
         clone)
             clone_all
+            ;;
+        install)
+            "$M65832_DIR/scripts/install-toolchain.sh"
             ;;
         test)
             run_tests

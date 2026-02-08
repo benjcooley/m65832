@@ -39,15 +39,22 @@ LINUX_BUILD="$PROJECTS_DIR/linux-build-m65832"
 SYSROOT_BAREMETAL="$PROJECTS_DIR/m65832-sysroot"
 SYSROOT_LINUX="$PROJECTS_DIR/m65832-sysroot-linux"
 
-# Tools (after LLVM is built)
-CLANG="$LLVM_BUILD_FAST/bin/clang"
-LLD="$LLVM_BUILD/bin/ld.lld"
-LLVM_AR="$LLVM_BUILD_FAST/bin/llvm-ar"
-LLVM_RANLIB="$LLVM_BUILD_FAST/bin/llvm-ranlib"
+# Installed toolchain (populated by scripts/install-toolchain.sh)
+TOOLCHAIN_BIN="$M65832_DIR/bin"
 
-# Emulator and assembler
-EMU="$M65832_DIR/emu/m65832emu"
-ASM="$M65832_DIR/as/m65832as"
+# Tools
+CLANG="$TOOLCHAIN_BIN/clang"
+LLD="$TOOLCHAIN_BIN/ld.lld"
+LLVM_AR="$TOOLCHAIN_BIN/llvm-ar"
+LLVM_RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
+LLVM_OBJCOPY="$TOOLCHAIN_BIN/llvm-objcopy"
+LLVM_NM="$TOOLCHAIN_BIN/llvm-nm"
+LLVM_STRIP="$TOOLCHAIN_BIN/llvm-strip"
+LLVM_OBJDUMP="$TOOLCHAIN_BIN/llvm-objdump"
+LLVM_READELF="$TOOLCHAIN_BIN/llvm-readelf"
+LLVM_SIZE="$TOOLCHAIN_BIN/llvm-size"
+EMU="$TOOLCHAIN_BIN/m65832emu"
+ASM="$TOOLCHAIN_BIN/m65832as"
 
 # ============================================================================
 # MMIO Configuration (must match FPGA and emulator)
@@ -223,6 +230,8 @@ export M65832_DIR PROJECTS_DIR
 export LLVM_SRC LLVM_BUILD LLVM_BUILD_FAST
 export PICOLIBC_SRC PICOLIBC_BUILD PICOLIBC_BUILD_LINUX
 export SYSROOT_BAREMETAL SYSROOT_LINUX
+export TOOLCHAIN_BIN
 export CLANG LLD LLVM_AR LLVM_RANLIB
+export LLVM_OBJCOPY LLVM_NM LLVM_STRIP LLVM_OBJDUMP LLVM_READELF LLVM_SIZE
 export EMU ASM
 export JOBS

@@ -6,26 +6,28 @@
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECTS_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
-LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
-LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
-LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
-if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
-    LLVM_BUILD="$LLVM_BUILD_FAST"
-else
-    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
-fi
-EMU="$(dirname "$SCRIPT_DIR")/m65832emu"
+M65832_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+PROJECTS_DIR="$(dirname "$M65832_DIR")"
+TOOLCHAIN_BIN="$M65832_DIR/bin"
 BUILD_DIR="$SCRIPT_DIR/build"
 
-# Tools
-CLANG="$LLVM_BUILD/bin/clang"
-LLD_FAST="$LLVM_BUILD_FAST/bin/ld.lld"
-LLD_DEFAULT="$LLVM_BUILD_DEFAULT/bin/ld.lld"
-if [ -x "$LLD_FAST" ]; then
-    LLD="$LLD_FAST"
+# Use installed toolchain, fall back to build-fast if not installed
+if [ -x "$TOOLCHAIN_BIN/clang" ]; then
+    CLANG="$TOOLCHAIN_BIN/clang"
+    LLD="$TOOLCHAIN_BIN/ld.lld"
+    EMU="$TOOLCHAIN_BIN/m65832emu"
 else
-    LLD="$LLD_DEFAULT"
+    LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
+    LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+    LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+    if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+        LLVM_BUILD="$LLVM_BUILD_FAST"
+    else
+        LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+    fi
+    CLANG="$LLVM_BUILD/bin/clang"
+    LLD="$LLVM_BUILD/bin/ld.lld"
+    EMU="$(dirname "$SCRIPT_DIR")/m65832emu"
 fi
 
 # Newlib paths (if installed)

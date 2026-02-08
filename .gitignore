@@ -60,6 +60,9 @@ build/
 dist/
 dbugging/
 
+# Installed toolchain binaries (populated by ./build.sh install)
+/bin/
+
 # Local archives and RAG indexes
 attic/
 rag/chroma_db/

@@ -3,18 +3,31 @@
 #
 # Usage: run_libc_test.sh <test.c> [expected_result] [cycles]
 
-LLVM_ROOT="/Users/benjamincooley/projects/llvm-m65832"
-LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
-LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
-if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
-    LLVM_BUILD="$LLVM_BUILD_FAST"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+M65832_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+PROJECTS_DIR="$(dirname "$M65832_DIR")"
+TOOLCHAIN_BIN="$M65832_DIR/bin"
+
+# Use installed toolchain, fall back to build-fast if not installed
+if [ -x "$TOOLCHAIN_BIN/clang" ]; then
+    CLANG="$TOOLCHAIN_BIN/clang"
+    ASM="$TOOLCHAIN_BIN/m65832as"
+    EMU="$TOOLCHAIN_BIN/m65832emu"
 else
-    LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+    LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
+    LLVM_BUILD_FAST="$LLVM_ROOT/build-fast"
+    LLVM_BUILD_DEFAULT="$LLVM_ROOT/build"
+    if [ -d "$LLVM_BUILD_FAST" ] && [ -x "$LLVM_BUILD_FAST/bin/clang" ]; then
+        LLVM_BUILD="$LLVM_BUILD_FAST"
+    else
+        LLVM_BUILD="$LLVM_BUILD_DEFAULT"
+    fi
+    CLANG="$LLVM_BUILD/bin/clang"
+    ASM="../../as/m65832as"
+    EMU="../m65832emu"
 fi
-CLANG="$LLVM_BUILD/bin/clang"
-ASM="../../as/m65832as"
-EMU="../m65832emu"
-STDLIB="/Users/benjamincooley/projects/llvm-m65832/m65832-stdlib"
+LLVM_ROOT="$PROJECTS_DIR/llvm-m65832"
+STDLIB="$LLVM_ROOT/m65832-stdlib"
 
 TEST_FILE="$1"
 EXPECTED="$2"
