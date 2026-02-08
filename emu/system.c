@@ -5,12 +5,17 @@
  */
 
 #include "system.h"
+#include "boot_header.h"
 #include "sandbox_filesystem.h"
 #include "platform.h"
 #include "elf_loader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+/* Forward declarations */
+static int system_inject_kernel_to_disk(system_state_t *sys, const char *kernel_file);
 
 /* ============================================================================
  * Configuration
@@ -31,6 +36,7 @@ void system_config_init(system_config_t *config) {
     config->enable_blkdev = true;
     config->disk_file = NULL;
     config->disk_readonly = false;
+    config->bootrom_file = NULL;
     config->supervisor_mode = true;
     config->native32_mode = true;
     config->verbose = false;
@@ -202,6 +208,18 @@ system_state_t *system_init(const system_config_t *config) {
         }
     }
     
+    /* Load boot ROM if specified */
+    if (config->bootrom_file) {
+        sys->bootrom = bootrom_load(sys->cpu, config->bootrom_file,
+                                    SYSTEM_BOOT_ROM, SYSTEM_BOOT_ROM_SIZE,
+                                    config->verbose);
+        if (!sys->bootrom) {
+            fprintf(stderr, "error: cannot load boot ROM '%s'\n", config->bootrom_file);
+            system_destroy(sys);
+            return NULL;
+        }
+    }
+    
     /* Initialize boot parameters */
     memset(&sys->boot_params, 0, sizeof(sys->boot_params));
     sys->boot_params.magic = BOOT_PARAMS_MAGIC;
@@ -213,10 +231,25 @@ system_state_t *system_init(const system_config_t *config) {
     
     /* Load kernel if specified */
     if (config->kernel_file) {
-        int size = system_load_kernel(sys, config->kernel_file, 0);
-        if (size < 0) {
-            system_destroy(sys);
-            return NULL;
+        if (sys->bootrom) {
+            /*
+             * Boot ROM mode: kernel goes into the disk image.
+             * If --kernel is a raw binary or ELF, inject it into the
+             * block device disk image at the standard kernel sector.
+             * The boot ROM will load it via DMA at runtime.
+             */
+            int size = system_inject_kernel_to_disk(sys, config->kernel_file);
+            if (size < 0) {
+                system_destroy(sys);
+                return NULL;
+            }
+        } else {
+            /* Legacy mode: load kernel directly into RAM */
+            int size = system_load_kernel(sys, config->kernel_file, 0);
+            if (size < 0) {
+                system_destroy(sys);
+                return NULL;
+            }
         }
     }
     
@@ -257,16 +290,28 @@ system_state_t *system_init(const system_config_t *config) {
         m65832_set_p(sys->cpu, p);
     }
     
-    /* Set entry point: explicit > ELF > default kernel load address */
-    uint32_t entry = config->entry_point;
-    if (entry == 0 && sys->elf_entry != 0) {
-        entry = sys->elf_entry;
-    }
-    if (entry == 0 && config->kernel_file) {
-        entry = SYSTEM_KERNEL_LOAD;
-    }
-    if (entry != 0) {
-        m65832_set_pc(sys->cpu, entry);
+    /* Set entry point */
+    if (sys->bootrom) {
+        /* Boot ROM mode: CPU starts at boot ROM entry point */
+        uint32_t rom_entry = config->entry_point;
+        if (rom_entry == 0) {
+            rom_entry = bootrom_get_entry(sys->bootrom);
+        }
+        if (rom_entry != 0) {
+            m65832_set_pc(sys->cpu, rom_entry);
+        }
+    } else {
+        /* Legacy mode: explicit > ELF > default kernel load address */
+        uint32_t entry = config->entry_point;
+        if (entry == 0 && sys->elf_entry != 0) {
+            entry = sys->elf_entry;
+        }
+        if (entry == 0 && config->kernel_file) {
+            entry = SYSTEM_KERNEL_LOAD;
+        }
+        if (entry != 0) {
+            m65832_set_pc(sys->cpu, entry);
+        }
     }
     
     /* Configure polling interval */
@@ -281,11 +326,20 @@ void system_destroy(system_state_t *sys) {
     if (!sys) return;
     
     /* Destroy devices */
+    if (sys->bootrom) {
+        bootrom_destroy(sys->bootrom);
+    }
     if (sys->blkdev) {
         blkdev_destroy(sys->blkdev);
     }
     if (sys->uart) {
         uart_destroy(sys->uart);
+    }
+    
+    /* Clean up temporary disk image */
+    if (sys->tmp_disk_path) {
+        unlink(sys->tmp_disk_path);
+        free(sys->tmp_disk_path);
     }
     
     /* Destroy CPU */
@@ -425,6 +479,141 @@ void system_poll_devices(system_state_t *sys) {
 /* ============================================================================
  * Loading
  * ========================================================================= */
+
+/*
+ * Inject a kernel binary into a temporary disk image and attach it to the
+ * block device. Called when both --bootrom and --kernel are specified.
+ * The boot ROM will then load the kernel from the disk via DMA.
+ */
+static int system_inject_kernel_to_disk(system_state_t *sys, const char *kernel_file) {
+    if (!sys || !sys->cpu || !kernel_file) return -1;
+    
+    /* Read kernel file */
+    FILE *kf = fopen(kernel_file, "rb");
+    if (!kf) {
+        fprintf(stderr, "error: cannot open kernel '%s'\n", kernel_file);
+        return -1;
+    }
+    
+    fseek(kf, 0, SEEK_END);
+    long kernel_size = ftell(kf);
+    fseek(kf, 0, SEEK_SET);
+    
+    if (kernel_size <= 0) {
+        fprintf(stderr, "error: empty kernel file '%s'\n", kernel_file);
+        fclose(kf);
+        return -1;
+    }
+    
+    /* If this is an ELF file, reject it -- must use vmlinux.bin */
+    uint32_t magic = 0;
+    if (fread(&magic, 1, 4, kf) == 4 && magic == 0x464C457F) {
+        fprintf(stderr, "error: kernel file '%s' is an ELF.\n", kernel_file);
+        fprintf(stderr, "  With boot ROM mode, use a flat binary (vmlinux.bin).\n");
+        fprintf(stderr, "  Build it with: make -C linux-m65832 vmlinux.bin\n");
+        fclose(kf);
+        return -1;
+    }
+    fseek(kf, 0, SEEK_SET);
+    
+    uint8_t *kernel_data = malloc(kernel_size);
+    if (!kernel_data) {
+        fprintf(stderr, "error: cannot allocate %ld bytes for kernel\n", kernel_size);
+        fclose(kf);
+        return -1;
+    }
+    
+    if (fread(kernel_data, 1, kernel_size, kf) != (size_t)kernel_size) {
+        fprintf(stderr, "error: short read from kernel '%s'\n", kernel_file);
+        free(kernel_data);
+        fclose(kf);
+        return -1;
+    }
+    fclose(kf);
+    
+    /* Calculate disk image size: header + kernel with room to spare */
+    uint32_t kernel_sectors = (kernel_size + BOOT_SECTOR_SIZE - 1) / BOOT_SECTOR_SIZE;
+    uint64_t disk_sectors = BOOT_KERNEL_SECTOR + kernel_sectors + 1024; /* Extra space */
+    uint64_t disk_size = disk_sectors * BOOT_SECTOR_SIZE;
+    
+    /* Create temporary disk image */
+    char tmp_path[] = "/tmp/m65832_boot_XXXXXX";
+    int tmp_fd = mkstemp(tmp_path);
+    if (tmp_fd < 0) {
+        fprintf(stderr, "error: cannot create temporary disk image\n");
+        free(kernel_data);
+        return -1;
+    }
+    
+    /* Extend to full size */
+    if (ftruncate(tmp_fd, disk_size) != 0) {
+        fprintf(stderr, "error: cannot extend temporary disk image\n");
+        close(tmp_fd);
+        unlink(tmp_path);
+        free(kernel_data);
+        return -1;
+    }
+    
+    /* Write boot header at sector 0 */
+    boot_header_t header;
+    memset(&header, 0, sizeof(header));
+    header.magic = BOOT_HEADER_MAGIC;
+    header.version = BOOT_HEADER_VERSION;
+    header.kernel_sector = BOOT_KERNEL_SECTOR;
+    header.kernel_size = (uint32_t)kernel_size;
+    header.kernel_load_addr = BOOT_KERNEL_LOAD_ADDR;
+    header.kernel_entry_offset = 0;
+    header.flags = 0;
+    
+    lseek(tmp_fd, 0, SEEK_SET);
+    if (write(tmp_fd, &header, sizeof(header)) != sizeof(header)) {
+        fprintf(stderr, "error: cannot write boot header\n");
+        close(tmp_fd);
+        unlink(tmp_path);
+        free(kernel_data);
+        return -1;
+    }
+    
+    /* Write kernel at sector BOOT_KERNEL_SECTOR */
+    off_t kernel_offset = (off_t)BOOT_KERNEL_SECTOR * BOOT_SECTOR_SIZE;
+    lseek(tmp_fd, kernel_offset, SEEK_SET);
+    if (write(tmp_fd, kernel_data, kernel_size) != kernel_size) {
+        fprintf(stderr, "error: cannot write kernel to disk image\n");
+        close(tmp_fd);
+        unlink(tmp_path);
+        free(kernel_data);
+        return -1;
+    }
+    
+    close(tmp_fd);
+    free(kernel_data);
+    
+    /* Save path for cleanup */
+    sys->tmp_disk_path = strdup(tmp_path);
+    
+    /* Attach the disk image to the block device */
+    if (sys->blkdev) {
+        if (!blkdev_attach(sys->blkdev, tmp_path, false)) {
+            fprintf(stderr, "error: cannot attach boot disk image\n");
+            return -1;
+        }
+    } else {
+        fprintf(stderr, "error: block device not initialized (needed for boot ROM mode)\n");
+        return -1;
+    }
+    
+    /* Update boot params with kernel info */
+    sys->boot_params.kernel_start = BOOT_KERNEL_LOAD_ADDR;
+    sys->boot_params.kernel_size = (uint32_t)kernel_size;
+    
+    if (sys->config.verbose) {
+        printf("Boot disk: %s (%llu sectors, kernel %ld bytes at sector %u)\n",
+               tmp_path, (unsigned long long)disk_sectors,
+               kernel_size, BOOT_KERNEL_SECTOR);
+    }
+    
+    return (int)kernel_size;
+}
 
 int system_load_kernel(system_state_t *sys, const char *filename, uint32_t addr) {
     if (!sys || !sys->cpu || !filename) return -1;

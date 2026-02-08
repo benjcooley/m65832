@@ -345,8 +345,9 @@ static void blkdev_mmio_write(m65832_cpu_t *cpu, uint32_t addr,
             break;
             
         case BLKDEV_COUNT:
-            /* Limit to reasonable value to prevent huge transfers */
-            blk->count = (value > 0 && value <= 256) ? value : 1;
+            /* Limit to reasonable value to prevent huge transfers.
+             * Allow up to 65536 sectors (32MB) for kernel loading. */
+            blk->count = (value > 0 && value <= 65536) ? value : 1;
             break;
             
         case BLKDEV_CAPACITY_LO:

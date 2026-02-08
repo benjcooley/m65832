@@ -11,6 +11,7 @@
 #include "m65832emu.h"
 #include "uart.h"
 #include "blkdev.h"
+#include "bootrom.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -93,6 +94,9 @@ typedef struct {
     const char *disk_file;      /* Disk image file (NULL = none) */
     bool disk_readonly;         /* Open disk read-only */
     
+    /* Boot ROM */
+    const char *bootrom_file;   /* Boot ROM binary (NULL = no boot ROM) */
+    
     /* Execution configuration */
     bool supervisor_mode;       /* Start in supervisor mode */
     bool native32_mode;         /* Start in native 32-bit mode */
@@ -118,6 +122,7 @@ typedef struct system_state {
     /* Devices */
     uart_state_t *uart;
     blkdev_state_t *blkdev;
+    bootrom_state_t *bootrom;
     
     /* Boot parameters */
     boot_params_t boot_params;
@@ -136,6 +141,9 @@ typedef struct system_state {
     
     /* ELF loading */
     uint32_t elf_entry;         /* Entry point from ELF (0 if raw binary) */
+    
+    /* Temporary disk image (created when --kernel + --bootrom, freed on destroy) */
+    char *tmp_disk_path;
     
     /* State */
     bool running;

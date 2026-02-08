@@ -18,6 +18,11 @@ tb_*
 *.bit
 *.bin
 *.ltx
+
+# Un-ignore LFS-tracked binary artifacts
+!images/*.img
+!images/*.bin
+!boot/bootrom.bin
 *.dcp
 *.xpr
 *.jou

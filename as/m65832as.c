@@ -1473,15 +1473,33 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         int is_immediate = (*p == '#');  /* Immediate addressing doesn't need Extended ALU */
         /* In 32-bit mode, traditional mnemonics (LDA, STA, etc.) with absolute addresses
          * must use Extended ALU since standard opcodes only support B-relative.
-         * Immediate mode uses standard opcodes with 4-byte immediate values. */
+         * Immediate mode uses standard opcodes with 4-byte immediate values.
+         * DP-based addressing modes (dp, (dp), (dp,X), (dp),Y, [dp], [dp],Y, sr, (sr,S),Y)
+         * use standard opcodes -- the CPU just transfers wider data through the pointer. */
         int is_traditional_mnemonic = (strcmp(mnemonic, "LDA") == 0 || strcmp(mnemonic, "STA") == 0 ||
                                        strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
                                        strcmp(mnemonic, "AND") == 0 || strcmp(mnemonic, "ORA") == 0 ||
                                        strcmp(mnemonic, "EOR") == 0 || strcmp(mnemonic, "CMP") == 0 ||
                                        strcmp(mnemonic, "BIT") == 0);
+        /* Pre-parse operand to check addressing mode for 32-bit routing.
+         * DP-based modes don't need extended ALU -- standard opcodes handle them. */
+        int is_dp_mode = 0;
+        if (as->m_flag == 2 && is_traditional_mnemonic && !is_immediate && !dest_starts_reg) {
+            Operand pre_op;
+            char *pre_operand = strdup(operand);
+            if (pre_operand && parse_operand(as, pre_operand, &pre_op)) {
+                if (pre_op.mode == AM_DP || pre_op.mode == AM_DPX || pre_op.mode == AM_DPY ||
+                    pre_op.mode == AM_IND || pre_op.mode == AM_INDX || pre_op.mode == AM_INDY ||
+                    pre_op.mode == AM_INDL || pre_op.mode == AM_INDLY ||
+                    pre_op.mode == AM_SR || pre_op.mode == AM_SRIY) {
+                    is_dp_mode = 1;
+                }
+            }
+            free(pre_operand);
+        }
         int use_ext_alu = (size_code >= 0 || dest_starts_reg ||
                            strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0 ||
-                           (as->m_flag == 2 && is_traditional_mnemonic && !is_immediate));
+                           (as->m_flag == 2 && is_traditional_mnemonic && !is_immediate && !is_dp_mode));
         if (ext_alu->is_unary && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
             use_ext_alu = 0;
         }
@@ -1866,8 +1884,11 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         return 0;
     }
 
-    /* Handle branches specially */
-    if (op.mode == AM_DP || op.mode == AM_ABS) {
+    /* Handle branches specially.
+     * In 32-bit mode, branch targets may be classified as AM_ABSL or AM_ABS32
+     * because labels have 32-bit addresses, but branches use relative offsets. */
+    if (op.mode == AM_DP || op.mode == AM_ABS ||
+        (as->m_flag == 2 && (op.mode == AM_ABSL || op.mode == AM_ABS32))) {
         if (inst->opcodes[AM_REL] != 0xFF) {
             if (as->m_flag == 2) {
                 /* 32-bit mode: use 16-bit relative offsets */
@@ -1956,7 +1977,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             error(as, "use B+$XXXX for 16-bit absolute in 32-bit mode");
             return 0;
         }
-        if (mode == AM_ABSL || mode == AM_ABSLX || mode == AM_ABSLIND) {
+        if ((mode == AM_ABSL || mode == AM_ABSLX || mode == AM_ABSLIND) && !is_control_flow) {
             error(as, "24-bit long addressing not valid in 32-bit mode");
             return 0;
         }
@@ -1970,6 +1991,14 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
     
+    /* In 32-bit mode, JSR/JMP with 32-bit addresses use AM_ABS opcode
+     * but emit 4-byte operand (handled in emit path below). Promote
+     * AM_ABS32/AM_ABSL to AM_ABS for control flow instructions. */
+    if (as->m_flag == 2 && is_control_flow &&
+        (mode == AM_ABS32 || mode == AM_ABSL)) {
+        mode = AM_ABS;
+    }
+
     /* Check if mode is valid for this instruction */
     if (inst->opcodes[mode] == 0xFF) {
         /* Try alternate modes */

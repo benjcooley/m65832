@@ -135,6 +135,7 @@ static void print_usage(const char *prog) {
     printf("  --kernel FILE        Load kernel at 0x00100000\n");
     printf("  --initrd FILE        Load initrd at 0x01000000\n");
     printf("  --cmdline \"STRING\"   Kernel command line\n");
+    printf("  --bootrom FILE       Boot ROM binary (enables hardware boot flow)\n");
     printf("  --disk FILE          Block device disk image file\n");
     printf("  --disk-ro            Open disk image read-only\n");
     printf("  --raw                Put terminal in raw mode (for UART I/O)\n");
@@ -579,6 +580,7 @@ int main(int argc, char *argv[]) {
     const char *cmdline = NULL;
     const char *sandbox_root = NULL;
     const char *disk_file = NULL;
+    const char *bootrom_file = NULL;
     int disk_readonly = 0;
     size_t sys_ram_size = 256 * 1024 * 1024;  /* Default 256 MB */
     int raw_mode = 0;
@@ -671,6 +673,11 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--disk-ro") == 0) {
             disk_readonly = 1;
         }
+        else if (strcmp(argv[i], "--bootrom") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            bootrom_file = argv[i];
+            g_system_mode = 1;
+        }
         else if (strcmp(argv[i], "--sandbox") == 0) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             sandbox_root = argv[i];
@@ -712,6 +719,7 @@ int main(int argc, char *argv[]) {
         config.enable_blkdev = true;
         config.disk_file = disk_file;
         config.disk_readonly = disk_readonly;
+        config.bootrom_file = bootrom_file;
         config.supervisor_mode = true;
         config.native32_mode = !emulation_mode;
         config.verbose = g_verbose;

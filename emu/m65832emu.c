@@ -609,7 +609,13 @@ static inline uint8_t fetch8(m65832_cpu_t *cpu) {
     } else if (cpu->memory && cpu->pc < cpu->memory_size) {
         val = cpu->memory[cpu->pc];
     } else {
-        val = 0;
+        /* Check MMIO regions for fetch (e.g., boot ROM at 0xFFFF0000) */
+        m65832_mmio_region_t *r = mmio_find_region(cpu, cpu->pc);
+        if (r && r->read) {
+            val = (uint8_t)r->read(cpu, cpu->pc, cpu->pc - r->base, 1, r->user);
+        } else {
+            val = 0;
+        }
     }
     cpu->pc++;
     return val;
