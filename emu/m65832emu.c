@@ -389,6 +389,29 @@ static inline bool check_watchpoint(m65832_cpu_t *cpu, uint32_t addr, bool is_wr
     return false;
 }
 
+/* ============================================================================
+ * Register Window Fast Path
+ *
+ * When R=1, addr_dp() returns marker 0xFFFFFF00|offset. Register accesses
+ * go directly to cpu->regs[] (64 x uint32_t), never touching memory.
+ * Registers are always 32-bit aligned; sub-word access extracts from the
+ * 32-bit register value.
+ * ========================================================================= */
+
+#define IS_REGFILE_ADDR(a) (((a) & 0xFFFFFF00) == 0xFFFFFF00)
+#define REGFILE_INDEX(a)   (((a) & 0xFF) >> 2)
+
+static inline uint32_t regfile_read(m65832_cpu_t *cpu, uint32_t addr, int width) {
+    uint32_t val = cpu->regs[REGFILE_INDEX(addr)];
+    (void)width;  /* Always return full 32-bit register value */
+    return val;
+}
+
+static inline void regfile_write(m65832_cpu_t *cpu, uint32_t addr, uint32_t val, int width) {
+    (void)width;  /* Always write full 32-bit register */
+    cpu->regs[REGFILE_INDEX(addr)] = val;
+}
+
 static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
     /* Check read watchpoints */
     if (cpu->num_watchpoints > 0) {
@@ -396,13 +419,14 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
     }
     
     /* Register window: internal register file, never touches memory */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        return cpu->regfile[addr & 0xFF];
+    if (IS_REGFILE_ADDR(addr)) {
+        uint32_t regval = cpu->regs[REGFILE_INDEX(addr)];
+        return (regval >> (((addr & 3)) * 8)) & 0xFF;
     }
     
     /* System registers bypass MMU */
     if (is_sysreg(addr)) {
-        uint32_t reg_addr = (addr & 0xFF) & ~3;  /* Offset within sysreg page */
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
         uint32_t val = sysreg_read(cpu, reg_addr);
         return (val >> ((addr & 3) * 8)) & 0xFF;
     }
@@ -442,8 +466,11 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
     }
     
     /* Register window: internal register file, never touches memory */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        cpu->regfile[addr & 0xFF] = val;
+    if (IS_REGFILE_ADDR(addr)) {
+        int shift = (addr & 3) * 8;
+        uint32_t mask = 0xFF << shift;
+        uint32_t *reg = &cpu->regs[REGFILE_INDEX(addr)];
+        *reg = (*reg & ~mask) | ((uint32_t)val << shift);
         return;
     }
     
@@ -499,9 +526,9 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
 
 static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
     /* Register window: internal register file */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        uint8_t off = addr & 0xFF;
-        return cpu->regfile[off] | ((uint16_t)cpu->regfile[off + 1] << 8);
+    if (IS_REGFILE_ADDR(addr)) {
+        uint32_t regval = cpu->regs[REGFILE_INDEX(addr)];
+        return (uint16_t)regval;
     }
     
     /* System registers bypass MMU */
@@ -538,10 +565,8 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
 
 static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
     /* Register window: internal register file */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        uint8_t off = addr & 0xFF;
-        cpu->regfile[off] = val & 0xFF;
-        cpu->regfile[off + 1] = (val >> 8) & 0xFF;
+    if (IS_REGFILE_ADDR(addr)) {
+        cpu->regs[REGFILE_INDEX(addr)] = (uint32_t)val;
         return;
     }
     
@@ -590,12 +615,8 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
     }
 
     /* Register window: internal register file */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        uint8_t off = addr & 0xFF;
-        return cpu->regfile[off] |
-               ((uint32_t)cpu->regfile[off + 1] << 8) |
-               ((uint32_t)cpu->regfile[off + 2] << 16) |
-               ((uint32_t)cpu->regfile[off + 3] << 24);
+    if (IS_REGFILE_ADDR(addr)) {
+        return cpu->regs[REGFILE_INDEX(addr)];
     }
     
     /* System registers bypass MMU */
@@ -640,12 +661,8 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
     }
 
     /* Register window: internal register file */
-    if ((addr & 0xFFFFFF00) == 0xFFFFFF00) {
-        uint8_t off = addr & 0xFF;
-        cpu->regfile[off] = val & 0xFF;
-        cpu->regfile[off + 1] = (val >> 8) & 0xFF;
-        cpu->regfile[off + 2] = (val >> 16) & 0xFF;
-        cpu->regfile[off + 3] = (val >> 24) & 0xFF;
+    if (IS_REGFILE_ADDR(addr)) {
+        cpu->regs[REGFILE_INDEX(addr)] = val;
         return;
     }
     
@@ -1272,6 +1289,8 @@ static void op_bit(m65832_cpu_t *cpu, uint32_t val, int width) {
  * ========================================================================= */
 
 static inline uint32_t read_val(m65832_cpu_t *cpu, uint32_t addr, int width) {
+    /* Fast path: register window access bypasses all memory/MMIO/MMU */
+    if (IS_REGFILE_ADDR(addr)) return regfile_read(cpu, addr, width);
     switch (width) {
         case 1: return mem_read8(cpu, addr);
         case 2: return mem_read16(cpu, addr);
@@ -1281,6 +1300,9 @@ static inline uint32_t read_val(m65832_cpu_t *cpu, uint32_t addr, int width) {
 }
 
 static inline void write_val(m65832_cpu_t *cpu, uint32_t addr, uint32_t val, int width) {
+    /* Fast path: register window access bypasses all memory/MMIO/MMU */
+    if (IS_REGFILE_ADDR(addr)) { regfile_write(cpu, addr, val, width); return; }
+
     /* Invalidate any LL/SC reservation on any store (LL/SC semantics) */
     cpu->ll_valid = false;
     
@@ -4382,7 +4404,7 @@ void m65832_emu_close(m65832_cpu_t *cpu) {
 void m65832_emu_reset(m65832_cpu_t *cpu) {
     if (!cpu) return;
     
-    /* Clear all registers (matches RTL regfile reset) */
+    /* Clear all registers (matches RTL register file reset) */
     cpu->a = 0;
     cpu->x = 0;
     cpu->y = 0;
