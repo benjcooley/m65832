@@ -1000,11 +1000,18 @@ static void exception_enter(m65832_cpu_t *cpu, uint32_t vector, uint32_t return_
     FLAG_SET(cpu, P_I);                   /* Disable IRQ */
     FLAG_SET(cpu, P_S);                   /* Enter supervisor mode */
     
-    /* Vector address depends on E mode: 16-bit read in emulation, 32-bit in native */
+    /* Vector reads bypass MMU (vectors are at physical addresses).
+     * In the VHDL, vector fetches happen in the exception state machine
+     * which doesn't go through the normal MMU translation pipeline.
+     * Use direct memory access instead of mem_read which goes through MMU. */
     if (IS_EMU(cpu)) {
-        cpu->pc = mem_read16(cpu, vector & 0xFFFF);
+        uint32_t va = vector & 0xFFFF;
+        cpu->pc = cpu->memory[va] | ((uint16_t)cpu->memory[va + 1] << 8);
     } else {
-        cpu->pc = mem_read32(cpu, vector);
+        cpu->pc = cpu->memory[vector] |
+                  ((uint32_t)cpu->memory[vector + 1] << 8) |
+                  ((uint32_t)cpu->memory[vector + 2] << 16) |
+                  ((uint32_t)cpu->memory[vector + 3] << 24);
     }
 }
 
@@ -1013,8 +1020,8 @@ static void page_fault_exception(m65832_cpu_t *cpu, uint32_t fault_addr, uint8_t
     cpu->faultva = fault_addr;
     cpu->mmucr = (cpu->mmucr & ~MMUCR_FTYPE_MASK) | (fault_type << MMUCR_FTYPE_SHIFT);
     exception_enter(cpu, VEC_PAGE_FAULT, cpu->pc);
-    cpu->trap = TRAP_PAGE_FAULT;
-    cpu->trap_addr = fault_addr;
+    /* Don't set TRAP_PAGE_FAULT -- let the handler run.
+     * The handler will RTI back to the faulting instruction. */
 }
 
 /* Illegal instruction exception - vectors to handler like BRK/TRAP.
@@ -4905,11 +4912,10 @@ uint64_t m65832_run_cycles(m65832_cpu_t *cpu, uint64_t cycles) {
     uint64_t start = cpu->cycles;
     while ((cpu->cycles - start) < cycles && cpu->running && !cpu->stopped) {
         m65832_step(cpu);
-        /* Only stop on truly fatal traps (page fault, illegal op, privilege violation).
-         * BRK, COP, and SYSCALL (TRAP) are normal software interrupts that continue
-         * execution via their respective handlers. */
-        if (cpu->trap == TRAP_PAGE_FAULT || cpu->trap == TRAP_ILLEGAL_OP || 
-            cpu->trap == TRAP_PRIVILEGE || cpu->trap == TRAP_WATCHPOINT) {
+        /* Only stop on truly fatal/debug traps.
+         * Page faults, illegal ops, and privilege violations are vectored
+         * exceptions that continue via their handlers (like BRK/TRAP). */
+        if (cpu->trap == TRAP_WATCHPOINT) {
             break;
         }
     }
