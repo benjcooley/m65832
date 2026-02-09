@@ -203,14 +203,29 @@ tlb_flush_asid:
     RTS
 ```
 
-### 3.6 MMIO Bypass
+### 3.6 MMIO Bypass and System Register Addressing
 
-The system register space ($FFFFF0xx) bypasses MMU translation, allowing the kernel to access MMU registers even when paging is enabled. This is detected in hardware:
+The system register space bypasses MMU translation, allowing the kernel to access
+MMU registers, timer, and other system registers even when paging is enabled.
+
+System registers are accessible at **two address ranges**:
+
+| Mode | Address Range | Example |
+|------|---------------|---------|
+| 8/16-bit (emulation) | `$F000-$F0FF` | `STA $F000` (MMUCR) |
+| 32-bit (native) | `$FFFFF000-$FFFFF0FF` | `STA $FFFFF000` (MMUCR) |
+
+Both ranges map to the same register set. The 16-bit alias `$F0xx` exists for
+compatibility with 65816 emulation mode code that uses 16-bit absolute addressing.
+In the VHDL, this is detected by checking `mem_addr_virt(15 downto 8) = x"F0"`:
 
 ```vhdl
 -- From m65832_core.vhd
 mmu_bypass <= '1' when mem_addr_virt(15 downto 8) = x"F0" else '0';
 ```
+
+Both address ranges bypass the MMU -- no page table entries are needed for system
+register access.
 
 ### 3.7 Enabling the MMU
 
@@ -281,8 +296,9 @@ When an exception occurs:
 
 1. **Save state:** Push PC (32-bit), Push P (including extended bits)
 2. **Set flags:** S=1 (supervisor), I=1 (disable IRQ)
-3. **Load PC:** From appropriate vector
-4. **Continue execution:** In supervisor mode
+3. **Read vector:** From the exception vector table in **physical memory**
+4. **Load PC:** From the vector
+5. **Continue execution:** In supervisor mode at the handler address
 
 ```asm
 ; Exception entry (automatic, done by hardware)
@@ -294,6 +310,23 @@ When an exception occurs:
 ;   [SP+4]  PC byte 2
 ;   [SP+5]  PC byte 3
 ```
+
+**Important: All exceptions are vectored and continue execution.** Page faults,
+illegal instruction traps, and privilege violations are NOT fatal -- they vector to
+their respective handler routines (just like BRK and TRAP). The handler runs in
+supervisor mode and returns via RTI.
+
+**Important: Exception vector reads bypass the MMU.** The vector table at `$FFD0-$FFFF`
+is read from physical memory, not virtual memory. This is critical because exceptions
+can occur when the MMU is enabled, and the vector table page may not have a mapping.
+In the VHDL, vector fetches are performed in the exception state machine which does not
+go through the normal MMU translation pipeline.
+
+For page faults specifically:
+- The faulting virtual address is latched in FAULTVA (`$FFFFF010`)
+- The fault type is written to MMUCR bits 4:3
+- The handler reads FAULTVA and MMUCR to determine the fault cause
+- The handler can fix the page tables (e.g., map the page) and RTI to retry
 
 ### 4.3 Return from Exception
 
