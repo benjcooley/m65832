@@ -466,6 +466,7 @@ EOF
 
 run_test "JSR (dp) indirect call" "test/test_jmp_jsr_dp.asm" "CAFEBABE" 300
 run_test "Register window isolation" "test/test_regwindow.asm" "00000001" 500
+run_test "FPU xfer FTOA/FTOT/ATOF/TTOF" "test/test_fpu_xfer.asm" "00000001" 500
 
 # Summary
 echo
