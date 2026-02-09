@@ -46,22 +46,22 @@ cat > "$CRT0" << 'EOF'
     .text
     .globl _start
 _start:
-    ; Initialize Direct Page to $4000
-    .byte 0xA9, 0x00, 0x40, 0x00, 0x00   ; LDA #$00004000
-    .byte 0x5B                            ; TCD
-    ; Enable register window (RSET)
+    // Initialize Direct Page to $4000
+    .byte 0xA9, 0x00, 0x40, 0x00, 0x00   // LDA #$00004000
+    .byte 0x5B                            // TCD
+    // Enable register window (RSET)
     .byte 0x02, 0x30
-    ; Initialize Stack Pointer to $FFFF
-    .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   ; LDX #$0000FFFF
-    .byte 0x9A                            ; TXS
-    ; Initialize B register to 0 for absolute addressing
-    .byte 0x02, 0x22, 0x00, 0x00, 0x00, 0x00  ; SB #$00000000
-    ; Call main
-    .byte 0x20                            ; JSR opcode
+    // Initialize Stack Pointer to $FFFF
+    .byte 0xA2, 0xFF, 0xFF, 0x00, 0x00   // LDX #$0000FFFF
+    .byte 0x9A                            // TXS
+    // Initialize B register to 0 for absolute addressing
+    .byte 0x02, 0x22, 0x00, 0x00, 0x00, 0x00  // SB #$00000000
+    // Call main
+    .byte 0x20                            // JSR opcode
     .long main
-    ; Get return value from R0 and stop
-    .byte 0xA5, 0x00                      ; LDA dp $00 (R0)
-    .byte 0xDB                            ; STP
+    // Get return value from R0 and stop
+    .byte 0xA5, 0x00                      // LDA dp $00 (R0)
+    .byte 0xDB                            // STP
 EOF
 
 # Create a simple linker script

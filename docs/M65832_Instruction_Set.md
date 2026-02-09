@@ -664,7 +664,7 @@ Increments memory or accumulator by one.
 | Absolute | INC abs | $EE | 3 |
 | Abs Indexed X | INC abs,X | $FE | 3 |
 
-**Flags Affected:** N, Z (not in 32-bit mode)
+**Flags Affected:** N, Z
 
 #### DEC - Decrement
 
@@ -678,7 +678,7 @@ Decrements memory or accumulator by one.
 | Absolute | DEC abs | $CE | 3 |
 | Abs Indexed X | DEC abs,X | $DE | 3 |
 
-**Flags Affected:** N, Z (not in 32-bit mode)
+**Flags Affected:** N, Z
 
 #### INX / INY / DEX / DEY - Index Register Inc/Dec
 

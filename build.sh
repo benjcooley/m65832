@@ -149,6 +149,12 @@ build_llvm_only() {
     echo ""
     echo "Clang: $CLANG"
     echo "LLD:   $LLD"
+    
+    # Rebuild downstream artifacts if they exist but are now stale
+    if [ -d "$SYSROOT_BAREMETAL/lib" ]; then
+        log_info "Checking if sysroot needs rebuild after compiler change..."
+        ensure_sysroot_current
+    fi
 }
 
 show_status() {

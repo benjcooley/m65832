@@ -162,6 +162,13 @@ EOF
 run_all_tests() {
     local failed=0
     
+    # Ensure sysroot/compiler_rt are current before compiler-dependent tests
+    log_section "Checking Build Dependencies"
+    ensure_sysroot_current || {
+        log_error "Failed to ensure sysroot is current"
+        failed=1
+    }
+    
     run_emu_tests || failed=1
     run_asm_tests || failed=1
     run_core_tests || failed=1

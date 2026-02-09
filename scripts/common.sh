@@ -223,6 +223,83 @@ print_config() {
 }
 
 # ============================================================================
+# Dependency Checking
+# ============================================================================
+
+# Check if file A is newer than file B (or B doesn't exist)
+is_newer() {
+    local src="$1"
+    local dst="$2"
+    
+    if [ ! -e "$dst" ]; then
+        return 0  # dst doesn't exist, needs rebuild
+    fi
+    if [ ! -e "$src" ]; then
+        return 1  # src doesn't exist, nothing to compare
+    fi
+    [ "$src" -nt "$dst" ]
+}
+
+# Check if the sysroot needs rebuilding (compiler changed since last build)
+sysroot_is_stale() {
+    local clang_bin="$LLVM_BUILD_FAST/bin/clang"
+    if [ ! -x "$clang_bin" ] && [ -x "$LLVM_BUILD/bin/clang" ]; then
+        clang_bin="$LLVM_BUILD/bin/clang"
+    fi
+    local sysroot_marker="$SYSROOT_BAREMETAL/lib/libc.a"
+    
+    is_newer "$clang_bin" "$sysroot_marker"
+}
+
+# Check if compiler_rt needs rebuilding
+compiler_rt_is_stale() {
+    local clang_bin="$LLVM_BUILD_FAST/bin/clang"
+    if [ ! -x "$clang_bin" ] && [ -x "$LLVM_BUILD/bin/clang" ]; then
+        clang_bin="$LLVM_BUILD/bin/clang"
+    fi
+    local rt_lib="$SYSROOT_BAREMETAL/lib/libcompiler_rt.a"
+    
+    is_newer "$clang_bin" "$rt_lib"
+}
+
+# Ensure the sysroot is up-to-date with the compiler.
+# Rebuilds picolibc sysroot and compiler_rt if clang is newer.
+ensure_sysroot_current() {
+    local needs_rebuild=0
+    
+    if sysroot_is_stale; then
+        log_warn "Sysroot is stale (compiler is newer than sysroot)"
+        needs_rebuild=1
+    fi
+    
+    if [ $needs_rebuild -eq 1 ]; then
+        log_info "Rebuilding sysroot..."
+        if [ -x "$SCRIPT_DIR/build-libc-baremetal.sh" ]; then
+            "$SCRIPT_DIR/build-libc-baremetal.sh" --rebuild
+        elif [ -x "$M65832_DIR/scripts/build-libc-baremetal.sh" ]; then
+            "$M65832_DIR/scripts/build-libc-baremetal.sh" --rebuild
+        else
+            log_error "Cannot find build-libc-baremetal.sh to rebuild sysroot"
+            return 1
+        fi
+    fi
+    
+    if compiler_rt_is_stale; then
+        log_warn "compiler_rt is stale (compiler is newer)"
+        log_info "Rebuilding compiler_rt..."
+        local rt_dir="$LLVM_SRC/m65832-stdlib/compiler-rt"
+        if [ -f "$rt_dir/Makefile" ]; then
+            make -C "$rt_dir" clean install
+        else
+            log_error "Cannot find compiler_rt Makefile at $rt_dir"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# ============================================================================
 # Export for subshells
 # ============================================================================
 

@@ -6,6 +6,7 @@
 #
 # Usage:
 #   ./test.sh                Run all tests
+#   ./test.sh --rebuild-all  Rebuild EVERYTHING (compiler + all libs) then test
 #   ./test.sh --quick        Run quick smoke tests only
 #   ./test.sh --compiler     Run compiler tests only
 #   ./test.sh --emulator     Run emulator tests only
@@ -40,7 +41,29 @@ else
 fi
 
 # Test options
+REBUILD_ALL=false
 TEST_TARGET="${1:---all}"
+
+# Check for --rebuild-all first (can combine with other flags)
+for arg in "$@"; do
+    if [ "$arg" = "--rebuild-all" ]; then
+        REBUILD_ALL=true
+    fi
+done
+
+# If --rebuild-all is the only arg, default to --all
+if [ "$REBUILD_ALL" = true ] && [ "$#" -eq 1 ]; then
+    TEST_TARGET="--all"
+elif [ "$REBUILD_ALL" = true ] && [ "$#" -gt 1 ]; then
+    # Use the first non-rebuild-all arg as target
+    for arg in "$@"; do
+        if [ "$arg" != "--rebuild-all" ]; then
+            TEST_TARGET="$arg"
+            break
+        fi
+    done
+fi
+
 VERBOSE="${VERBOSE:-OFF}"
 
 # Test counters
@@ -128,6 +151,82 @@ run_suite() {
         return 0
     else
         log_fail "$name had failures"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Dependency Checks
+# ============================================================================
+
+# Ensure all build artifacts are current before running tests.
+# If the compiler is newer than the sysroot, rebuild everything.
+ensure_deps_current() {
+    log_section "Checking Build Dependencies"
+    
+    # Check if clang exists
+    local clang_bin="$LLVM_BUILD_FAST/bin/clang"
+    if [ ! -x "$clang_bin" ] && [ -x "$LLVM_BUILD/bin/clang" ]; then
+        clang_bin="$LLVM_BUILD/bin/clang"
+    fi
+    
+    if [ ! -x "$clang_bin" ]; then
+        log_skip "Clang not built - skipping dependency check"
+        return 0
+    fi
+    
+    # Check sysroot freshness
+    if sysroot_is_stale; then
+        log_warn "Sysroot is STALE (compiler is newer than sysroot)"
+        log_info "Rebuilding sysroot to match current compiler..."
+        ensure_sysroot_current || {
+            log_fail "Failed to rebuild sysroot"
+            return 1
+        }
+        log_success "Sysroot rebuilt successfully"
+    else
+        log_success "Sysroot is up-to-date"
+    fi
+    
+    # Check compiler_rt freshness
+    if compiler_rt_is_stale; then
+        log_warn "compiler_rt is STALE (compiler is newer)"
+        log_info "Rebuilding compiler_rt..."
+        ensure_sysroot_current || {
+            log_fail "Failed to rebuild compiler_rt"
+            return 1
+        }
+        log_success "compiler_rt rebuilt successfully"
+    else
+        log_success "compiler_rt is up-to-date"
+    fi
+    
+    return 0
+}
+
+# ============================================================================
+# Rebuild-All Support
+# ============================================================================
+
+# Rebuild the LLVM/Clang compiler from source.
+# This is the top-level step that must happen BEFORE any library rebuilds.
+rebuild_compiler() {
+    log_section "Rebuilding Compiler (ninja)"
+    
+    local llvm_root="$PROJECTS_DIR/llvm-m65832"
+    local build_dir="$llvm_root/build-fast"
+    
+    if [ ! -d "$build_dir" ]; then
+        log_fail "Compiler build directory not found: $build_dir"
+        return 1
+    fi
+    
+    log_info "Running: ninja -C $build_dir clang lld"
+    if ninja -C "$build_dir" clang lld; then
+        log_success "Compiler rebuilt successfully"
+        return 0
+    else
+        log_fail "Compiler rebuild failed"
         return 1
     fi
 }
@@ -300,11 +399,19 @@ test_picolibc() {
         return 1
     fi
     
-    local test_dir="$M65832_DIR/emu/c_tests"
+    # The real picolibc test suite (~170 tests) lives in picolibc-m65832/
+    # and is run via build_and_test.sh (or the python runner directly).
+    local picolibc_dir="$PROJECTS_DIR/picolibc-m65832"
     
-    if [ -x "$test_dir/run_all_picolibc_tests.sh" ]; then
-        cd "$test_dir"
-        if ./run_all_picolibc_tests.sh; then
+    if [ -f "$picolibc_dir/build_and_test.sh" ]; then
+        cd "$picolibc_dir"
+        local picolibc_args=""
+        if [ "$REBUILD_ALL" = true ]; then
+            picolibc_args="--rebuild-all"
+        else
+            picolibc_args="--skip-build"
+        fi
+        if ./build_and_test.sh $picolibc_args; then
             TOTAL_PASS=$((TOTAL_PASS + 1))
             return 0
         else
@@ -313,7 +420,7 @@ test_picolibc() {
         fi
     else
         TOTAL_SKIP=$((TOTAL_SKIP + 1))
-        log_skip "Picolibc test runner not found"
+        log_skip "Picolibc test runner not found at $picolibc_dir/run_picolibc_gtest.py"
         return 1
     fi
 }
@@ -481,6 +588,14 @@ test_smoke() {
 test_all() {
     local failed=0
     
+    # If --rebuild-all, rebuild compiler first (top of the dependency chain)
+    if [ "$REBUILD_ALL" = true ]; then
+        rebuild_compiler || failed=1
+    fi
+    
+    # Ensure sysroot/compiler_rt are current before compiler tests
+    ensure_deps_current || failed=1
+    
     test_emulator_basic || failed=1
     test_assembler || failed=1
     test_vhdl_emu || failed=1
@@ -513,16 +628,26 @@ Test Selection:
   --picolibc, -p        Run picolibc integration tests
   --inline-asm          Run inline assembly tests
 
-Options:
+Build Options:
+  --rebuild-all         Rebuild EVERYTHING before testing:
+                          1. Compiler (ninja -C build-fast clang lld)
+                          2. compiler-rt (soft int64/float)
+                          3. picolibc (clean meson rebuild)
+                          4. crt0.o + libsys.a (startup/syscalls)
+                        Combine with test selection, e.g.:
+                          $0 --rebuild-all --picolibc
+
+General Options:
   --verbose, -v         Verbose output
   --help, -h            Show this help message
 
 Examples:
-  $0                    # Run all tests
+  $0                    # Run all tests (existing build)
+  $0 --rebuild-all      # Rebuild everything, then run all tests
+  $0 --picolibc         # Picolibc tests only (existing build)
+  $0 --rebuild-all -p   # Rebuild everything, then picolibc tests
   $0 --quick            # Quick smoke tests
-  $0 --compiler         # Compiler tests only
   $0 -e -s              # Emulator and assembler tests
-  $0 --vhdl-emu         # VHDL-to-emulator compatibility tests
 
 Prerequisites:
   1. Run ./configure.sh first
@@ -581,6 +706,7 @@ main() {
             test_smoke || failed=1
             ;;
         --compiler|-c)
+            ensure_deps_current || failed=1
             test_compiler_core || failed=1
             ;;
         --emulator|-e)
@@ -596,9 +722,14 @@ main() {
             test_vhdl_emu || failed=1
             ;;
         --picolibc|-p)
+            if [ "$REBUILD_ALL" = true ]; then
+                rebuild_compiler || failed=1
+            fi
+            ensure_deps_current || failed=1
             test_picolibc || failed=1
             ;;
         --inline-asm)
+            ensure_deps_current || failed=1
             test_inline_asm || failed=1
             ;;
         --verbose|-v)
