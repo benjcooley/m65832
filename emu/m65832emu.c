@@ -43,12 +43,12 @@
  * ========================================================================= */
 
 static inline bool is_sysreg(uint32_t addr) {
-    /* System registers at $F000-$F0FF in the 16-bit address space,
-     * and at SYSREG_BASE ($00FFF000) in the full 32-bit address space.
-     * NOTE: The original VHDL checked only bits 15:8 == 0xF0, but that
-     * causes false matches for any address whose low 16 bits are in
-     * $F000-$F0FF (e.g., $0002F0E0). Use full 32-bit comparison instead. */
-    return (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
+    /* System registers are accessible at two address ranges:
+     * - $F000-$F0FF in 8/16-bit emulation mode (matches VHDL bits 15:8 == 0xF0)
+     * - SYSREG_BASE ($00FFF000) + 0x00-0xFF in 32-bit mode
+     * Both ranges map to the same register set. */
+    return (addr >= 0xF000 && addr < 0xF100) ||
+           (addr >= SYSREG_BASE && addr < SYSREG_BASE + 0x100);
 }
 
 /* Forward declarations for exception handling (defined after stack functions) */
@@ -1418,14 +1418,11 @@ static int execute_instruction(m65832_cpu_t *cpu) {
     /* M65832: In native-32 mode, ALL standard ops are 32-bit.
      * The M/X width flags are only used by Extended ALU (.B/.W suffixes).
      * In native mode (E=0), standard instruction widths are always 32-bit. */
-    int width_m, width_x;
-    if (!IS_EMU(cpu)) {
-        width_m = 4;  /* 32-bit accumulator for all standard ops */
-        width_x = 4;  /* 32-bit index for all standard ops */
-    } else {
-        width_m = SIZE_M(cpu);
-        width_x = SIZE_X(cpu);
-    }
+    /* Data width depends on M/X flags in P register:
+     * M=00: 8-bit, M=01: 16-bit, M=10: 32-bit
+     * In emulation mode (E=1), M/X are forced to 8-bit. */
+    int width_m = SIZE_M(cpu);
+    int width_x = SIZE_X(cpu);
     uint32_t addr, val;
     int8_t rel8;
     int16_t rel16;
@@ -3715,9 +3712,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm - use register window when RSET active */
-                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
-                        addr = mem_read32(cpu, reg_addr);
+                        /* Get address from GPR Rm - use register file directly when RSET active */
+                        addr = FLAG_TST(cpu, P_R) ? cpu->regs[rm] : mem_read32(cpu, cpu->d + (rm * 4));
                         uint32_t lo = mem_read32(cpu, addr);
                         uint32_t hi = mem_read32(cpu, addr + 4);
                         uint64_t val64 = (uint64_t)lo | ((uint64_t)hi << 32);
@@ -3731,9 +3727,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm - use register window when RSET active */
-                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
-                        addr = mem_read32(cpu, reg_addr);
+                        /* Get address from GPR Rm - use register file directly when RSET active */
+                        addr = FLAG_TST(cpu, P_R) ? cpu->regs[rm] : mem_read32(cpu, cpu->d + (rm * 4));
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
@@ -3745,9 +3740,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm - use register window when RSET active */
-                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
-                        addr = mem_read32(cpu, reg_addr);
+                        /* Get address from GPR Rm - use register file directly when RSET active */
+                        addr = FLAG_TST(cpu, P_R) ? cpu->regs[rm] : mem_read32(cpu, cpu->d + (rm * 4));
                         uint32_t val32 = mem_read32(cpu, addr);
                         union { uint64_t u; double d; } conv;
                         conv.u = (uint64_t)val32;
@@ -3759,9 +3753,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         uint8_t reg_byte = fetch8(cpu);
                         int freg = (reg_byte >> 4) & 0x0F;
                         int rm = reg_byte & 0x0F;
-                        /* Get address from GPR Rm - use register window when RSET active */
-                        uint32_t reg_addr = FLAG_TST(cpu, P_R) ? (rm * 4) : (cpu->d + (rm * 4));
-                        addr = mem_read32(cpu, reg_addr);
+                        /* Get address from GPR Rm - use register file directly when RSET active */
+                        addr = FLAG_TST(cpu, P_R) ? cpu->regs[rm] : mem_read32(cpu, cpu->d + (rm * 4));
                         union { uint64_t u; double d; } conv;
                         conv.d = cpu->f[freg];
                         mem_write32(cpu, addr, (uint32_t)conv.u);
