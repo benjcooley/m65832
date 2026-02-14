@@ -11,7 +11,7 @@ PREFIX ?= /usr/local
 
 # Source files
 LIB_SRCS = m65832emu.c m65832_6502.c
-SYS_SRCS = uart.c blkdev.c bootrom.c platform.c platform_de25.c platform_kv260.c sandbox_filesystem.c system.c elf_loader.c
+SYS_SRCS = uart.c blkdev.c bootrom.c platform.c platform_de25.c platform_kv260.c sandbox_filesystem.c system.c elf_loader.c debugger.c
 EMU_SRCS = main.c
 LIB_OBJS = $(LIB_SRCS:.c=.o)
 SYS_OBJS = $(SYS_SRCS:.c=.o)
@@ -43,12 +43,13 @@ blkdev.o: blkdev.c blkdev.h m65832emu.h
 bootrom.o: bootrom.c bootrom.h m65832emu.h
 system.o: system.c system.h boot_header.h bootrom.h sandbox_filesystem.h elf_loader.h uart.h blkdev.h platform.h m65832emu.h
 elf_loader.o: elf_loader.c elf_loader.h m65832emu.h
+debugger.o: debugger.c debugger.h system.h elf_loader.h m65832emu.h
 sandbox_filesystem.o: sandbox_filesystem.c sandbox_filesystem.h system.h m65832emu.h
 platform.o: platform.c platform.h platform_de25.h platform_kv260.h
 platform_de25.o: platform_de25.c platform_de25.h platform.h
 platform_kv260.o: platform_kv260.c platform_kv260.h platform.h
 sandbox_filesystem.o: sandbox_filesystem.c sandbox_filesystem.h system.h m65832emu.h
-main.o: main.c m65832emu.h system.h elf_loader.h uart.h blkdev.h
+main.o: main.c m65832emu.h system.h elf_loader.h debugger.h uart.h blkdev.h
 
 clean:
 	rm -f $(LIBRARY) $(EMULATOR) *.o

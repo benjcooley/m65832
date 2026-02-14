@@ -50,11 +50,17 @@ build_tools() {
     
     log_info "Building emulator..."
     make -C "$M65832_DIR/emu" -j "$JOBS"
-    
+
     log_info "Building assembler..."
     make -C "$M65832_DIR/as" -j "$JOBS"
-    
-    log_success "Tools built"
+
+    # Copy binaries to bin/
+    mkdir -p "$TOOLCHAIN_BIN"
+    cp "$M65832_DIR/emu/m65832emu" "$TOOLCHAIN_BIN/m65832emu"
+    cp "$M65832_DIR/as/m65832as" "$TOOLCHAIN_BIN/m65832as"
+    [ -f "$M65832_DIR/emu/edb" ] && cp "$M65832_DIR/emu/edb" "$TOOLCHAIN_BIN/edb"
+
+    log_success "Tools built and installed to bin/"
 }
 
 build_baremetal() {

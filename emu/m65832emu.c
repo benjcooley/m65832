@@ -382,6 +382,8 @@ static inline bool check_watchpoint(m65832_cpu_t *cpu, uint32_t addr, bool is_wr
                 (!is_write && cpu->watchpoints[i].on_read)) {
                 cpu->trap = TRAP_WATCHPOINT;
                 cpu->trap_addr = addr;
+                if (cpu->dbg_irq) *cpu->dbg_irq = 1;
+                if (cpu->dbg_hit_wp) *cpu->dbg_hit_wp = 1;
                 return true;
             }
         }
@@ -417,27 +419,21 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
     if (cpu->num_watchpoints > 0) {
         check_watchpoint(cpu, addr, false);
     }
-    
-    /* Register window: internal register file, never touches memory */
+
+    /* Register window: CPU-internal register file */
     if (IS_REGFILE_ADDR(addr)) {
         uint32_t regval = cpu->regs[REGFILE_INDEX(addr)];
         return (regval >> (((addr & 3)) * 8)) & 0xFF;
     }
-    
-    /* System registers bypass MMU */
+
+    /* System registers: CPU-internal, bypass MMU */
     if (is_sysreg(addr)) {
         uint32_t reg_addr = (addr & 0xFF) & ~3;
         uint32_t val = sysreg_read(cpu, reg_addr);
         return (val >> ((addr & 3) * 8)) & 0xFF;
     }
-    
-    /* Check MMIO regions (also bypass MMU) */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
-    if (r && r->read) {
-        return (uint8_t)r->read(cpu, addr, addr - r->base, 1, r->user);
-    }
-    
-    /* MMU translation (if enabled) */
+
+    /* MMU translation (if enabled) - VA to PA */
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
@@ -446,15 +442,19 @@ static inline uint8_t mem_read8(m65832_cpu_t *cpu, uint32_t addr) {
             return 0xFF;
         }
     }
-    
-    /* Custom memory callback */
+
+    /* Fast path: physical RAM */
+    if (pa < cpu->memory_size) {
+        return cpu->memory[pa];
+    }
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->read) {
+        return (uint8_t)r->read(cpu, (uint32_t)pa, (uint32_t)pa - r->base, 1, r->user);
+    }
     if (cpu->mem_read) {
         return (uint8_t)cpu->mem_read(cpu, (uint32_t)pa, 1, MEM_READ, cpu->mem_user);
-    }
-    
-    /* Flat memory */
-    if (cpu->memory && pa < cpu->memory_size) {
-        return cpu->memory[pa];
     }
     return 0xFF;
 }
@@ -464,8 +464,8 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
     if (cpu->num_watchpoints > 0) {
         check_watchpoint(cpu, addr, true);
     }
-    
-    /* Register window: internal register file, never touches memory */
+
+    /* Register window: CPU-internal register file */
     if (IS_REGFILE_ADDR(addr)) {
         int shift = (addr & 3) * 8;
         uint32_t mask = 0xFF << shift;
@@ -473,54 +473,50 @@ static inline void mem_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t val) {
         *reg = (*reg & ~mask) | ((uint32_t)val << shift);
         return;
     }
-    
+
     /* Invalidate LL/SC reservation if writing to linked address */
     if (cpu->ll_valid && addr == cpu->ll_addr) {
         cpu->ll_valid = false;
     }
-    
-    /* System registers bypass MMU */
+
+    /* System registers: CPU-internal, bypass MMU */
     if (is_sysreg(addr)) {
-        /* Check privilege first before doing read-modify-write */
         if (!FLAG_TST(cpu, P_S)) {
             privilege_violation(cpu);
             return;
         }
-        uint32_t reg_addr = (addr & 0xFF) & ~3;  /* Offset within sysreg page */
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
         uint32_t old = sysreg_read(cpu, reg_addr);
         int shift = (addr & 3) * 8;
         uint32_t mask = 0xFF << shift;
         sysreg_write(cpu, reg_addr, (old & ~mask) | ((uint32_t)val << shift));
         return;
     }
-    
-    /* Check MMIO regions (also bypass MMU) */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
-    if (r && r->write) {
-        r->write(cpu, addr, addr - r->base, val, 1, r->user);
-        return;
-    }
-    
-    /* MMU translation (if enabled) */
+
+    /* MMU translation (if enabled) - VA to PA */
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 1, !FLAG_TST(cpu, P_S))) {
-            /* mmu_translate already set faultva and fault type in mmucr */
             uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
             page_fault_exception(cpu, addr, fault_type);
             return;
         }
     }
-    
-    /* Custom memory callback */
-    if (cpu->mem_write) {
-        cpu->mem_write(cpu, (uint32_t)pa, val, 1, cpu->mem_user);
+
+    /* Fast path: physical RAM */
+    if (pa < cpu->memory_size) {
+        cpu->memory[pa] = val;
         return;
     }
-    
-    /* Flat memory */
-    if (cpu->memory && pa < cpu->memory_size) {
-        cpu->memory[pa] = val;
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->write) {
+        r->write(cpu, (uint32_t)pa, (uint32_t)pa - r->base, val, 1, r->user);
+        return;
+    }
+    if (cpu->mem_write) {
+        cpu->mem_write(cpu, (uint32_t)pa, val, 1, cpu->mem_user);
     }
 }
 
@@ -538,13 +534,7 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
         return (val >> ((addr & 2) * 8)) & 0xFFFF;
     }
 
-    /* MMIO regions bypass MMU */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
-    if (r && r->read) {
-        return (uint16_t)r->read(cpu, addr, addr - r->base, 2, r->user);
-    }
-    
-    /* MMU translation */
+    /* MMU translation - VA to PA */
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
@@ -554,11 +544,18 @@ static inline uint16_t mem_read16(m65832_cpu_t *cpu, uint32_t addr) {
         }
     }
 
+    /* Fast path: physical RAM */
+    if (pa + 1 < cpu->memory_size) {
+        return cpu->memory[pa] | ((uint16_t)cpu->memory[pa + 1] << 8);
+    }
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->read) {
+        return (uint16_t)r->read(cpu, (uint32_t)pa, (uint32_t)pa - r->base, 2, r->user);
+    }
     if (cpu->mem_read) {
         return (uint16_t)cpu->mem_read(cpu, (uint32_t)pa, 2, MEM_READ, cpu->mem_user);
-    }
-    if (cpu->memory && pa < cpu->memory_size && pa + 1 < cpu->memory_size) {
-        return cpu->memory[pa] | ((uint16_t)cpu->memory[pa + 1] << 8);
     }
     return 0xFFFF;
 }
@@ -581,14 +578,7 @@ static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
         return;
     }
 
-    /* MMIO regions bypass MMU */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
-    if (r && r->write) {
-        r->write(cpu, addr, addr - r->base, val, 2, r->user);
-        return;
-    }
-    
-    /* MMU translation */
+    /* MMU translation - VA to PA */
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 1, !FLAG_TST(cpu, P_S))) {
@@ -598,13 +588,21 @@ static inline void mem_write16(m65832_cpu_t *cpu, uint32_t addr, uint16_t val) {
         }
     }
 
-    if (cpu->mem_write) {
-        cpu->mem_write(cpu, (uint32_t)pa, val, 2, cpu->mem_user);
-        return;
-    }
-    if (cpu->memory && pa < cpu->memory_size && pa + 1 < cpu->memory_size) {
+    /* Fast path: physical RAM */
+    if (pa + 1 < cpu->memory_size) {
         cpu->memory[pa] = val & 0xFF;
         cpu->memory[pa + 1] = (val >> 8) & 0xFF;
+        return;
+    }
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->write) {
+        r->write(cpu, (uint32_t)pa, (uint32_t)pa - r->base, val, 2, r->user);
+        return;
+    }
+    if (cpu->mem_write) {
+        cpu->mem_write(cpu, (uint32_t)pa, val, 2, cpu->mem_user);
     }
 }
 
@@ -625,13 +623,7 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
         return sysreg_read(cpu, reg_addr);
     }
 
-    /* Check MMIO regions (bypass MMU) */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
-    if (r && r->read) {
-        return r->read(cpu, addr, addr - r->base, 4, r->user);
-    }
-    
-    /* MMU translation */
+    /* MMU translation - VA to PA */
     uint64_t pa = addr;
     if (cpu->mmucr & MMUCR_PG) {
         if (!mmu_translate(cpu, addr, &pa, 0, !FLAG_TST(cpu, P_S))) {
@@ -641,14 +633,21 @@ static inline uint32_t mem_read32(m65832_cpu_t *cpu, uint32_t addr) {
         }
     }
 
-    if (cpu->mem_read) {
-        return cpu->mem_read(cpu, (uint32_t)pa, 4, MEM_READ, cpu->mem_user);
-    }
-    if (cpu->memory && pa < cpu->memory_size && pa + 3 < cpu->memory_size) {
-        return cpu->memory[pa] | 
+    /* Fast path: physical RAM */
+    if (pa + 3 < cpu->memory_size) {
+        return cpu->memory[pa] |
                ((uint32_t)cpu->memory[pa + 1] << 8) |
                ((uint32_t)cpu->memory[pa + 2] << 16) |
                ((uint32_t)cpu->memory[pa + 3] << 24);
+    }
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->read) {
+        return r->read(cpu, (uint32_t)pa, (uint32_t)pa - r->base, 4, r->user);
+    }
+    if (cpu->mem_read) {
+        return cpu->mem_read(cpu, (uint32_t)pa, 4, MEM_READ, cpu->mem_user);
     }
     return 0xFFFFFFFF;
 }
@@ -677,22 +676,33 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
         return;
     }
 
-    /* Check MMIO regions */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, addr);
+    /* MMU translation - VA to PA */
+    uint64_t pa = addr;
+    if (cpu->mmucr & MMUCR_PG) {
+        if (!mmu_translate(cpu, addr, &pa, 1, !FLAG_TST(cpu, P_S))) {
+            uint8_t fault_type = (cpu->mmucr >> MMUCR_FTYPE_SHIFT) & 0x07;
+            page_fault_exception(cpu, addr, fault_type);
+            return;
+        }
+    }
+
+    /* Fast path: physical RAM */
+    if (pa + 3 < cpu->memory_size) {
+        cpu->memory[pa] = val & 0xFF;
+        cpu->memory[pa + 1] = (val >> 8) & 0xFF;
+        cpu->memory[pa + 2] = (val >> 16) & 0xFF;
+        cpu->memory[pa + 3] = (val >> 24) & 0xFF;
+        return;
+    }
+
+    /* Slow path: MMIO or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
     if (r && r->write) {
-        r->write(cpu, addr, addr - r->base, val, 4, r->user);
+        r->write(cpu, (uint32_t)pa, (uint32_t)pa - r->base, val, 4, r->user);
         return;
     }
-    
     if (cpu->mem_write) {
-        cpu->mem_write(cpu, addr, val, 4, cpu->mem_user);
-        return;
-    }
-    if (cpu->memory && addr < cpu->memory_size && (uint64_t)addr + 3 < cpu->memory_size) {
-        cpu->memory[addr] = val & 0xFF;
-        cpu->memory[addr + 1] = (val >> 8) & 0xFF;
-        cpu->memory[addr + 2] = (val >> 16) & 0xFF;
-        cpu->memory[addr + 3] = (val >> 24) & 0xFF;
+        cpu->mem_write(cpu, (uint32_t)pa, val, 4, cpu->mem_user);
     }
 }
 
@@ -700,19 +710,6 @@ static inline void mem_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t val) {
 static inline uint8_t fetch8(m65832_cpu_t *cpu) {
     uint32_t va = cpu->pc;
     uint8_t val;
-
-    /* System registers bypass MMU (boot ROM at 0xFFFF0000) */
-    if (is_sysreg(va)) {
-        /* Should not normally fetch from sysregs, but boot ROM is nearby */
-    }
-
-    /* Check MMIO regions first (e.g., boot ROM at 0xFFFF0000 bypasses MMU) */
-    m65832_mmio_region_t *r = mmio_find_region(cpu, va);
-    if (r && r->read) {
-        val = (uint8_t)r->read(cpu, va, va - r->base, 1, r->user);
-        cpu->pc++;
-        return val;
-    }
 
     /* MMU translation for instruction fetch (access_type=2 for execute) */
     uint64_t pa = va;
@@ -723,14 +720,21 @@ static inline uint8_t fetch8(m65832_cpu_t *cpu) {
             cpu->pc++;
             return 0xFF;
         }
-        
     }
 
-    /* Custom memory callback */
-    if (cpu->mem_read) {
-        val = (uint8_t)cpu->mem_read(cpu, (uint32_t)pa, 1, MEM_FETCH, cpu->mem_user);
-    } else if (cpu->memory && pa < cpu->memory_size) {
+    /* Fast path: physical RAM */
+    if (pa < cpu->memory_size) {
         val = cpu->memory[pa];
+        cpu->pc++;
+        return val;
+    }
+
+    /* Slow path: MMIO (e.g., boot ROM) or custom callback */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->read) {
+        val = (uint8_t)r->read(cpu, (uint32_t)pa, (uint32_t)pa - r->base, 1, r->user);
+    } else if (cpu->mem_read) {
+        val = (uint8_t)cpu->mem_read(cpu, (uint32_t)pa, 1, MEM_FETCH, cpu->mem_user);
     } else {
         val = 0xFF;
     }
@@ -2891,6 +2895,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
 
         /* ============ Interrupts ============ */
         case 0x00: /* BRK - Software break */
+            if (cpu->dbg_irq) {
+                /* HW debug: back up PC, signal the debugger, stop. */
+                cpu->pc = cpu->inst_pc;
+                *cpu->dbg_hit_bp = 1;
+                *cpu->dbg_irq = 1;
+                cycles = 0;
+                break;
+            }
             /* M65832: BRK pushes PC (the address after the BRK opcode), not PC+1.
              * This differs from 65816 which pushes PC+2 to skip the signature byte.
              * After fetch, cpu->pc points to the byte after BRK, which is the return address. */
@@ -4172,9 +4184,16 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cycles = 6;
             break;
 
-        case 0x42: /* WDM (reserved) */
+        case 0x42: { /* WDM sig -- 2-byte instruction (65816 spec) */
+            uint8_t sig = fetch8(cpu);
+            if (sig == 0x01 && cpu->dbg_irq) {
+                /* "Kernel loaded" signal: debugger re-inserts breakpoints */
+                if (cpu->dbg_kernel_ready) *cpu->dbg_kernel_ready = 1;
+                *cpu->dbg_irq = 1;
+            }
             cycles = 2;
             break;
+        }
 
         /* ============ Flag instructions ============ */
         case 0x18: /* CLC */
@@ -4503,8 +4522,31 @@ size_t m65832_emu_get_memory_size(m65832_cpu_t *cpu) {
 }
 
 uint8_t m65832_emu_read8(m65832_cpu_t *cpu, uint32_t addr) {
-    if (!cpu || !cpu->memory || addr >= cpu->memory_size) return 0xFF;
-    return cpu->memory[addr];
+    if (!cpu) return 0xFF;
+
+    /* MMU translation first (VA -> PA) */
+    uint64_t pa = addr;
+    if (cpu->mmucr & MMUCR_PG) {
+        /* Save and restore fault state so reads don't corrupt CPU state */
+        uint32_t save_faultva = cpu->faultva;
+        uint32_t save_mmucr = cpu->mmucr;
+        if (!mmu_translate(cpu, addr, &pa, 0, false)) {
+            cpu->faultva = save_faultva;
+            cpu->mmucr = save_mmucr;
+            return 0xFF;
+        }
+        cpu->faultva = save_faultva;
+        cpu->mmucr = save_mmucr;
+    }
+
+    /* Check MMIO regions on the physical address */
+    m65832_mmio_region_t *r = mmio_find_region(cpu, (uint32_t)pa);
+    if (r && r->read) {
+        return (uint8_t)r->read(cpu, (uint32_t)pa, (uint32_t)pa - r->base, 1, r->user);
+    }
+
+    if (!cpu->memory || pa >= cpu->memory_size) return 0xFF;
+    return cpu->memory[pa];
 }
 
 void m65832_emu_write8(m65832_cpu_t *cpu, uint32_t addr, uint8_t value) {
@@ -4534,6 +4576,22 @@ void m65832_emu_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t value) {
     m65832_emu_write8(cpu, addr + 1, (value >> 8) & 0xFF);
     m65832_emu_write8(cpu, addr + 2, (value >> 16) & 0xFF);
     m65832_emu_write8(cpu, addr + 3, (value >> 24) & 0xFF);
+}
+
+uint64_t m65832_virt_to_phys(m65832_cpu_t *cpu, uint32_t va) {
+    uint64_t pa = va;
+    if (cpu->mmucr & MMUCR_PG) {
+        uint32_t save_faultva = cpu->faultva;
+        uint32_t save_mmucr = cpu->mmucr;
+        if (!mmu_translate(cpu, va, &pa, 0, false)) {
+            cpu->faultva = save_faultva;
+            cpu->mmucr = save_mmucr;
+            return (uint64_t)-1;
+        }
+        cpu->faultva = save_faultva;
+        cpu->mmucr = save_mmucr;
+    }
+    return pa;
 }
 
 size_t m65832_emu_write_block(m65832_cpu_t *cpu, uint32_t addr,
@@ -4867,15 +4925,9 @@ int m65832_step(m65832_cpu_t *cpu) {
         uint8_t buf[8];
         uint32_t pc = cpu->pc;
         for (int i = 0; i < 8; i++) {
-            /* Read through MMU like fetch8 does */
-            uint64_t pa = pc + i;
-            if (cpu->mmucr & MMUCR_PG) {
-                if (!mmu_translate(cpu, pc + i, &pa, 0, false))
-                    pa = pc + i;  /* Fallback on fault */
-            }
-            buf[i] = (pa < cpu->memory_size) ? cpu->memory[pa] : 0xFF;
+            buf[i] = m65832_emu_read8(cpu, pc + i);
         }
-        cpu->trace_fn(cpu, pc, buf, 1, cpu->trace_user);  /* Simplified */
+        cpu->trace_fn(cpu, pc, buf, 1, cpu->trace_user);
     }
     
     /* Save instruction start PC for fault handling */
@@ -5082,15 +5134,10 @@ void m65832_print_state(m65832_cpu_t *cpu) {
 #include "../as/m65832dis.c"
 
 int m65832_disassemble(m65832_cpu_t *cpu, uint32_t addr, char *buf, size_t bufsize) {
-    /* Read instruction bytes through MMU translation */
+    /* Read instruction bytes through MMU/MMIO (same path as m65832_emu_read8) */
     uint8_t instbuf[8];
     for (int i = 0; i < 8; i++) {
-        uint64_t pa = addr + i;
-        if (cpu->mmucr & MMUCR_PG) {
-            if (!mmu_translate(cpu, addr + i, &pa, 0, false))
-                pa = addr + i;
-        }
-        instbuf[i] = (pa < cpu->memory_size) ? cpu->memory[pa] : 0;
+        instbuf[i] = m65832_emu_read8(cpu, addr + i);
     }
     
     /* Set up context based on CPU state */

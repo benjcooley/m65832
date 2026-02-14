@@ -123,6 +123,14 @@ install_toolchain() {
         log_warn "Assembler not built: $ASM_SRC"
     fi
 
+    # Install debug client
+    local EDB_SRC="$M65832_DIR/emu/edb"
+    if [ -f "$EDB_SRC" ]; then
+        cp "$EDB_SRC" "$DEST/edb"
+        chmod +x "$DEST/edb"
+        log_success "Installed edb"
+    fi
+
     # Preserve any user wrapper scripts (e.g. m65832-linux-clang)
     if [ -f "$LLVM_SRC/bin/m65832-linux-clang" ]; then
         cp "$LLVM_SRC/bin/m65832-linux-clang" "$DEST/m65832-linux-clang"

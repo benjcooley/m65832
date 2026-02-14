@@ -8,6 +8,7 @@
 #include "m65832emu.h"
 #include "system.h"
 #include "elf_loader.h"
+#include "debugger.h"
 #include "uart.h"
 #include "blkdev.h"
 #include "platform.h"
@@ -34,6 +35,9 @@ static uint64_t g_max_cycles = 0;
 static uint64_t g_max_instructions = 0;
 static int g_system_mode = 0;  /* Use system layer instead of raw CPU */
 static int g_stop_on_brk = 0;  /* Stop on BRK instruction (for test harnesses) */
+static elf_symtab_t *g_symbols = NULL;  /* Loaded symbol table for debugging */
+static elf_linetab_t *g_lines = NULL;  /* DWARF line info for source debugging */
+static dbg_state_t *g_debugger = NULL;  /* Remote debug server (--debug) */
 
 /* ============================================================================
  * Signal Handler
@@ -42,6 +46,9 @@ static int g_stop_on_brk = 0;  /* Stop on BRK instruction (for test harnesses) *
 static void signal_handler(int sig) {
     (void)sig;
     g_running = 0;
+    if (g_debugger) {
+        g_debugger->paused = 1;
+    }
     if (g_system) {
         system_stop(g_system);
     } else if (g_cpu) {
@@ -98,9 +105,22 @@ static void trace_callback(m65832_cpu_t *cpu, uint32_t pc,
                          m65832_emu_read8(cpu, pc + i));
     }
     
-    /* Trace format: PC: BYTES  DISASM  | A=... X=... Y=... S=... P=... */
-    printf("%08X: %-36s %-24s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
-           pc, hexbuf, disasm,
+    /* Symbol lookup */
+    char symbuf[48] = "";
+    if (g_symbols) {
+        uint32_t sym_off;
+        const char *sym = elf_lookup_symbol(g_symbols, pc, &sym_off);
+        if (sym) {
+            if (sym_off == 0)
+                snprintf(symbuf, sizeof(symbuf), "<%s>", sym);
+            else
+                snprintf(symbuf, sizeof(symbuf), "<%s+0x%X>", sym, sym_off);
+        }
+    }
+
+    /* Trace format: PC: BYTES  DISASM  SYMBOL  A=... X=... Y=... S=... P=... */
+    printf("%08X: %-36s %-24s %-32s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
+           pc, hexbuf, disasm, symbuf,
            m65832_get_a(cpu), m65832_get_x(cpu), m65832_get_y(cpu),
            m65832_get_s(cpu), m65832_get_p(cpu));
 }
@@ -129,6 +149,8 @@ static void print_usage(const char *prog) {
     printf("  --emulation          Start in 6502 emulation mode (default: 32-bit native)\n");
     printf("  --stop-on-brk        Stop execution on BRK instruction (for test harnesses)\n");
     printf("  --coproc FREQ        Enable 6502 coprocessor at frequency (Hz)\n");
+    printf("  --symbols FILE       Load symbols from ELF for trace/debug\n");
+    printf("  --debug              Start debug server (use 'edb' to send commands)\n");
     printf("\nSystem Mode (Linux boot support):\n");
     printf("  --system             Enable system mode with UART and boot support\n");
     printf("  --ram SIZE           RAM size (e.g., 256M, 1G) (default: 256M)\n");
@@ -229,6 +251,9 @@ static void interactive_mode(m65832_cpu_t *cpu) {
             printf("  coproc             Show 6502 coprocessor state\n");
             printf("  mmio               Show MMIO regions\n");
             printf("  blk, disk          Show block device state\n");
+            printf("Symbols:\n");
+            printf("  sym ADDR           Look up symbol at address\n");
+            printf("  addr NAME          Find address of symbol\n");
             printf("Control:\n");
             printf("  reset              Reset CPU\n");
             printf("  irq [0|1]          Assert/deassert IRQ (default: assert)\n");
@@ -488,7 +513,12 @@ static void interactive_mode(m65832_cpu_t *cpu) {
                     sp += 7;  /* 2-byte P + 4-byte PC */
                 }
                 if (ret_addr == 0 || ret_addr >= cpu->memory_size) break;
-                printf("  #%d  %08X\n", i, ret_addr);
+                uint32_t bt_off;
+                const char *bt_sym = elf_lookup_symbol(g_symbols, ret_addr, &bt_off);
+                if (bt_sym)
+                    printf("  #%d  %08X  <%s+0x%X>\n", i, ret_addr, bt_sym, bt_off);
+                else
+                    printf("  #%d  %08X\n", i, ret_addr);
             }
         }
         else if (strcmp(cmd, "wp") == 0 || strcmp(cmd, "watch") == 0) {
@@ -532,6 +562,36 @@ static void interactive_mode(m65832_cpu_t *cpu) {
                 }
             }
         }
+        else if (strcmp(cmd, "sym") == 0) {
+            if (!g_symbols) {
+                printf("No symbols loaded (use --symbols FILE)\n");
+            } else if (argc >= 2) {
+                uint32_t sym_off;
+                const char *sym = elf_lookup_symbol(g_symbols, arg1, &sym_off);
+                if (sym)
+                    printf("%08X  <%s+0x%X>\n", arg1, sym, sym_off);
+                else
+                    printf("%08X  (no symbol)\n", arg1);
+            } else {
+                printf("Usage: sym ADDR\n");
+            }
+        }
+        else if (strcmp(cmd, "addr") == 0) {
+            if (!g_symbols) {
+                printf("No symbols loaded (use --symbols FILE)\n");
+            } else if (argc >= 2) {
+                /* arg1 was parsed as hex, but we need the raw string */
+                char name[64];
+                sscanf(line, "%*s %63s", name);
+                uint32_t a = elf_find_symbol(g_symbols, name);
+                if (a)
+                    printf("%s = %08X\n", name, a);
+                else
+                    printf("Symbol '%s' not found\n", name);
+            } else {
+                printf("Usage: addr SYMBOL_NAME\n");
+            }
+        }
         else if (strcmp(cmd, "q") == 0 || strcmp(cmd, "quit") == 0 ||
                  strcmp(cmd, "exit") == 0) {
             break;
@@ -573,7 +633,9 @@ int main(int argc, char *argv[]) {
     int load_hex = 0;
     int emulation_mode = 0;
     uint32_t coproc_freq = 0;
-    
+    const char *symbols_file = NULL;
+    int debug_server = 0;
+
     /* System mode options */
     const char *kernel_file = NULL;
     const char *initrd_file = NULL;
@@ -636,6 +698,13 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--coproc") == 0) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             coproc_freq = (uint32_t)strtoul(argv[i], NULL, 0);
+        }
+        else if (strcmp(argv[i], "--symbols") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            symbols_file = argv[i];
+        }
+        else if (strcmp(argv[i], "--debug") == 0) {
+            debug_server = 1;
         }
         /* System mode options */
         else if (strcmp(argv[i], "--system") == 0) {
@@ -746,17 +815,82 @@ int main(int argc, char *argv[]) {
             system_print_info(g_system);
         }
         
+        /* Load symbols and DWARF line info */
+        {
+            const char *elf_file = symbols_file ? symbols_file :
+                (config.kernel_file && elf_is_elf_file(config.kernel_file)) ?
+                config.kernel_file : NULL;
+            if (elf_file) {
+                g_symbols = elf_load_symbols(elf_file, g_verbose);
+                g_lines = elf_load_lines(elf_file, g_verbose);
+            }
+        }
+
         /* Enable tracing if requested */
         if (g_trace_enabled) {
             m65832_set_trace(g_cpu, true, trace_callback, NULL);
         }
-        
+
+        /* Interactive debugger or run */
+        if (interactive) {
+            interactive_mode(g_cpu);
+            elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
+            system_destroy(g_system);
+            return 0;
+        }
+
+        /* Debug server mode */
+        if (debug_server) {
+            g_debugger = dbg_init(g_cpu, g_symbols, g_lines, g_system,
+                                  &g_trace_enabled, trace_callback);
+            if (!g_debugger || dbg_start(g_debugger) != 0) {
+                fprintf(stderr, "Failed to start debug server\n");
+                elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
+                system_destroy(g_system);
+                return 1;
+            }
+            /* Set kernel VA→PA offset from ELF for breakpoint translation */
+            {
+                const char *elf_file = symbols_file ? symbols_file :
+                    (config.kernel_file && elf_is_elf_file(config.kernel_file)) ?
+                    config.kernel_file : NULL;
+                if (elf_file) {
+                    g_debugger->kernel_va_offset = elf_get_va_offset(elf_file);
+                    if (g_verbose && g_debugger->kernel_va_offset) {
+                        printf("Kernel VA offset: 0x%08X\n",
+                               g_debugger->kernel_va_offset);
+                    }
+                }
+            }
+
+            g_running = 1;
+            while (g_running) {
+                if (g_debugger->irq) {
+                    int r = dbg_poll(g_debugger);
+                    if (r < 0) break;
+                    if (r > 0) continue;
+                }
+                m65832_emu_step(g_cpu);
+                if ((g_cpu->inst_count & 0xFF) == 0)
+                    system_poll_devices(g_system);
+            }
+
+            dbg_destroy(g_debugger);
+            g_debugger = NULL;
+            elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
+            system_destroy(g_system);
+            return 0;
+        }
+
         /* Run system */
         g_running = 1;
         clock_t start = clock();
         uint64_t start_cycles = g_cpu->cycles;
         uint64_t start_inst = g_cpu->inst_count;
-        
+
         if (g_max_cycles > 0) {
             system_run(g_system, g_max_cycles);
         } else {
@@ -782,6 +916,8 @@ int main(int argc, char *argv[]) {
             m65832_print_state(g_cpu);
         }
         
+        elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
         system_destroy(g_system);
         return 0;
     }
@@ -826,6 +962,11 @@ int main(int argc, char *argv[]) {
             if (g_verbose) {
                 printf("ELF entry point: 0x%08X\n", elf_entry);
             }
+            /* Auto-load symbols and DWARF from ELF */
+            if (!symbols_file) {
+                g_symbols = elf_load_symbols(filename, g_verbose);
+                g_lines = elf_load_lines(filename, g_verbose);
+            }
         } else if (load_hex) {
             int loaded = m65832_load_hex(g_cpu, filename);
             if (loaded < 0) {
@@ -848,7 +989,13 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-    
+
+    /* Load symbols from explicit --symbols option */
+    if (symbols_file && !g_symbols) {
+        g_symbols = elf_load_symbols(symbols_file, g_verbose);
+        g_lines = elf_load_lines(symbols_file, g_verbose);
+    }
+
     /* Set up entry point */
     if (is_elf) {
         /* ELF provides entry point directly */
@@ -893,24 +1040,50 @@ int main(int argc, char *argv[]) {
     /* Run or enter interactive mode */
     if (interactive) {
         interactive_mode(g_cpu);
+    } else if (debug_server) {
+        /* Debug server mode (legacy) */
+        g_debugger = dbg_init(g_cpu, g_symbols, g_lines, NULL,
+                              &g_trace_enabled, trace_callback);
+        if (!g_debugger || dbg_start(g_debugger) != 0) {
+            fprintf(stderr, "Failed to start debug server\n");
+            elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
+            if (uart) uart_destroy(uart);
+            m65832_emu_close(g_cpu);
+            return 1;
+        }
+
+        g_running = 1;
+        while (g_running) {
+            if (g_debugger->irq) {
+                int r = dbg_poll(g_debugger);
+                if (r < 0) break;
+                if (r > 0) continue;
+            }
+            m65832_emu_step(g_cpu);
+            if (uart) uart_poll(uart);
+        }
+
+        dbg_destroy(g_debugger);
+        g_debugger = NULL;
     } else {
         /* Execute */
         g_running = 1;
         clock_t start = clock();
         uint64_t start_cycles = g_cpu->cycles;
         uint64_t start_inst = g_cpu->inst_count;
-        
+
         while (g_running && m65832_emu_is_running(g_cpu)) {
             int cycles = m65832_emu_step(g_cpu);
             if (cycles < 0) break;
-            
+
             /* Poll UART for input (non-blocking) */
             if (uart) uart_poll(uart);
-            
+
             /* Check limits */
             if (g_max_cycles > 0 && (g_cpu->cycles - start_cycles) >= g_max_cycles) break;
             if (g_max_instructions > 0 && (g_cpu->inst_count - start_inst) >= g_max_instructions) break;
-            
+
             /* Handle traps */
             m65832_trap_t trap = m65832_get_trap(g_cpu);
             if (trap != TRAP_NONE && trap != TRAP_COP && trap != TRAP_SYSCALL) {
@@ -956,6 +1129,8 @@ int main(int argc, char *argv[]) {
     }
     
     /* Clean up */
+    elf_free_symbols(g_symbols);
+    elf_free_lines(g_lines);
     if (uart) uart_destroy(uart);
     m65832_emu_close(g_cpu);
     

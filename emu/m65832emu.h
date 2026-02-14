@@ -461,6 +461,10 @@ struct m65832_cpu {
     bool     running;
     bool     halted;        /* WAI instruction */
     bool     stopped;       /* STP instruction */
+    volatile int *dbg_irq;     /* BRK sets *dbg_irq=1 to interrupt main loop */
+    volatile int *dbg_hit_bp;  /* BRK sets *dbg_hit_bp=1 to signal BP hit  */
+    volatile int *dbg_hit_wp;  /* Watchpoint sets this to signal WP hit    */
+    volatile int *dbg_kernel_ready; /* WDM #$01 sets this to re-insert BPs */
     
     /* Statistics */
     uint64_t inst_count;    /* Instructions executed */
@@ -586,6 +590,13 @@ uint32_t m65832_emu_read32(m65832_cpu_t *cpu, uint32_t addr);
  * Write a 32-bit value to emulator memory (little-endian).
  */
 void m65832_emu_write32(m65832_cpu_t *cpu, uint32_t addr, uint32_t value);
+
+/*
+ * Translate virtual address to physical using current MMU state.
+ * Returns (uint64_t)-1 on translation failure.
+ * Does not modify CPU fault state.
+ */
+uint64_t m65832_virt_to_phys(m65832_cpu_t *cpu, uint32_t va);
 
 /*
  * Copy data into emulator memory.

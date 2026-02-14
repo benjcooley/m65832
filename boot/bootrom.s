@@ -218,13 +218,11 @@ reset_entry:
     ; Wait for ready
     JSR wait_blkdev
 
-    ; Print 'K' to indicate kernel loaded
-    LDA #$4B                    ; 'K'
-    JSR putc
-    LDA #$0D
-    JSR putc
-    LDA #$0A
-    JSR putc
+    ; Print "Kernel loaded\r\n"
+    JSR print_kernel_loaded
+
+    ; Signal debugger: kernel image loaded, re-apply breakpoints
+    .BYTE $42, $01              ; WDM #$01 (raw bytes, not valid in 32-bit asm)
 
     ; -------------------------------------------
     ; Step 6: Write boot_params at 0x1000
@@ -296,6 +294,9 @@ reset_entry:
     ADC R5                      ; + entry_offset
     STA R8                      ; R8 = entry point
 
+    ; Print "Booting...\r\n" (putc preserves R8/R9)
+    JSR print_booting
+
     ; Pass boot_params pointer in R0
     LDA #BOOT_PARAMS_ADDR
     STA R0
@@ -308,20 +309,30 @@ reset_entry:
 ; ============================================================================
 
 ; putc -- Send character in A to UART (polled)
+;   Preserves all registers (A, R8, R9)
 putc:
-    PHA                         ; Save character
+    PHA                         ; [SP+9] Save character
+    LDA R8
+    PHA                         ; [SP+5] Save R8
+    LDA R9
+    PHA                         ; [SP+1] Save R9
 putc_wait:
     LDA #UART_BASE + UART_STATUS
     STA R9
     LDA (R9)                    ; Read UART status
     AND #UART_TX_READY
     BEQ putc_wait               ; Loop until TX ready
-    PLA                         ; Restore character
+    LDA $09,S                   ; Load character from stack
     STA R8
     LDA #UART_BASE + UART_DATA
     STA R9
     LDA R8
     STA (R9)                    ; Write character to UART TX
+    PLA
+    STA R9                      ; Restore R9
+    PLA
+    STA R8                      ; Restore R8
+    PLA                         ; Discard saved character
     RTS
 
 ; wait_blkdev -- Wait for block device READY status
@@ -334,7 +345,69 @@ blkdev_poll:
     BEQ blkdev_poll             ; Loop until READY
     RTS
 
-; boot_error -- Print 'E' and halt
+; print_kernel_loaded -- Print "Kernel loaded\r\n"
+print_kernel_loaded:
+    LDA #$4B ; 'K'
+    JSR putc
+    LDA #$65 ; 'e'
+    JSR putc
+    LDA #$72 ; 'r'
+    JSR putc
+    LDA #$6E ; 'n'
+    JSR putc
+    LDA #$65 ; 'e'
+    JSR putc
+    LDA #$6C ; 'l'
+    JSR putc
+    LDA #$20 ; ' '
+    JSR putc
+    LDA #$6C ; 'l'
+    JSR putc
+    LDA #$6F ; 'o'
+    JSR putc
+    LDA #$61 ; 'a'
+    JSR putc
+    LDA #$64 ; 'd'
+    JSR putc
+    LDA #$65 ; 'e'
+    JSR putc
+    LDA #$64 ; 'd'
+    JSR putc
+    LDA #$0D
+    JSR putc
+    LDA #$0A
+    JSR putc
+    RTS
+
+; print_booting -- Print "Booting...\r\n"
+print_booting:
+    LDA #$42 ; 'B'
+    JSR putc
+    LDA #$6F ; 'o'
+    JSR putc
+    LDA #$6F ; 'o'
+    JSR putc
+    LDA #$74 ; 't'
+    JSR putc
+    LDA #$69 ; 'i'
+    JSR putc
+    LDA #$6E ; 'n'
+    JSR putc
+    LDA #$67 ; 'g'
+    JSR putc
+    LDA #$2E ; '.'
+    JSR putc
+    LDA #$2E ; '.'
+    JSR putc
+    LDA #$2E ; '.'
+    JSR putc
+    LDA #$0D
+    JSR putc
+    LDA #$0A
+    JSR putc
+    RTS
+
+; boot_error -- Print "ERR\r\n" and halt
 boot_error:
     LDA #$45                    ; 'E'
     JSR putc
