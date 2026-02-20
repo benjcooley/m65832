@@ -9,6 +9,9 @@ CFLAGS ?= -O3 -Wall -Wextra -std=c99 -march=native
 LDFLAGS ?=
 PREFIX ?= /usr/local
 
+# Project toolchain bin directory (auto-deploy target)
+TOOLCHAIN_BIN = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))../bin
+
 # Source files
 LIB_SRCS = m65832emu.c m65832_6502.c
 SYS_SRCS = uart.c blkdev.c bootrom.c platform.c platform_de25.c platform_kv260.c sandbox_filesystem.c system.c elf_loader.c debugger.c
@@ -21,9 +24,15 @@ EMU_OBJS = $(EMU_SRCS:.c=.o)
 LIBRARY = libm65832emu.a
 EMULATOR = m65832emu
 
-.PHONY: all clean install uninstall test debug check profile
+.PHONY: all clean install uninstall test debug check profile deploy
 
-all: $(LIBRARY) $(EMULATOR)
+all: $(LIBRARY) $(EMULATOR) deploy
+
+# Auto-deploy to project toolchain bin/ after build
+deploy: $(EMULATOR)
+	@mkdir -p $(TOOLCHAIN_BIN)
+	@cp -f $(EMULATOR) $(TOOLCHAIN_BIN)/$(EMULATOR)
+	@echo "  DEPLOY  $(TOOLCHAIN_BIN)/$(EMULATOR)"
 
 # Library
 $(LIBRARY): $(LIB_OBJS)

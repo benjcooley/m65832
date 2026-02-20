@@ -1,0 +1,29 @@
+#!/bin/bash
+# edb - M65832 Emulator Debug Client
+#
+# Usage:  edb <command>
+#         edb reg
+#         edb "b 8054BF30"
+#         edb c
+#         edb "step 10"
+#         edb wait       # blocks until CPU stops
+#
+# The emulator must be running with --debug.
+
+SOCK="${M65832_DBG_SOCK:-/tmp/m65832-dbg.sock}"
+
+if [ ! -S "$SOCK" ]; then
+    echo "Error: no emulator debug server (start with --debug)" >&2
+    exit 1
+fi
+
+if [ $# -eq 0 ]; then
+    echo "Usage: edb <command>" >&2
+    echo "Commands: reg mem dis bt sys tlb sym addr" >&2
+    echo "          b bc bl wp wc wl pc a x y w" >&2
+    echo "          c s [N] r [N] pause wait trace status" >&2
+    echo "          reset irq nmi q help" >&2
+    exit 1
+fi
+
+echo "$*" | nc -U "$SOCK"

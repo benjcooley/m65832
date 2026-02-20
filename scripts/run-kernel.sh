@@ -68,6 +68,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --debug)     DEBUG=1; shift ;;
         --trace)     TRACE=1; shift ;;
+        --trace-ring) EXTRA_ARGS="$EXTRA_ARGS --trace-ring $2"; shift 2 ;;
         --verbose|-v) VERBOSE=1; shift ;;
         --kernel)    KERNEL_ELF="$2"; shift 2 ;;
         --ram)       RAM_SIZE="$2"; shift 2 ;;

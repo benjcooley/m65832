@@ -468,6 +468,103 @@ run_test "JSR (dp) indirect call" "test/test_jmp_jsr_dp.asm" "CAFEBABE" 300
 run_test "Register window isolation" "test/test_regwindow.asm" "00000001" 500
 run_test "FPU xfer FTOA/FTOT/ATOF/TTOF" "test/test_fpu_xfer.asm" "00000001" 500
 
+# W_mode (32-bit native mode) width tests
+echo
+echo "--- W_mode Width Tests ---"
+
+# Test: W_mode forces 32-bit accumulator width
+cat > test/test_wmode_acc.asm << 'EOF'
+; W_mode: LDA/STA round-trip through 32-bit absolute address
+    .org $1000
+    .M32
+
+    LDA #$AABBCCDD   ; 32-bit immediate load
+    STA $00002000     ; Extended ALU 32-bit absolute store
+    LDA #$00000000   ; Clear A
+    LDA $00002000     ; Extended ALU 32-bit absolute load
+    STP
+EOF
+
+run_test "W_mode 32-bit accumulator" "test/test_wmode_acc.asm" "AABBCCDD" 200
+
+# Test: W_mode forces 32-bit index width (X forced to 32-bit)
+cat > test/test_wmode_idx.asm << 'EOF'
+; W_mode: LDX/STX should operate on full 32 bits
+    .org $1000
+    .M32
+
+    LDX #$11223344   ; 32-bit index load
+    TXA              ; A = X (should be full 32-bit value)
+    STP
+EOF
+
+run_test "W_mode 32-bit index" "test/test_wmode_idx.asm" "11223344" 200
+
+# Test: W_mode Y register also 32-bit
+cat > test/test_wmode_y.asm << 'EOF'
+; W_mode: LDY should also be 32-bit (X width forced)
+    .org $1000
+    .M32
+
+    LDY #$DEADBEEF   ; 32-bit Y load
+    TYA              ; A = Y
+    STP
+EOF
+
+run_test "W_mode 32-bit Y register" "test/test_wmode_y.asm" "DEADBEEF" 200
+
+# Test: W_mode ADC operates on 32 bits
+cat > test/test_wmode_alu.asm << 'EOF'
+; W_mode: ALU operations should use 32-bit width
+    .org $1000
+    .M32
+
+    CLC
+    LDA #$0000FFFF
+    ADC #$00000001   ; Should produce $00010000 (32-bit carry propagation)
+    STP
+EOF
+
+run_test "W_mode 32-bit ALU" "test/test_wmode_alu.asm" "00010000" 200
+
+# 16-bit mode via M/X flags (not forced to 8-bit)
+echo
+echo "--- 16-bit Flag Width Tests ---"
+
+# Test: SEP #$40 enables 16-bit accumulator (M0=1)
+cat > test/test_16bit_acc.asm << 'EOF'
+; Switch from 32-bit to 16-bit accumulator via REP/SEP
+    .org $1000
+    .M32
+
+    ; Start in 32-bit mode (M = "10")
+    ; To get 16-bit (M = "01"), clear M1 and set M0
+    REP #$80        ; Clear M1
+    SEP #$40        ; Set M0 -> M = "01" (16-bit)
+    .M16            ; Tell assembler
+    LDA #$1234      ; 16-bit immediate load
+    STP
+EOF
+
+run_test "16-bit accumulator via REP/SEP" "test/test_16bit_acc.asm" "00001234" 100
+
+# Test: 16-bit index via REP/SEP
+cat > test/test_16bit_idx.asm << 'EOF'
+; Switch from 32-bit to 16-bit index via REP/SEP
+    .org $1000
+    .M32
+
+    ; Start in 32-bit (X = "10"), switch to 16-bit (X = "01")
+    REP #$20        ; Clear X1
+    SEP #$10        ; Set X0 -> X = "01" (16-bit)
+    .X16            ; Tell assembler
+    LDX #$ABCD      ; 16-bit X load
+    TXA              ; A = X (should be $ABCD in lower 16 bits)
+    STP
+EOF
+
+run_test "16-bit index via REP/SEP" "test/test_16bit_idx.asm" "0000ABCD" 100
+
 # Summary
 echo
 echo "=== Results ==="

@@ -50,7 +50,7 @@ architecture sim of tb_M65832_Core is
     ---------------------------------------------------------------------------
     -- Trace Controls (disable for faster sims)
     ---------------------------------------------------------------------------
-    constant TRACE_MEM_WRITES  : boolean := false;
+    constant TRACE_MEM_WRITES  : boolean := true;
     constant TRACE_FIRST_CYCLES : boolean := false;
     
     ---------------------------------------------------------------------------

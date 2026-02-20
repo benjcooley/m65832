@@ -534,7 +534,7 @@ begin
         X_WIDTH     => X_width,
         
         WIDTH_M     => M_width_eff,
-        WIDTH_X     => X_width
+        WIDTH_X     => X_width_eff
     );
     
     ---------------------------------------------------------------------------
@@ -1445,7 +1445,9 @@ X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
                                     -- Absolute modes - done after 2 bytes
                                     if IS_JSR = '1' then
                                         -- JSR: capture return address, then push it to stack
-                                        jsr_return <= std_logic_vector(unsigned(PC_reg) - 1);
+                                        -- PC_reg points to the last byte of the instruction (not yet incremented)
+                                        -- 6502 convention: push address of last instruction byte; RTS adds 1
+                                        jsr_return <= PC_reg;
                                         data_byte_count <= (others => '0');
                                         state <= ST_PUSH;  -- Push return address, then execute
                                     elsif ext_lea = '1' then

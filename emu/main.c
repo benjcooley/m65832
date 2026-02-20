@@ -39,6 +39,20 @@ static elf_symtab_t *g_symbols = NULL;  /* Loaded symbol table for debugging */
 static elf_linetab_t *g_lines = NULL;  /* DWARF line info for source debugging */
 static dbg_state_t *g_debugger = NULL;  /* Remote debug server (--debug) */
 
+/* Ring buffer trace: stores last N instructions for post-crash analysis */
+typedef struct {
+    uint32_t pc;
+    uint32_t a, x, y, s;
+    uint16_t p;
+    char disasm[48];
+    char symbol[48];
+} trace_entry_t;
+
+static trace_entry_t *g_trace_ring = NULL;
+static int g_trace_ring_size = 0;
+static int g_trace_ring_pos = 0;   /* next write position */
+static int g_trace_ring_count = 0; /* total entries written */
+
 /* ============================================================================
  * Signal Handler
  * ========================================================================= */
@@ -67,6 +81,8 @@ static void write_hex(int fd, uint32_t val) {
     buf[8] = ' ';
     (void)write(fd, buf, 9);
 }
+static void trace_ring_dump(void);  /* forward decl */
+
 static void crash_handler(int sig) {
     const char msg[] = "\n*** EMU CRASH ***\nPC=";
     (void)write(STDERR_FILENO, msg, sizeof(msg)-1);
@@ -80,6 +96,7 @@ static void crash_handler(int sig) {
         write_hex(STDERR_FILENO, g_cpu->inst_pc);
         (void)write(STDERR_FILENO, "\n", 1);
     }
+    trace_ring_dump();
     signal(sig, SIG_DFL);
     raise(sig);
 }
@@ -93,18 +110,10 @@ static void trace_callback(m65832_cpu_t *cpu, uint32_t pc,
     (void)opcode;
     (void)len;
     (void)user;
-    
+
     char disasm[64];
     int inst_len = m65832_disassemble(cpu, pc, disasm, sizeof(disasm));
-    
-    /* Show hex bytes for instruction (up to 12 bytes for largest extended ops) */
-    char hexbuf[48];
-    int hpos = 0;
-    for (int i = 0; i < inst_len && i < 12; i++) {
-        hpos += snprintf(hexbuf + hpos, sizeof(hexbuf) - hpos, "%02X ", 
-                         m65832_emu_read8(cpu, pc + i));
-    }
-    
+
     /* Symbol lookup */
     char symbuf[48] = "";
     if (g_symbols) {
@@ -118,11 +127,65 @@ static void trace_callback(m65832_cpu_t *cpu, uint32_t pc,
         }
     }
 
+    /* Ring buffer mode: store entry silently */
+    if (g_trace_ring) {
+        trace_entry_t *e = &g_trace_ring[g_trace_ring_pos];
+        e->pc = pc;
+        e->a = m65832_get_a(cpu);
+        e->x = m65832_get_x(cpu);
+        e->y = m65832_get_y(cpu);
+        e->s = m65832_get_s(cpu);
+        e->p = m65832_get_p(cpu);
+        snprintf(e->disasm, sizeof(e->disasm), "%s", disasm);
+        snprintf(e->symbol, sizeof(e->symbol), "%s", symbuf);
+        g_trace_ring_pos = (g_trace_ring_pos + 1) % g_trace_ring_size;
+        g_trace_ring_count++;
+
+        /* Detect crash: PC in low memory (NULL pointer dereference) */
+        if (pc < 0x1000 && g_trace_ring_count > 100) {
+            trace_ring_dump();
+            /* Disable ring buffer so we don't overwrite the dump */
+            free(g_trace_ring);
+            g_trace_ring = NULL;
+            m65832_set_trace(cpu, false, NULL, NULL);
+        }
+        return;
+    }
+
+    /* Show hex bytes for instruction (up to 12 bytes for largest extended ops) */
+    char hexbuf[48];
+    int hpos = 0;
+    for (int i = 0; i < inst_len && i < 12; i++) {
+        hpos += snprintf(hexbuf + hpos, sizeof(hexbuf) - hpos, "%02X ",
+                         m65832_emu_read8(cpu, pc + i));
+    }
+
     /* Trace format: PC: BYTES  DISASM  SYMBOL  A=... X=... Y=... S=... P=... */
     printf("%08X: %-36s %-24s %-32s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
            pc, hexbuf, disasm, symbuf,
            m65832_get_a(cpu), m65832_get_x(cpu), m65832_get_y(cpu),
            m65832_get_s(cpu), m65832_get_p(cpu));
+}
+
+/* Dump the ring buffer trace to stderr */
+static void trace_ring_dump(void) {
+    if (!g_trace_ring || g_trace_ring_count == 0) return;
+
+    int total = (g_trace_ring_count < g_trace_ring_size) ?
+                 g_trace_ring_count : g_trace_ring_size;
+    int start = (g_trace_ring_count < g_trace_ring_size) ?
+                 0 : g_trace_ring_pos;
+
+    fprintf(stderr, "\n=== Last %d instructions before crash ===\n", total);
+    for (int i = 0; i < total; i++) {
+        int idx = (start + i) % g_trace_ring_size;
+        trace_entry_t *e = &g_trace_ring[idx];
+        fprintf(stderr, "%08X: %-24s %-32s A=%08X X=%08X Y=%08X S=%08X P=%04X\n",
+                e->pc, e->disasm, e->symbol,
+                e->a, e->x, e->y, e->s, e->p);
+    }
+    fprintf(stderr, "=== End trace (total %llu instructions) ===\n",
+            (unsigned long long)g_trace_ring_count);
 }
 
 /* ============================================================================
@@ -150,6 +213,7 @@ static void print_usage(const char *prog) {
     printf("  --stop-on-brk        Stop execution on BRK instruction (for test harnesses)\n");
     printf("  --coproc FREQ        Enable 6502 coprocessor at frequency (Hz)\n");
     printf("  --symbols FILE       Load symbols from ELF for trace/debug\n");
+    printf("  --trace-ring N       Keep last N instructions in ring buffer (dump on crash)\n");
     printf("  --debug              Start debug server (use 'edb' to send commands)\n");
     printf("\nSystem Mode (Linux boot support):\n");
     printf("  --system             Enable system mode with UART and boot support\n");
@@ -703,6 +767,11 @@ int main(int argc, char *argv[]) {
             if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
             symbols_file = argv[i];
         }
+        else if (strcmp(argv[i], "--trace-ring") == 0) {
+            if (++i >= argc) { fprintf(stderr, "Missing argument for %s\n", argv[i-1]); return 1; }
+            g_trace_ring_size = (int)strtoul(argv[i], NULL, 0);
+            g_trace_enabled = 1;  /* ring buffer implies tracing */
+        }
         else if (strcmp(argv[i], "--debug") == 0) {
             debug_server = 1;
         }
@@ -826,6 +895,15 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        /* Allocate ring buffer if requested */
+        if (g_trace_ring_size > 0) {
+            g_trace_ring = calloc(g_trace_ring_size, sizeof(trace_entry_t));
+            if (!g_trace_ring) {
+                fprintf(stderr, "Failed to allocate trace ring buffer\n");
+                return 1;
+            }
+        }
+
         /* Enable tracing if requested */
         if (g_trace_enabled) {
             m65832_set_trace(g_cpu, true, trace_callback, NULL);
@@ -896,7 +974,10 @@ int main(int argc, char *argv[]) {
         } else {
             system_run_until_halt(g_system);
         }
-        
+
+        /* Dump ring buffer trace if present */
+        trace_ring_dump();
+
         clock_t end = clock();
         double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
         uint64_t cycles_run = g_cpu->cycles - start_cycles;
@@ -1028,11 +1109,16 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    /* Allocate ring buffer if requested */
+    if (g_trace_ring_size > 0 && !g_trace_ring) {
+        g_trace_ring = calloc(g_trace_ring_size, sizeof(trace_entry_t));
+    }
+
     /* Enable tracing if requested */
     if (g_trace_enabled && !interactive) {
         m65832_set_trace(g_cpu, true, trace_callback, NULL);
     }
-    
+
     if (g_verbose) {
         m65832_print_state(g_cpu);
     }

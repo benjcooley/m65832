@@ -1480,7 +1480,8 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                                        strcmp(mnemonic, "ADC") == 0 || strcmp(mnemonic, "SBC") == 0 ||
                                        strcmp(mnemonic, "AND") == 0 || strcmp(mnemonic, "ORA") == 0 ||
                                        strcmp(mnemonic, "EOR") == 0 || strcmp(mnemonic, "CMP") == 0 ||
-                                       strcmp(mnemonic, "BIT") == 0);
+                                       strcmp(mnemonic, "BIT") == 0 || strcmp(mnemonic, "TSB") == 0 ||
+                                       strcmp(mnemonic, "TRB") == 0 || strcmp(mnemonic, "STZ") == 0);
         /* Pre-parse operand to check addressing mode for 32-bit routing.
          * DP-based modes don't need extended ALU -- standard opcodes handle them. */
         int is_dp_mode = 0;
@@ -1564,6 +1565,18 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
 
                 int mem_dest_case = 0;
                 if (!dest_starts_reg && ext_alu->allows_mem_dest) {
+                    /* For store-type instructions (STA, STZ, TSB, TRB) without
+                     * comma, the single operand is the memory destination and A
+                     * is the implicit source.  The no-comma path above sets
+                     * dest_str="A" / src_str=operand, but we need the operand
+                     * as the memory destination here. */
+                    if (!comma && (strcmp(mnemonic, "STA") == 0 ||
+                                   strcmp(mnemonic, "STZ") == 0 ||
+                                   strcmp(mnemonic, "TSB") == 0 ||
+                                   strcmp(mnemonic, "TRB") == 0)) {
+                        dest_str = src_str;
+                        src_str = "A";
+                    }
                     Operand mem_op;
                     if (!parse_operand(as, dest_str, &mem_op)) {
                         return 0;

@@ -1426,23 +1426,30 @@ static bool ext_read_source(m65832_cpu_t *cpu, uint8_t addr_mode, int width, uin
 static int execute_instruction(m65832_cpu_t *cpu) {
     uint8_t opcode = fetch8(cpu);
     int cycles = 2;  /* Base cycles */
-    /* M65832: In native-32 mode, ALL standard ops are 32-bit.
-     * The M/X width flags are only used by Extended ALU (.B/.W suffixes).
-     * In native mode (E=0), standard instruction widths are always 32-bit. */
-    /* Data width depends on M/X flags in P register:
-     * M=00: 8-bit, M=01: 16-bit, M=10: 32-bit
-     * In emulation mode (E=1), M/X are forced to 8-bit. */
-    int width_m = SIZE_M(cpu);
-    int width_x = SIZE_X(cpu);
+    /* M65832 width handling:
+     * - Emulation mode (E=1): All operations are 8-bit (M/X flags ignored)
+     * - Native mode (E=0) with M/X=00 or 01: Operations use M/X flag widths (8/16-bit)
+     * - Native-32 mode (E=0, M=10, X=10): Standard instructions are 32-bit (M/X flags used only by Extended ALU)
+     * The M/X flags must be explicitly set to 10 for 32-bit mode via REPE/SEPE instructions.
+     */
+    int width_m, width_x;
+    
+    if (WIDTH_M(cpu) == WIDTH_32) {
+        /* W_mode: M flags = 10 (32-bit) forces both M and X to 32-bit.
+         * X flags are ignored; only Extended ALU uses explicit widths. */
+        width_m = 4;
+        width_x = 4;
+    } else {
+        /* M65832 uses raw M/X flag widths in ALL modes (emulation and native).
+         * Unlike the 65816, the M65832 does NOT force 8-bit in emulation mode. */
+        width_m = SIZE_M(cpu);
+        width_x = SIZE_X(cpu);
+    }
+    
     uint32_t addr, val;
     int8_t rel8;
     int16_t rel16;
     uint8_t ext_op;
-
-    /* M65832: When M is 32-bit, X is also forced to 32-bit (matches VHDL) */
-    if (width_m == 4) {
-        width_x = 4;
-    }
 
     switch (opcode) {
         /* ============ LDA ============ */
@@ -4523,6 +4530,14 @@ size_t m65832_emu_get_memory_size(m65832_cpu_t *cpu) {
 
 uint8_t m65832_emu_read8(m65832_cpu_t *cpu, uint32_t addr) {
     if (!cpu) return 0xFF;
+
+    /* System registers: read from CPU state, not raw memory */
+    if (is_sysreg(addr)) {
+        uint32_t reg_addr = (addr & 0xFF) & ~3;
+        uint32_t val = sysreg_read(cpu, reg_addr);
+        int shift = (addr & 3) * 8;
+        return (uint8_t)(val >> shift);
+    }
 
     /* MMU translation first (VA -> PA) */
     uint64_t pa = addr;

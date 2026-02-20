@@ -114,6 +114,33 @@ stz_ops:
     STZ.B R0               ; $02 $97 - Store zero byte to DP
     STZ.W R0               ; $02 $97 - Store zero word to DP
 
+; ==== Store to absolute addresses (32-bit and B-relative) ====
+store_abs:
+    ; STA to 32-bit absolute (no comma, extended ALU)
+    STA $00002000              ; ST A to 32-bit absolute $00002000
+    STA $DEADBEEF              ; ST A to 32-bit absolute $DEADBEEF
+    STA B+$1000                ; ST A to B-relative $1000
+    STA B+$1000,X              ; ST A to B-relative $1000,X
+    STA B+$1000,Y              ; ST A to B-relative $1000,Y
+
+    ; LDA from 32-bit absolute
+    LDA $00002000              ; LD A from 32-bit absolute $00002000
+    LDA B+$1000                ; LD A from B-relative $1000
+
+    ; STZ to 32-bit absolute
+    STZ $00002000              ; STZ to 32-bit absolute
+    STZ B+$1000                ; STZ to B-relative
+
+    ; TSB/TRB to 32-bit absolute
+    TSB $00002000              ; TSB 32-bit absolute
+    TRB $00002000              ; TRB 32-bit absolute
+    TSB B+$1000                ; TSB B-relative
+    TRB B+$1000                ; TRB B-relative
+
+    ; STA with size suffix to absolute
+    STA.B $00002000            ; ST.B A to 32-bit absolute
+    STA.W $00002000            ; ST.W A to 32-bit absolute
+
 ; ==== Register-targeted operations with LD/ST ====
 reg_target:
     LD.B R0, #$11          ; Register R0 target, byte immediate
