@@ -198,6 +198,7 @@ architecture rtl of M65832_Core is
     signal illegal_jsl                             : std_logic;  -- JSL illegal in 32-bit mode
     signal illegal_jml                             : std_logic;  -- JML illegal in 32-bit mode
     signal illegal_rtl                             : std_logic;  -- RTL illegal in 32-bit mode
+    signal illegal_long                            : std_logic;  -- Long addressing illegal in 32-bit mode
     signal dp_addr_unaligned                       : std_logic;
     
     ---------------------------------------------------------------------------
@@ -695,6 +696,9 @@ X_width_eff <= get_index_width(X_flag_s, W_mode_reg);
     illegal_jsl <= '1' when (IS_JSL = '1' and W_mode = '1') else '0';
     illegal_jml <= '1' when (IS_JML = '1' and W_mode = '1') else '0';
     illegal_rtl <= '1' when (IS_RTL = '1' and W_mode = '1') else '0';
+    -- Long addressing (24-bit) is illegal in 32-bit mode — use extended ALU instead
+    -- This catches all cc=11 bbb=011 (long) and bbb=111 (long,X) ALU ops
+    illegal_long <= '1' when (IS_ALU_OP = '1' and ADDR_MODE = "1111" and W_mode = '1') else '0';
     
     -- DP alignment check for R_mode: DP address must be multiple of 4
     -- dp_addr_unaligned is computed in dp_reg_index_next process
@@ -974,7 +978,7 @@ X_width_eff <= get_index_width(X_flag_s, W_mode_reg);
                     data_byte_count <= (others => '0');
                     int_vector_addr <= VEC_PGFAULT;
                     state <= ST_PUSH;
-                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1' or illegal_jsl = '1' or illegal_jml = '1' or illegal_rtl = '1') and ext_fpu_trap = '0' and 
+                elsif (ILLEGAL_OP = '1' or illegal_regalu = '1' or illegal_dp_align = '1' or illegal_jsl = '1' or illegal_jml = '1' or illegal_rtl = '1' or illegal_long = '1') and ext_fpu_trap = '0' and
                       (state = ST_DECODE or state = ST_ADDR1) and
                       int_in_progress = '0' and rti_in_progress = '0' then
                     int_in_progress <= '1';

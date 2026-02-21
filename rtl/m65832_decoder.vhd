@@ -815,9 +815,10 @@ begin
                             case bbb is
                                 when "000" => ADDR_MODE <= "1101"; INSTR_LEN <= "010";  -- sr,S
                                 when "001" => ADDR_MODE <= "1011"; INSTR_LEN <= "010";  -- [dp]
-                                when "010" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long
-                                when "011" => ADDR_MODE <= "1110"; INSTR_LEN <= "010";  -- (sr,S),Y
-                                when "100" => ADDR_MODE <= "1100"; INSTR_LEN <= "010";  -- [dp],Y
+                                -- bbb=010: implied ops (PLB/PHD/PLD/etc) handled individually above
+                                when "011" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long
+                                when "100" => ADDR_MODE <= "1110"; INSTR_LEN <= "010";  -- (sr,S),Y
+                                when "101" => ADDR_MODE <= "1100"; INSTR_LEN <= "010";  -- [dp],Y
                                 when "111" => ADDR_MODE <= "1111"; INSTR_LEN <= "100";  -- long,X
                                 when others => null;
                             end case;

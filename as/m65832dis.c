@@ -22,11 +22,17 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* Disassembler context - tracks processor state */
+/* Disassembler context - tracks processor state
+ * m_flag/x_flag values match WMODE encoding:
+ *   0 = 6502 emulation (8-bit)
+ *   1 = 65816 native (16-bit)
+ *   3 = M65832 32-bit native
+ */
 typedef struct {
-    int m_flag;     /* 0=8-bit A, 1=16-bit A, 2=32-bit A */
-    int x_flag;     /* 0=8-bit X/Y, 1=16-bit X/Y, 2=32-bit X/Y */
+    int m_flag;     /* WMODE: 0=8-bit, 1=16-bit, 3=32-bit */
+    int x_flag;     /* WMODE: 0=8-bit, 1=16-bit, 3=32-bit */
     int emu_mode;   /* 1=emulation mode (6502 compatible) */
+    int r_flag;     /* 1=register window enabled (DP accesses are Rn) */
 } M65832DisCtx;
 
 /* Initialize context with default settings */
@@ -135,44 +141,44 @@ typedef struct {
 
 /* Standard 6502/65816 opcode table */
 static const OpcodeEntry opcode_table[256] = {
-    /* 0x00-0x0F - Note: M65832 $0B=ORA long (cc=11), not PHD; $0F=ORA (sr,S),Y */
+    /* 0x00-0x0F */
     { "BRK", AM_IMP   }, { "ORA", AM_INDX  }, { "COP", AM_IMM   }, { "ORA", AM_SR    },
     { "TSB", AM_DP    }, { "ORA", AM_DP    }, { "ASL", AM_DP    }, { "ORA", AM_INDL  },
-    { "PHP", AM_IMP   }, { "ORA", AM_IMM_M }, { "ASL", AM_ACC   }, { "ORA", AM_ABSL  },
-    { "TSB", AM_ABS   }, { "ORA", AM_ABS   }, { "ASL", AM_ABS   }, { "ORA", AM_SRIY  },
-    /* 0x10-0x1F - Note: M65832 $13=ORA [dp],Y, $17 undefined */
-    { "BPL", AM_REL   }, { "ORA", AM_INDY  }, { "ORA", AM_IND   }, { "ORA", AM_INDLY },
-    { "TRB", AM_DP    }, { "ORA", AM_DPX   }, { "ASL", AM_DPX   }, { "???", AM_IMP   },
+    { "PHP", AM_IMP   }, { "ORA", AM_IMM_M }, { "ASL", AM_ACC   }, { "PHD", AM_IMP   },
+    { "TSB", AM_ABS   }, { "ORA", AM_ABS   }, { "ASL", AM_ABS   }, { "ORA", AM_ABSL  },
+    /* 0x10-0x1F */
+    { "BPL", AM_REL   }, { "ORA", AM_INDY  }, { "ORA", AM_IND   }, { "ORA", AM_SRIY  },
+    { "TRB", AM_DP    }, { "ORA", AM_DPX   }, { "ASL", AM_DPX   }, { "ORA", AM_INDLY },
     { "CLC", AM_IMP   }, { "ORA", AM_ABSY  }, { "INC", AM_ACC   }, { "TCS", AM_IMP   },
     { "TRB", AM_ABS   }, { "ORA", AM_ABSX  }, { "ASL", AM_ABSX  }, { "ORA", AM_ABSLX },
-    /* 0x20-0x2F - Note: M65832 $2B=AND long (cc=11), not PLD; $2F=AND (sr,S),Y */
+    /* 0x20-0x2F */
     { "JSR", AM_ABS   }, { "AND", AM_INDX  }, { "JSL", AM_ABSL  }, { "AND", AM_SR    },
     { "BIT", AM_DP    }, { "AND", AM_DP    }, { "ROL", AM_DP    }, { "AND", AM_INDL  },
-    { "PLP", AM_IMP   }, { "AND", AM_IMM_M }, { "ROL", AM_ACC   }, { "AND", AM_ABSL  },
-    { "BIT", AM_ABS   }, { "AND", AM_ABS   }, { "ROL", AM_ABS   }, { "AND", AM_SRIY  },
-    /* 0x30-0x3F - Note: M65832 $33=AND [dp],Y, $37 undefined */
-    { "BMI", AM_REL   }, { "AND", AM_INDY  }, { "AND", AM_IND   }, { "AND", AM_INDLY },
-    { "BIT", AM_DPX   }, { "AND", AM_DPX   }, { "ROL", AM_DPX   }, { "???", AM_IMP   },
+    { "PLP", AM_IMP   }, { "AND", AM_IMM_M }, { "ROL", AM_ACC   }, { "PLD", AM_IMP   },
+    { "BIT", AM_ABS   }, { "AND", AM_ABS   }, { "ROL", AM_ABS   }, { "AND", AM_ABSL  },
+    /* 0x30-0x3F */
+    { "BMI", AM_REL   }, { "AND", AM_INDY  }, { "AND", AM_IND   }, { "AND", AM_SRIY  },
+    { "BIT", AM_DPX   }, { "AND", AM_DPX   }, { "ROL", AM_DPX   }, { "AND", AM_INDLY },
     { "SEC", AM_IMP   }, { "AND", AM_ABSY  }, { "DEC", AM_ACC   }, { "TSC", AM_IMP   },
     { "BIT", AM_ABSX  }, { "AND", AM_ABSX  }, { "ROL", AM_ABSX  }, { "AND", AM_ABSLX },
-    /* 0x40-0x4F - Note: M65832 $4B=EOR long (cc=11), not PHK; $4F=EOR (sr,S),Y */
+    /* 0x40-0x4F */
     { "RTI", AM_IMP   }, { "EOR", AM_INDX  }, { "WDM", AM_IMM   }, { "EOR", AM_SR    },
     { "MVP", AM_MVP   }, { "EOR", AM_DP    }, { "LSR", AM_DP    }, { "EOR", AM_INDL  },
-    { "PHA", AM_IMP   }, { "EOR", AM_IMM_M }, { "LSR", AM_ACC   }, { "EOR", AM_ABSL  },
-    { "JMP", AM_ABS   }, { "EOR", AM_ABS   }, { "LSR", AM_ABS   }, { "EOR", AM_SRIY  },
-    /* 0x50-0x5F - Note: M65832 $53=EOR [dp],Y, $57 undefined */
-    { "BVC", AM_REL   }, { "EOR", AM_INDY  }, { "EOR", AM_IND   }, { "EOR", AM_INDLY },
-    { "MVN", AM_MVP   }, { "EOR", AM_DPX   }, { "LSR", AM_DPX   }, { "???", AM_IMP   },
+    { "PHA", AM_IMP   }, { "EOR", AM_IMM_M }, { "LSR", AM_ACC   }, { "PHK", AM_IMP   },
+    { "JMP", AM_ABS   }, { "EOR", AM_ABS   }, { "LSR", AM_ABS   }, { "EOR", AM_ABSL  },
+    /* 0x50-0x5F */
+    { "BVC", AM_REL   }, { "EOR", AM_INDY  }, { "EOR", AM_IND   }, { "EOR", AM_SRIY  },
+    { "MVN", AM_MVP   }, { "EOR", AM_DPX   }, { "LSR", AM_DPX   }, { "EOR", AM_INDLY },
     { "CLI", AM_IMP   }, { "EOR", AM_ABSY  }, { "PHY", AM_IMP   }, { "TCD", AM_IMP   },
     { "JML", AM_ABSL  }, { "EOR", AM_ABSX  }, { "LSR", AM_ABSX  }, { "EOR", AM_ABSLX },
-    /* 0x60-0x6F - Note: M65832 $6B=ADC long (cc=11), not RTL; $6F=ADC (sr,S),Y */
+    /* 0x60-0x6F */
     { "RTS", AM_IMP   }, { "ADC", AM_INDX  }, { "PER", AM_RELL  }, { "ADC", AM_SR    },
     { "STZ", AM_DP    }, { "ADC", AM_DP    }, { "ROR", AM_DP    }, { "ADC", AM_INDL  },
-    { "PLA", AM_IMP   }, { "ADC", AM_IMM_M }, { "ROR", AM_ACC   }, { "ADC", AM_ABSL  },
-    { "JMP", AM_ABSIND}, { "ADC", AM_ABS   }, { "ROR", AM_ABS   }, { "ADC", AM_SRIY  },
-    /* 0x70-0x7F - Note: M65832 $73=ADC [dp],Y, $77 undefined */
-    { "BVS", AM_REL   }, { "ADC", AM_INDY  }, { "ADC", AM_IND   }, { "ADC", AM_INDLY },
-    { "STZ", AM_DPX   }, { "ADC", AM_DPX   }, { "ROR", AM_DPX   }, { "???", AM_IMP   },
+    { "PLA", AM_IMP   }, { "ADC", AM_IMM_M }, { "ROR", AM_ACC   }, { "RTL", AM_IMP   },
+    { "JMP", AM_ABSIND}, { "ADC", AM_ABS   }, { "ROR", AM_ABS   }, { "ADC", AM_ABSL  },
+    /* 0x70-0x7F */
+    { "BVS", AM_REL   }, { "ADC", AM_INDY  }, { "ADC", AM_IND   }, { "ADC", AM_SRIY  },
+    { "STZ", AM_DPX   }, { "ADC", AM_DPX   }, { "ROR", AM_DPX   }, { "ADC", AM_INDLY },
     { "SEI", AM_IMP   }, { "ADC", AM_ABSY  }, { "PLY", AM_IMP   }, { "TDC", AM_IMP   },
     { "JMP", AM_ABSINDX},{ "ADC", AM_ABSX  }, { "ROR", AM_ABSX  }, { "ADC", AM_ABSLX },
     /* 0x80-0x8F */
@@ -180,39 +186,39 @@ static const OpcodeEntry opcode_table[256] = {
     { "STY", AM_DP    }, { "STA", AM_DP    }, { "STX", AM_DP    }, { "STA", AM_INDL  },
     { "DEY", AM_IMP   }, { "BIT", AM_IMM_M }, { "TXA", AM_IMP   }, { "PHB", AM_IMP   },
     { "STY", AM_ABS   }, { "STA", AM_ABS   }, { "STX", AM_ABS   }, { "STA", AM_ABSL  },
-    /* 0x90-0x9F - Note: M65832 $93=STA [dp],Y (not (sr,S),Y), $97 undefined */
-    { "BCC", AM_REL   }, { "STA", AM_INDY  }, { "STA", AM_IND   }, { "STA", AM_INDLY },
-    { "STY", AM_DPX   }, { "STA", AM_DPX   }, { "STX", AM_DPY   }, { "???", AM_IMP   },
+    /* 0x90-0x9F */
+    { "BCC", AM_REL   }, { "STA", AM_INDY  }, { "STA", AM_IND   }, { "STA", AM_SRIY  },
+    { "STY", AM_DPX   }, { "STA", AM_DPX   }, { "STX", AM_DPY   }, { "STA", AM_INDLY },
     { "TYA", AM_IMP   }, { "STA", AM_ABSY  }, { "TXS", AM_IMP   }, { "TXY", AM_IMP   },
     { "STZ", AM_ABS   }, { "STA", AM_ABSX  }, { "STZ", AM_ABSX  }, { "STA", AM_ABSLX },
-    /* 0xA0-0xAF - Note: M65832 remaps cc=11 opcodes (PLB->extended, $AB=LDA long, $AF=LDA (sr,S),Y) */
+    /* 0xA0-0xAF */
     { "LDY", AM_IMM_X }, { "LDA", AM_INDX  }, { "LDX", AM_IMM_X }, { "LDA", AM_SR    },
     { "LDY", AM_DP    }, { "LDA", AM_DP    }, { "LDX", AM_DP    }, { "LDA", AM_INDL  },
-    { "TAY", AM_IMP   }, { "LDA", AM_IMM_M }, { "TAX", AM_IMP   }, { "LDA", AM_ABSL  },
-    { "LDY", AM_ABS   }, { "LDA", AM_ABS   }, { "LDX", AM_ABS   }, { "LDA", AM_SRIY  },
-    /* 0xB0-0xBF - Note: M65832 $B3=LDA [dp],Y (not (sr,S),Y), $B7 undefined */
-    { "BCS", AM_REL   }, { "LDA", AM_INDY  }, { "LDA", AM_IND   }, { "LDA", AM_INDLY },
-    { "LDY", AM_DPX   }, { "LDA", AM_DPX   }, { "LDX", AM_DPY   }, { "???", AM_IMP   },
+    { "TAY", AM_IMP   }, { "LDA", AM_IMM_M }, { "TAX", AM_IMP   }, { "PLB", AM_IMP   },
+    { "LDY", AM_ABS   }, { "LDA", AM_ABS   }, { "LDX", AM_ABS   }, { "LDA", AM_ABSL  },
+    /* 0xB0-0xBF */
+    { "BCS", AM_REL   }, { "LDA", AM_INDY  }, { "LDA", AM_IND   }, { "LDA", AM_SRIY  },
+    { "LDY", AM_DPX   }, { "LDA", AM_DPX   }, { "LDX", AM_DPY   }, { "LDA", AM_INDLY },
     { "CLV", AM_IMP   }, { "LDA", AM_ABSY  }, { "TSX", AM_IMP   }, { "TYX", AM_IMP   },
     { "LDY", AM_ABSX  }, { "LDA", AM_ABSX  }, { "LDX", AM_ABSY  }, { "LDA", AM_ABSLX },
-    /* 0xC0-0xCF - Note: M65832 $CB=CMP long (cc=11), not WAI; $CF=CMP (sr,S),Y */
+    /* 0xC0-0xCF */
     { "CPY", AM_IMM_X }, { "CMP", AM_INDX  }, { "REP", AM_IMM   }, { "CMP", AM_SR    },
     { "CPY", AM_DP    }, { "CMP", AM_DP    }, { "DEC", AM_DP    }, { "CMP", AM_INDL  },
-    { "INY", AM_IMP   }, { "CMP", AM_IMM_M }, { "DEX", AM_IMP   }, { "CMP", AM_ABSL  },
-    { "CPY", AM_ABS   }, { "CMP", AM_ABS   }, { "DEC", AM_ABS   }, { "CMP", AM_SRIY  },
-    /* 0xD0-0xDF - Note: M65832 $D3=CMP [dp],Y, $D7 undefined */
-    { "BNE", AM_REL   }, { "CMP", AM_INDY  }, { "CMP", AM_IND   }, { "CMP", AM_INDLY },
-    { "PEI", AM_IND   }, { "CMP", AM_DPX   }, { "DEC", AM_DPX   }, { "???", AM_IMP   },
+    { "INY", AM_IMP   }, { "CMP", AM_IMM_M }, { "DEX", AM_IMP   }, { "WAI", AM_IMP   },
+    { "CPY", AM_ABS   }, { "CMP", AM_ABS   }, { "DEC", AM_ABS   }, { "CMP", AM_ABSL  },
+    /* 0xD0-0xDF */
+    { "BNE", AM_REL   }, { "CMP", AM_INDY  }, { "CMP", AM_IND   }, { "CMP", AM_SRIY  },
+    { "PEI", AM_IND   }, { "CMP", AM_DPX   }, { "DEC", AM_DPX   }, { "CMP", AM_INDLY },
     { "CLD", AM_IMP   }, { "CMP", AM_ABSY  }, { "PHX", AM_IMP   }, { "STP", AM_IMP   },
     { "JML", AM_ABSLIND},{ "CMP", AM_ABSX  }, { "DEC", AM_ABSX  }, { "CMP", AM_ABSLX },
-    /* 0xE0-0xEF - Note: M65832 $EB=SBC long (cc=11), not XBA; $EF=SBC (sr,S),Y */
+    /* 0xE0-0xEF */
     { "CPX", AM_IMM_X }, { "SBC", AM_INDX  }, { "SEP", AM_IMM   }, { "SBC", AM_SR    },
     { "CPX", AM_DP    }, { "SBC", AM_DP    }, { "INC", AM_DP    }, { "SBC", AM_INDL  },
-    { "INX", AM_IMP   }, { "SBC", AM_IMM_M }, { "NOP", AM_IMP   }, { "SBC", AM_ABSL  },
-    { "CPX", AM_ABS   }, { "SBC", AM_ABS   }, { "INC", AM_ABS   }, { "SBC", AM_SRIY  },
-    /* 0xF0-0xFF - Note: M65832 $F3=SBC [dp],Y, $F7 undefined */
-    { "BEQ", AM_REL   }, { "SBC", AM_INDY  }, { "SBC", AM_IND   }, { "SBC", AM_INDLY },
-    { "PEA", AM_ABS   }, { "SBC", AM_DPX   }, { "INC", AM_DPX   }, { "???", AM_IMP   },
+    { "INX", AM_IMP   }, { "SBC", AM_IMM_M }, { "NOP", AM_IMP   }, { "XBA", AM_IMP   },
+    { "CPX", AM_ABS   }, { "SBC", AM_ABS   }, { "INC", AM_ABS   }, { "SBC", AM_ABSL  },
+    /* 0xF0-0xFF */
+    { "BEQ", AM_REL   }, { "SBC", AM_INDY  }, { "SBC", AM_IND   }, { "SBC", AM_SRIY  },
+    { "PEA", AM_ABS   }, { "SBC", AM_DPX   }, { "INC", AM_DPX   }, { "SBC", AM_INDLY },
     { "SED", AM_IMP   }, { "SBC", AM_ABSY  }, { "PLX", AM_IMP   }, { "XCE", AM_IMP   },
     { "JMP", AM_ABSINDX},{ "SBC", AM_ABSX  }, { "INC", AM_ABSX  }, { "SBC", AM_ABSLX },
 };
@@ -341,6 +347,8 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
         case AM_IMP:
         case AM_ACC:
             return 0;
+        case AM_REL:
+            return (m_flag >= 3) ? 2 : 1;
         case AM_IMM:
         case AM_DP:
         case AM_DPX:
@@ -350,15 +358,14 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
         case AM_INDY:
         case AM_INDL:
         case AM_INDLY:
-        case AM_REL:
-            return (m_flag == 2) ? 2 : 1;
+            return 1;
         case AM_SR:
         case AM_SRIY:
             return 1;
         case AM_IMM_M:
-            return (m_flag == 0) ? 1 : (m_flag == 1) ? 2 : 4;
+            return (m_flag == 0) ? 1 : (m_flag == 1) ? 2 : 4; /* wmode 3 -> 4 bytes */
         case AM_IMM_X:
-            return (x_flag == 0) ? 1 : (x_flag == 1) ? 2 : 4;
+            return (x_flag == 0) ? 1 : (x_flag == 1) ? 2 : 4; /* wmode 3 -> 4 bytes */
         case AM_ABS:
         case AM_ABSX:
         case AM_ABSY:
@@ -389,7 +396,8 @@ static int get_operand_size(AddrMode mode, int m_flag, int x_flag) {
 
 /* Format operand based on addressing mode */
 static void format_operand(char *out, size_t out_size, AddrMode mode,
-                           const uint8_t *operand, int opsize, uint32_t pc, int m_flag) {
+                           const uint8_t *operand, int opsize, uint32_t pc,
+                           int m_flag, int r_flag) {
     uint32_t val;
     int32_t rel;
     
@@ -412,14 +420,23 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
                         operand[0] | (operand[1] << 8) | (operand[2] << 16) | (operand[3] << 24));
             break;
         case AM_DP:
-            snprintf(out, out_size, "$%02X", operand[0]);
+            if (r_flag) format_dp_reg(out, out_size, operand[0]);
+            else snprintf(out, out_size, "$%02X", operand[0]);
             break;
-        case AM_DPX:
-            snprintf(out, out_size, "$%02X,X", operand[0]);
+        case AM_DPX: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "%s,X", base);
             break;
-        case AM_DPY:
-            snprintf(out, out_size, "$%02X,Y", operand[0]);
+        }
+        case AM_DPY: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "%s,Y", base);
             break;
+        }
         case AM_ABS:
             if (opsize == 4) {
                 /* 32-bit absolute (control flow in 32-bit mode) */
@@ -427,35 +444,55 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
                 snprintf(out, out_size, "$%08X", val);
             } else {
                 val = operand[0] | (operand[1] << 8);
-                if (m_flag == 2) snprintf(out, out_size, "B+$%04X", val);
+                if (m_flag >= 3) snprintf(out, out_size, "B+$%04X", val);
                 else snprintf(out, out_size, "$%04X", val);
             }
             break;
         case AM_ABSX:
             val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "B+$%04X,X", val);
+            if (m_flag >= 3) snprintf(out, out_size, "B+$%04X,X", val);
             else snprintf(out, out_size, "$%04X,X", val);
             break;
         case AM_ABSY:
             val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "B+$%04X,Y", val);
+            if (m_flag >= 3) snprintf(out, out_size, "B+$%04X,Y", val);
             else snprintf(out, out_size, "$%04X,Y", val);
             break;
-        case AM_IND:
-            snprintf(out, out_size, "($%02X)", operand[0]);
+        case AM_IND: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "(%s)", base);
             break;
-        case AM_INDX:
-            snprintf(out, out_size, "($%02X,X)", operand[0]);
+        }
+        case AM_INDX: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "(%s,X)", base);
             break;
-        case AM_INDY:
-            snprintf(out, out_size, "($%02X),Y", operand[0]);
+        }
+        case AM_INDY: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "(%s),Y", base);
             break;
-        case AM_INDL:
-            snprintf(out, out_size, "[$%02X]", operand[0]);
+        }
+        case AM_INDL: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "[%s]", base);
             break;
-        case AM_INDLY:
-            snprintf(out, out_size, "[$%02X],Y", operand[0]);
+        }
+        case AM_INDLY: {
+            char base[16];
+            if (r_flag) format_dp_reg(base, sizeof(base), operand[0]);
+            else snprintf(base, sizeof(base), "$%02X", operand[0]);
+            snprintf(out, out_size, "[%s],Y", base);
             break;
+        }
         case AM_ABSL:
             val = operand[0] | (operand[1] << 8) | (operand[2] << 16);
             snprintf(out, out_size, "$%06X", val);
@@ -490,17 +527,17 @@ static void format_operand(char *out, size_t out_size, AddrMode mode,
             break;
         case AM_ABSIND:
             val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "(B+$%04X)", val);
+            if (m_flag >= 3) snprintf(out, out_size, "(B+$%04X)", val);
             else snprintf(out, out_size, "($%04X)", val);
             break;
         case AM_ABSINDX:
             val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "(B+$%04X,X)", val);
+            if (m_flag >= 3) snprintf(out, out_size, "(B+$%04X,X)", val);
             else snprintf(out, out_size, "($%04X,X)", val);
             break;
         case AM_ABSLIND:
             val = operand[0] | (operand[1] << 8);
-            if (m_flag == 2) snprintf(out, out_size, "[B+$%04X]", val);
+            if (m_flag >= 3) snprintf(out, out_size, "[B+$%04X]", val);
             else snprintf(out, out_size, "[$%04X]", val);
             break;
         case AM_FPU_REG2:
@@ -541,6 +578,7 @@ void m65832_dis_init(M65832DisCtx *ctx) {
     ctx->m_flag = 1;    /* Default 16-bit */
     ctx->x_flag = 1;
     ctx->emu_mode = 0;
+    ctx->r_flag = 1;    /* Default: register window enabled */
 }
 
 int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
@@ -564,12 +602,12 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     int m_flag = ctx->m_flag;
     int x_flag = ctx->x_flag;
     
-    if (m_flag == 2 || x_flag == 2) {
-        m_flag = 2;
-        x_flag = 2;
+    if (m_flag >= 3 || x_flag >= 3) {
+        m_flag = 3;
+        x_flag = 3;
     }
 
-    if (m_flag == 2 && opcode == 0x42) {
+    if (m_flag >= 3 && opcode == 0x42) {
         snprintf(out, out_size, ".BYTE $42");
         return 1;
     }
@@ -601,7 +639,8 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
                     snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
                     return 2;
                 }
-                format_dp_reg(dest_str, sizeof(dest_str), buf[index++]);
+                if (ctx->r_flag) format_dp_reg(dest_str, sizeof(dest_str), buf[index++]);
+                else snprintf(dest_str, sizeof(dest_str), "$%02X", buf[index++]);
             } else {
                 snprintf(dest_str, sizeof(dest_str), "A");
             }
@@ -653,82 +692,90 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
                 switch (addr_mode) {
                     case 0x00:
                         val8 = buf[index++];
-                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        if (ctx->r_flag) format_dp_reg(src_str, sizeof(src_str), val8);
+                        else snprintf(src_str, sizeof(src_str), "$%02X", val8);
                         break;
                     case 0x01:
                         val8 = buf[index++];
-                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        if (ctx->r_flag) format_dp_reg(src_str, sizeof(src_str), val8);
+                        else snprintf(src_str, sizeof(src_str), "$%02X", val8);
                         snprintf(src_str + strlen(src_str), sizeof(src_str) - strlen(src_str), ",X");
                         break;
                     case 0x02:
                         val8 = buf[index++];
-                        format_dp_reg(src_str, sizeof(src_str), val8);
+                        if (ctx->r_flag) format_dp_reg(src_str, sizeof(src_str), val8);
+                        else snprintf(src_str, sizeof(src_str), "$%02X", val8);
                         snprintf(src_str + strlen(src_str), sizeof(src_str) - strlen(src_str), ",Y");
                         break;
                     case 0x03: {
                         char base[16];
                         val8 = buf[index++];
-                        format_dp_reg(base, sizeof(base), val8);
+                        if (ctx->r_flag) format_dp_reg(base, sizeof(base), val8);
+                        else snprintf(base, sizeof(base), "$%02X", val8);
                         snprintf(src_str, sizeof(src_str), "(%s,X)", base);
                         break;
                     }
                     case 0x04: {
                         char base[16];
                         val8 = buf[index++];
-                        format_dp_reg(base, sizeof(base), val8);
+                        if (ctx->r_flag) format_dp_reg(base, sizeof(base), val8);
+                        else snprintf(base, sizeof(base), "$%02X", val8);
                         snprintf(src_str, sizeof(src_str), "(%s),Y", base);
                         break;
                     }
                     case 0x05: {
                         char base[16];
                         val8 = buf[index++];
-                        format_dp_reg(base, sizeof(base), val8);
+                        if (ctx->r_flag) format_dp_reg(base, sizeof(base), val8);
+                        else snprintf(base, sizeof(base), "$%02X", val8);
                         snprintf(src_str, sizeof(src_str), "(%s)", base);
                         break;
                     }
                     case 0x06: {
                         char base[16];
                         val8 = buf[index++];
-                        format_dp_reg(base, sizeof(base), val8);
+                        if (ctx->r_flag) format_dp_reg(base, sizeof(base), val8);
+                        else snprintf(base, sizeof(base), "$%02X", val8);
                         snprintf(src_str, sizeof(src_str), "[%s]", base);
                         break;
                     }
                     case 0x07: {
                         char base[16];
                         val8 = buf[index++];
-                        format_dp_reg(base, sizeof(base), val8);
+                        if (ctx->r_flag) format_dp_reg(base, sizeof(base), val8);
+                        else snprintf(base, sizeof(base), "$%02X", val8);
                         snprintf(src_str, sizeof(src_str), "[%s],Y", base);
                         break;
                     }
                     case 0x08:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X" : "$%04X", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "B+$%04X" : "$%04X", val16);
                         break;
                     case 0x09:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X,X" : "$%04X,X", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "B+$%04X,X" : "$%04X,X", val16);
                         break;
                     case 0x0A:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "B+$%04X,Y" : "$%04X,Y", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "B+$%04X,Y" : "$%04X,Y", val16);
                         break;
                     case 0x0B:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "(B+$%04X)" : "($%04X)", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "(B+$%04X)" : "($%04X)", val16);
                         break;
                     case 0x0C:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "(B+$%04X,X)" : "($%04X,X)", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "(B+$%04X,X)" : "($%04X,X)", val16);
                         break;
                     case 0x0D:
                         val16 = buf[index] | (buf[index + 1] << 8);
                         index += 2;
-                        snprintf(src_str, sizeof(src_str), m_flag == 2 ? "[B+$%04X]" : "[$%04X]", val16);
+                        snprintf(src_str, sizeof(src_str), m_flag >= 3 ? "[B+$%04X]" : "[$%04X]", val16);
                         break;
                     case 0x10:
                         val32 = buf[index] | (buf[index + 1] << 8) | (buf[index + 2] << 16) | (buf[index + 3] << 24);
@@ -798,14 +845,28 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
             }
 
             if (unary_no_src) {
-                snprintf(out, out_size, "%s%s %s", ext_alu, suffix, dest_str);
+                if (target == 0) {
+                    /* Unary A-targeted: "INC.B A" */
+                    snprintf(out, out_size, "%s%s A", ext_alu, suffix);
+                } else {
+                    /* Unary register-targeted: "INC.B R4" */
+                    snprintf(out, out_size, "%s%s %s", ext_alu, suffix, dest_str);
+                }
                 return index;
             }
             if (opcode == 0x97 && target == 0 && addr_mode != 0x19 && addr_mode != 0x1A && addr_mode != 0x1B) {
+                /* STZ to memory: "STZ.B R0" or "STZ B+$1000" */
                 snprintf(out, out_size, "%s%s %s", ext_alu, suffix, src_str);
                 return index;
             }
-            snprintf(out, out_size, "%s%s %s,%s", ext_alu, suffix, dest_str, src_str);
+            if (target == 0 && (opcode == 0x80 || opcode == 0x81)) {
+                /* A-targeted LD/ST: use LDA/STA mnemonic without "A," prefix */
+                const char *mnem = (opcode == 0x80) ? "LDA" : "STA";
+                snprintf(out, out_size, "%s%s %s", mnem, suffix, src_str);
+            } else {
+                /* Register-targeted or other A-targeted ALU ops */
+                snprintf(out, out_size, "%s%s %s,%s", ext_alu, suffix, dest_str, src_str);
+            }
             return index;
         }
 
@@ -884,7 +945,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
                    mode == AM_INDX || mode == AM_INDY || mode == AM_INDL || mode == AM_INDLY)) {
         /* Extended instructions always use 1-byte DP operands (register window) */
         opsize = 1;
-    } else if (is_control_flow && m_flag == 2 && mode == AM_ABS) {
+    } else if (is_control_flow && m_flag >= 3 && mode == AM_ABS) {
         /* Control flow in 32-bit mode uses 4-byte absolute addresses */
         opsize = 4;
     } else {
@@ -902,20 +963,35 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     char operand_str[64];
     const uint8_t *operand_bytes = buf + 1 + prefix_len;
     
-    format_operand(operand_str, sizeof(operand_str), mode, operand_bytes, opsize, pc, m_flag);
+    format_operand(operand_str, sizeof(operand_str), mode, operand_bytes, opsize, pc,
+                   m_flag, ctx->r_flag);
     
+    /* Check if instruction is illegal */
+    int illegal_32 = 0;
+    /* Deprecated 65816 [dp],Y opcodes (bbb=101, cc=11) — trap illegal instruction */
+    if (!is_ext && (opcode & 0x07) == 0x07 && (opcode & 0x18) == 0x10)
+        illegal_32 = 1;
+    if (m_flag >= 3) {
+        /* Long addressing modes are illegal in 32-bit mode */
+        if (mode == AM_ABSL || mode == AM_ABSLX || mode == AM_ABSLIND)
+            illegal_32 = 1;
+        /* RTL is illegal in 32-bit mode (use RTS instead) */
+        if (opcode == 0x6B && !is_ext)
+            illegal_32 = 1;
+    }
+
     /* Build output string */
     if (operand_str[0])
-        snprintf(out, out_size, "%s %s", mnemonic, operand_str);
+        snprintf(out, out_size, illegal_32 ? "%s %s (Illegal)" : "%s %s", mnemonic, operand_str);
     else
-        snprintf(out, out_size, "%s", mnemonic);
+        snprintf(out, out_size, illegal_32 ? "%s (Illegal)" : "%s", mnemonic);
     
-    /* Track state changes from REP/SEP */
-    if (strcmp(mnemonic, "REP") == 0 && opsize >= 1) {
+    /* Track state changes from REP/SEP (only in 65816 mode, not 32-bit) */
+    if (ctx->m_flag < 3 && strcmp(mnemonic, "REP") == 0 && opsize >= 1) {
         uint8_t val = operand_bytes[0];
         if (val & 0x20) ctx->m_flag = 1;  /* M=1: 16-bit */
         if (val & 0x10) ctx->x_flag = 1;
-    } else if (strcmp(mnemonic, "SEP") == 0 && opsize >= 1) {
+    } else if (ctx->m_flag < 3 && strcmp(mnemonic, "SEP") == 0 && opsize >= 1) {
         uint8_t val = operand_bytes[0];
         if (val & 0x20) ctx->m_flag = 0;  /* M=0: 8-bit */
         if (val & 0x10) ctx->x_flag = 0;
@@ -1007,6 +1083,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -x8          Set 8-bit index mode\n");
     fprintf(stderr, "  -x16         Set 16-bit index mode (default)\n");
     fprintf(stderr, "  -x32         Set 32-bit index mode\n");
+    fprintf(stderr, "  -R           Disable register window (show raw DP offsets)\n");
     fprintf(stderr, "  --help       Show this help\n");
 }
 
@@ -1036,13 +1113,15 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "-m16") == 0) {
             ctx.m_flag = 1;
         } else if (strcmp(argv[i], "-m32") == 0) {
-            ctx.m_flag = 2;
+            ctx.m_flag = 3;
         } else if (strcmp(argv[i], "-x8") == 0) {
             ctx.x_flag = 0;
         } else if (strcmp(argv[i], "-x16") == 0) {
             ctx.x_flag = 1;
         } else if (strcmp(argv[i], "-x32") == 0) {
-            ctx.x_flag = 2;
+            ctx.x_flag = 3;
+        } else if (strcmp(argv[i], "-R") == 0) {
+            ctx.r_flag = 0;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;

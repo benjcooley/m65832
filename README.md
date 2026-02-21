@@ -248,7 +248,7 @@ FCMP.S                  ; Compare F1 to F2 (sets N, Z, C)
 ```asm
 ; Compare-and-swap
 LD    X, expected       ; X = expected value
-LD    A, new_value      ; A = new value
+LDA   new_value         ; A = new value
 CAS   lock              ; if [lock]==X: [lock]=A, Z=1
 
 ; Load-linked / Store-conditional

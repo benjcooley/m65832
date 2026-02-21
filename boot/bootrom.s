@@ -55,12 +55,9 @@ reset_entry:
     ; -------------------------------------------
     ; Step 1: CPU initialization
     ; -------------------------------------------
-    CLC                         ; Clear carry
-    XCE                         ; Enter native mode (E=0)
-    REP #$30                    ; Clear M0,X0 -> 16-bit A and X/Y
-    SEPE #$A0                   ; Set M1,X1 -> 32-bit A and X/Y (M=10, X=10)
+    ; Single instruction: set W0+W1 (32-bit) + S (supervisor) + R (register window)
+    SEPE #$1B                   ; W0|W1|S|R -> 32-bit, supervisor, register window
     SEI                         ; Disable interrupts
-    RSET                        ; Enable register window (R=1)
 
     ; Set stack pointer
     LDA #$0000FFFF

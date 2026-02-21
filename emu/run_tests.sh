@@ -80,6 +80,36 @@ run_test_flag() {
     fi
 }
 
+# Helper function to run a test and verify a trap occurs
+run_test_trap() {
+    local name="$1"
+    local asm_file="$2"
+    local expected_trap="$3"
+    local cycles="$4"
+
+    echo -n "Test: $name... "
+
+    # Assemble
+    if ! $ASSEMBLER "$asm_file" -o "${asm_file%.asm}.bin" > /dev/null 2>&1; then
+        echo "FAIL (assembly failed)"
+        FAIL=$((FAIL + 1))
+        return
+    fi
+
+    # Run emulator and capture output
+    output=$($EMULATOR -c "$cycles" -s "${asm_file%.asm}.bin" 2>&1)
+
+    # Check for expected trap
+    if echo "$output" | grep -q "Trap: ${expected_trap}"; then
+        echo "PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL (expected Trap: $expected_trap)"
+        echo "$output" | grep "Trap:"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 # Test basic emulator functions
 echo "--- Basic Emulator Tests ---"
 
@@ -659,6 +689,12 @@ bit32_done:
 EOF
 
 run_test "E=0 when W=11 (32-bit)" "test/test_we_alias_32bit.asm" "00000001" 200
+
+# Long addressing illegal in 32-bit mode
+echo
+echo "--- Long Addressing Illegal in W=11 Tests ---"
+
+run_test_trap "LDA long illegal in W=11" "test/test_long_illegal.asm" "ILLEGAL_OP" 200
 
 # Summary
 echo

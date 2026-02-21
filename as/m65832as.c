@@ -1469,8 +1469,6 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     const ExtALUOp *ext_alu = find_ext_alu_op(mnemonic);
     if (ext_alu) {
         const char *p = skip_whitespace(operand);
-        int dest_starts_reg = (*p == 'A' || *p == 'a' || *p == 'R' || *p == 'r');
-        int is_immediate = (*p == '#');  /* Immediate addressing doesn't need Extended ALU */
         /* In 32-bit mode, traditional mnemonics (LDA, STA, etc.) with absolute addresses
          * must use Extended ALU since standard opcodes only support B-relative.
          * Immediate mode uses standard opcodes with 4-byte immediate values.
@@ -1482,6 +1480,12 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                                        strcmp(mnemonic, "EOR") == 0 || strcmp(mnemonic, "CMP") == 0 ||
                                        strcmp(mnemonic, "BIT") == 0 || strcmp(mnemonic, "TSB") == 0 ||
                                        strcmp(mnemonic, "TRB") == 0 || strcmp(mnemonic, "STZ") == 0);
+        /* dest_starts_reg only applies to LD/ST (register-targeted forms like "LD R4, src").
+         * Traditional mnemonics (LDA, STA, etc.) always use A as implicit destination,
+         * so "LDA R4" means load from DP address R4 into A — not register-targeted. */
+        int dest_starts_reg = !is_traditional_mnemonic &&
+                              (*p == 'A' || *p == 'a' || *p == 'R' || *p == 'r');
+        int is_immediate = (*p == '#');
         /* Pre-parse operand to check addressing mode for 32-bit routing.
          * DP-based modes don't need extended ALU -- standard opcodes handle them. */
         int is_dp_mode = 0;
@@ -1653,6 +1657,12 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                     /* Memory destination path handled above */
                 } else {
                 if (!parse_ext_alu_dest(as, dest_str, &target, &dest_dp)) {
+                    return 0;
+                }
+                /* LD/ST require a register destination (Rn), not A.
+                 * Use LDA/STA for A-targeted operations. */
+                if (is_ld_st && target == 0) {
+                    error(as, "LD/ST require register destination (Rn), use LDA/STA for A");
                     return 0;
                 }
 

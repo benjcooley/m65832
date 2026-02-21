@@ -1540,28 +1540,34 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 4;
             break;
-        case 0xB3: /* LDA [dp],Y (M65832: cc=11, bbb=100) */
-            addr = addr_dpily(cpu);
-            cpu->a = read_val(cpu, addr, width_m);
-            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
-            cycles = 6;
-            break;
-        case 0xAB: /* LDA long - M65832 cc=11 bbb=010 */
+        /* 0xAB is PLB - see stack ops section */
+        case 0xAF: /* LDA long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) {
+                /* Long addressing reserved/illegal in 32-bit mode - use extended ALU */
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = addr_long(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
+            update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
-        case 0xAF: /* LDA (sr,S),Y - M65832 cc=11 bbb=011 */
+        case 0xB3: /* LDA (sr,S),Y - 65816 cc=11 bbb=100 */
             addr = addr_sriy(cpu);
             cpu->a = read_val(cpu, addr, width_m);
             if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 7;
             break;
-        case 0xBF: /* LDA long,X - M65832 cc=11 bbb=111 */
+        case 0xBF: /* LDA long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) {
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = addr_longx(cpu);
             cpu->a = read_val(cpu, addr, width_m);
-            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
+            update_nz(cpu, cpu->a, width_m);
             cycles = 5;
             break;
 
@@ -1685,17 +1691,27 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             write_val(cpu, addr, cpu->a, width_m);
             cycles = 4;
             break;
-        case 0x93: /* STA [dp],Y (M65832: cc=11, bbb=100) */
-            addr = addr_dpily(cpu);
+        case 0x93: /* STA (sr,S),Y - 65816 cc=11 bbb=100 */
+            addr = addr_sriy(cpu);
             write_val(cpu, addr, cpu->a, width_m);
-            cycles = 6;
+            cycles = 7;
             break;
-        case 0x8F: /* STA long (M65832 explicit) */
+        case 0x8F: /* STA long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) {
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = addr_long(cpu);
             write_val(cpu, addr, cpu->a, width_m);
             cycles = 5;
             break;
-        case 0x9F: /* STA long,X (M65832 explicit) */
+        case 0x9F: /* STA long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) {
+                cpu->trap = TRAP_ILLEGAL_OP;
+                cycles = 2;
+                break;
+            }
             addr = addr_longx(cpu);
             write_val(cpu, addr, cpu->a, width_m);
             cycles = 5;
@@ -1836,6 +1852,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             op_adc(cpu, val, width_m);
             cycles = 7;
             break;
+        case 0x6F: /* ADC long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_adc(cpu, val, width_m);
+            cycles = 5;
+            break;
+        case 0x7F: /* ADC long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_adc(cpu, val, width_m);
+            cycles = 5;
+            break;
 
         /* ============ SBC ============ */
         case 0xE9: /* SBC #imm */
@@ -1916,6 +1946,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             op_sbc(cpu, val, width_m);
             cycles = 7;
             break;
+        case 0xEF: /* SBC long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_sbc(cpu, val, width_m);
+            cycles = 5;
+            break;
+        case 0xFF: /* SBC long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_sbc(cpu, val, width_m);
+            cycles = 5;
+            break;
 
         /* ============ CMP ============ */
         case 0xC9: /* CMP #imm */
@@ -1995,6 +2039,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             val = read_val(cpu, addr, width_m);
             op_cmp(cpu, cpu->a, val, width_m);
             cycles = 7;
+            break;
+        case 0xCF: /* CMP long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_cmp(cpu, cpu->a, val, width_m);
+            cycles = 5;
+            break;
+        case 0xDF: /* CMP long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_cmp(cpu, cpu->a, val, width_m);
+            cycles = 5;
             break;
 
         /* ============ CPX ============ */
@@ -2116,6 +2174,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             op_and(cpu, val, width_m);
             cycles = 7;
             break;
+        case 0x2F: /* AND long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_and(cpu, val, width_m);
+            cycles = 5;
+            break;
+        case 0x3F: /* AND long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_and(cpu, val, width_m);
+            cycles = 5;
+            break;
 
         /* ============ ORA ============ */
         case 0x09: /* ORA #imm */
@@ -2196,6 +2268,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             op_ora(cpu, val, width_m);
             cycles = 7;
             break;
+        case 0x0F: /* ORA long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_ora(cpu, val, width_m);
+            cycles = 5;
+            break;
+        case 0x1F: /* ORA long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_ora(cpu, val, width_m);
+            cycles = 5;
+            break;
 
         /* ============ EOR ============ */
         case 0x49: /* EOR #imm */
@@ -2275,6 +2361,20 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             val = read_val(cpu, addr, width_m);
             op_eor(cpu, val, width_m);
             cycles = 7;
+            break;
+        case 0x4F: /* EOR long - 65816 cc=11 bbb=011 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_long(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_eor(cpu, val, width_m);
+            cycles = 5;
+            break;
+        case 0x5F: /* EOR long,X - 65816 cc=11 bbb=111 */
+            if (width_m == 4) { cpu->trap = TRAP_ILLEGAL_OP; cycles = 2; break; }
+            addr = addr_longx(cpu);
+            val = read_val(cpu, addr, width_m);
+            op_eor(cpu, val, width_m);
+            cycles = 5;
             break;
 
         /* ============ BIT ============ */
@@ -2656,8 +2756,15 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             }
             cycles = 3;
             break;
-        /* Note: $AB is LDA long in M65832 (see LDA section), not PLB */
-        /* PLB is extended opcode $02 $73 in M65832 */
+        case 0xAB: /* PLB - Pull B */
+            /* M65832: In 32-bit mode, pull full 32-bit B */
+            if (width_m == 4) {
+                cpu->b = pull32(cpu);
+            } else {
+                cpu->b = (cpu->b & 0x00FFFFFF) | ((uint32_t)pull8(cpu) << 16);
+            }
+            cycles = 4;
+            break;
         case 0x4B: /* PHK */
             push8(cpu, (uint8_t)(cpu->pc >> 16));
             cycles = 3;
@@ -4366,16 +4473,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
 
         default:
-            /* Unknown opcode - check compatibility mode.
-             * compat_mode = 1 when M_width=32 OR K=1, per VHDL. */
-            if (SIZE_M(cpu) == 4 || FLAG_TST(cpu, P_K)) {
-                /* Compatibility mode - NOP */
-                cycles = 2;
-            } else {
-                /* Strict mode - trap to illegal instruction handler */
-                illegal_instruction(cpu);
-                cycles = 7;
-            }
+            /* Unknown/unhandled opcode - always illegal */
+            illegal_instruction(cpu);
+            cycles = 2;
             break;
     }
 
