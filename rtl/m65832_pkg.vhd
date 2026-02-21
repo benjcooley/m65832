@@ -16,11 +16,15 @@ package M65832_pkg is
     -- Constants
     ---------------------------------------------------------------------------
     
-    -- Data widths (controlled by M1:M0 and X1:X0 flags)
+    -- Data widths
+    -- In legacy mode (W=00): M/X single-bit flags control width
+    --   M=1 or X=1 → 8-bit, M=0 or X=0 → 16-bit (65816 compatible)
+    -- In 32-bit mode (W=10): all standard ops are 32-bit (M/X ignored)
+    -- Extended ALU instructions have their own size encoding regardless of mode
     constant WIDTH_8   : std_logic_vector(1 downto 0) := "00";
     constant WIDTH_16  : std_logic_vector(1 downto 0) := "01";
     constant WIDTH_32  : std_logic_vector(1 downto 0) := "10";
-    -- "11" reserved
+    -- "11" reserved for 64-bit (M65864)
     
     -- Address spaces
     constant VA_WIDTH  : integer := 32;  -- Virtual address width
@@ -37,9 +41,9 @@ package M65832_pkg is
     ---------------------------------------------------------------------------
     
     type cpu_mode_t is (
-        MODE_EMU,       -- E=1: 6502 emulation mode
-        MODE_NATIVE16,  -- E=0, W=0: 65816-compatible native mode
-        MODE_NATIVE32   -- E=0, W=1: Full 32-bit native mode
+        MODE_EMU,       -- W=00: 6502 emulation mode (E derived as '1')
+        MODE_NATIVE16,  -- W=01: 65816-compatible native mode
+        MODE_NATIVE32   -- W=10: Full 32-bit native mode
     );
     
     ---------------------------------------------------------------------------
@@ -171,42 +175,55 @@ package M65832_pkg is
     ---------------------------------------------------------------------------
     -- Status Register (P) - Extended
     ---------------------------------------------------------------------------
-    -- 
-    -- 65816 P: N V M X D I Z C  (+ E separate)
-    -- M65832 P: N V M1 M0 X1 X0 D I Z C  (+ E, S, R)
     --
-    -- Bit layout (internal representation):
+    -- 65816 P: N V M X D I Z C  (bits 7-0, + E separate)
+    -- M65832 P: Extends 65816 with W field and privilege flags above bit 7.
+    --           Bits 0-7 are IDENTICAL to 65816 for backwards compatibility.
+    --
+    -- Processor mode is controlled by W1:W0 (bits 9:8):
+    --   W = 00: 6502 emulation mode (8-bit, VBR-relative)
+    --   W = 01: 65816 native mode (M/X control 8/16-bit)
+    --   W = 10: 32-bit mode (M/X ignored, all ops 32-bit)
+    --   W = 11: Reserved for 64-bit (M65864)
+    --
+    -- E (emulation) is NOT a stored flag. It is derived: E = (W = "00").
+    -- XCE swaps C with the derived E value and sets W accordingly:
+    --   XCE with C=1: W <= "00" (enter emulation), C gets old E
+    --   XCE with C=0: W <= "01" (enter native), C gets old E
+    -- SEPE/REPE set W bits directly for 32-bit mode transitions.
+    --
+    -- Bit layout:
     --   [0]  C  - Carry
     --   [1]  Z  - Zero
     --   [2]  I  - IRQ disable
     --   [3]  D  - Decimal mode
-    --   [4]  X0 - Index width bit 0
-    --   [5]  X1 - Index width bit 1
-    --   [6]  M0 - Accumulator width bit 0
-    --   [7]  M1 - Accumulator width bit 1
-    --   [8]  V  - Overflow
-    --   [9]  N  - Negative
---   [10] E  - Emulation (6502 mode)
---   [11] S  - Supervisor (privilege level)
---   [12] R  - Register window enable
---   [13] K  - Compatibility (illegal opcodes as NOP in 8/16-bit)
-    
+    --   [4]  X  - Index width (1=8-bit, 0=16-bit; 65816 compatible)
+    --   [5]  M  - Accumulator width (1=8-bit, 0=16-bit; 65816 compatible)
+    --   [6]  V  - Overflow
+    --   [7]  N  - Negative
+    --   [8]  W0 - Wide mode bit 0
+    --   [9]  W1 - Wide mode bit 1
+    --   [10] (reserved)
+    --   [11] S  - Supervisor (privilege level)
+    --   [12] R  - Register window enable
+    --   [13] K  - Compatibility (illegal opcodes as NOP in 8/16-bit)
+
     constant P_C  : integer := 0;
     constant P_Z  : integer := 1;
     constant P_I  : integer := 2;
     constant P_D  : integer := 3;
-    constant P_X0 : integer := 4;
-    constant P_X1 : integer := 5;
-    constant P_M0 : integer := 6;
-    constant P_M1 : integer := 7;
-    constant P_V  : integer := 8;
-    constant P_N  : integer := 9;
-    constant P_E  : integer := 10;
+    constant P_X  : integer := 4;
+    constant P_M  : integer := 5;
+    constant P_V  : integer := 6;
+    constant P_N  : integer := 7;
+    constant P_W0 : integer := 8;
+    constant P_W1 : integer := 9;
+    -- Bit 10 reserved (E is derived from W, not stored)
     constant P_S  : integer := 11;
     constant P_R  : integer := 12;
-constant P_K  : integer := 13;
-    
-constant P_WIDTH : integer := 14;
+    constant P_K  : integer := 13;
+
+    constant P_WIDTH : integer := 14;
     
     ---------------------------------------------------------------------------
     -- Register File
@@ -289,43 +306,65 @@ constant VEC_ILLEGAL : std_logic_vector(31 downto 0) := x"0000FFF8";
     constant MMIO_TIMER_COUNT: std_logic_vector(31 downto 0) := x"FFFFF048";
     
     ---------------------------------------------------------------------------
+    -- Processor Mode Constants
+    ---------------------------------------------------------------------------
+
+    constant WMODE_6502   : std_logic_vector(1 downto 0) := "00";  -- 6502 emulation
+    constant WMODE_65816  : std_logic_vector(1 downto 0) := "01";  -- 65816 native
+    constant WMODE_32BIT  : std_logic_vector(1 downto 0) := "11";  -- 32-bit mode
+    -- W="10" reserved (future W2 bit for 64-bit: W=111)
+
+    ---------------------------------------------------------------------------
     -- Helper Functions
     ---------------------------------------------------------------------------
-    
-    -- Get effective data width from M1:M0 flags
-    function get_data_width(m1, m0, e : std_logic) return std_logic_vector;
-    
-    -- Get effective index width from X1:X0 flags  
-    function get_index_width(x1, x0, e : std_logic) return std_logic_vector;
-    
-    -- Check if in 32-bit wide mode
-    function is_wide_mode(e : std_logic; m1m0 : std_logic_vector) return boolean;
-    
+
+    -- Get effective data width from M flag and W mode
+    -- W=00 (6502): always 8-bit
+    -- W=01 (65816): M=1 → 8-bit, M=0 → 16-bit
+    -- W=11 (32-bit): always 32-bit (M ignored)
+    function get_data_width(m : std_logic; w : std_logic_vector) return std_logic_vector;
+
+    -- Get effective index width from X flag and W mode
+    function get_index_width(x : std_logic; w : std_logic_vector) return std_logic_vector;
+
+    -- Check if in 32-bit wide mode (W = "11")
+    function is_wide_mode(w : std_logic_vector) return boolean;
+
 end package M65832_pkg;
 
 package body M65832_pkg is
 
-    function get_data_width(m1, m0, e : std_logic) return std_logic_vector is
+    function get_data_width(m : std_logic; w : std_logic_vector) return std_logic_vector is
     begin
-        if e = '1' then
-            return WIDTH_8;  -- Emulation mode always 8-bit
-        else
-            return m1 & m0;
-        end if;
+        case w is
+            when WMODE_6502  => return WIDTH_8;   -- 6502: always 8-bit
+            when WMODE_32BIT => return WIDTH_32;   -- 32-bit mode (W=11)
+            when others =>                         -- 65816 native (W=01) or reserved (W=10)
+                if m = '1' then
+                    return WIDTH_8;                -- M=1 → 8-bit
+                else
+                    return WIDTH_16;               -- M=0 → 16-bit
+                end if;
+        end case;
     end function;
-    
-    function get_index_width(x1, x0, e : std_logic) return std_logic_vector is
+
+    function get_index_width(x : std_logic; w : std_logic_vector) return std_logic_vector is
     begin
-        if e = '1' then
-            return WIDTH_8;  -- Emulation mode always 8-bit
-        else
-            return x1 & x0;
-        end if;
+        case w is
+            when WMODE_6502  => return WIDTH_8;   -- 6502: always 8-bit
+            when WMODE_32BIT => return WIDTH_32;   -- 32-bit mode (W=11)
+            when others =>                         -- 65816 native (W=01) or reserved (W=10)
+                if x = '1' then
+                    return WIDTH_8;                -- X=1 → 8-bit
+                else
+                    return WIDTH_16;               -- X=0 → 16-bit
+                end if;
+        end case;
     end function;
-    
-    function is_wide_mode(e : std_logic; m1m0 : std_logic_vector) return boolean is
+
+    function is_wide_mode(w : std_logic_vector) return boolean is
     begin
-        return (e = '0') and (m1m0 = WIDTH_32);
+        return (w = WMODE_32BIT);
     end function;
-    
+
 end package body M65832_pkg;

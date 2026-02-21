@@ -24,63 +24,73 @@ A concise reference for M65832 programming. For detailed information, see the [I
 
 ## Status Flags
 
-### Standard P (Byte 0)
+### Standard P (Byte 0, P[7:0])
 ```
 Bit:  7   6   5   4   3   2   1   0
-      N   V   -   B   D   I   Z   C
-      │   │       │   │   │   │   └── Carry
-      │   │       │   │   │   └────── Zero
-      │   │       │   │   └────────── IRQ Disable
-      │   │       │   └────────────── Decimal Mode
-      │   │       └────────────────── Break
+      N   V   M   X   D   I   Z   C
+      │   │   │   │   │   │   │   └── Carry
+      │   │   │   │   │   │   └────── Zero
+      │   │   │   │   │   └────────── IRQ Disable
+      │   │   │   │   └────────────── Decimal Mode
+      │   │   │   └────────────────── Index Width (65816-compatible)
+      │   │   └────────────────────── Accumulator Width (65816-compatible)
       │   └────────────────────────── Overflow
       └────────────────────────────── Negative
+
+REP/SEP operate on this byte (same as 65816).
+M and X are active in native-16 mode (W=01), ignored in emu (W=00) and 32-bit (W=11).
 ```
 
 ### Extended P (Byte 1)
 ```
 Bit:  7   6   5   4   3   2   1   0
-      M1  M0  X1  X0  E   S   R   K
-      │   │   │   │   │   │   │   └── Compat (illegal→NOP)
-      │   │   │   │   │   │   └────── Register Window
-      │   │   │   │   │   └────────── Supervisor Mode
-      │   │   │   │   └────────────── Emulation Mode
-      │   │   └───┴────────────────── Index Width (X1:X0)
-      └───┴────────────────────────── Accumulator Width (M1:M0)
+      K   R   S  rsv  W1  W0  0   0
+      │   │   │   │   │   │
+      │   │   │   │   └───┴────────── Width Mode (W1:W0, thermometer)
+      │   │   │   └────────────────── Reserved (future W2 for 64-bit)
+      │   │   └────────────────────── Supervisor Mode
+      │   └────────────────────────── Register Window
+      └────────────────────────────── Compat (illegal→NOP)
 
-Width encoding: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved
+W encoding: 00=6502 emu, 01=65816 native, 11=32-bit, 10=reserved
+E is derived: E = (W==00)
 ```
 
 ---
 
 ## Processor Modes
 
-| Mode | E | M1:M0 | X1:X0 | Description |
-|------|---|-------|-------|-------------|
-| Emulation | 1 | — | — | 6502 compatible (VBR-relative) |
-| Native-16 | 0 | 01 | 01 | 65816 compatible |
-| Native-32 | 0 | 10 | 10 | Full 32-bit mode |
+| Mode | W1:W0 | M/X | Description |
+|------|-------|-----|-------------|
+| Emulation | 00 | ignored | 6502 compatible (VBR-relative), E derived |
+| Native-16 | 01 | active | 65816 compatible, M/X control widths |
+| Native-32 | 11 | ignored | Full 32-bit mode |
 
-In Native-32, standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
+In Native-32 (W=11), standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
 
 ### Mode Switching
 ```asm
-; Enter Native Mode (from emulation)
+; Enter Native-16 Mode (from any mode)
+    SEPE #$01           ; W=01 (native-16)
+
+; Enter 32-bit Mode (from any mode)
+    SEPE #$03           ; W=11 (32-bit)
+
+; Enter Emulation Mode (from any mode)
+    REPE #$03           ; W=00 (emulation)
+
+; Legacy: Enter Native Mode via XCE
     CLC
-    XCE                 ; E=0
+    XCE                 ; E=0 (sets W=01)
 
-; Enter Emulation Mode
+; Legacy: Enter Emulation Mode via XCE
     SEC
-    XCE                 ; E=1
+    XCE                 ; E=1 (sets W=00)
 
-; Enter 32-bit Mode (from native)
-    REP #$30            ; M=01, X=01 (16-bit first)
-    REPE #$A0           ; M=10, X=10 (32-bit)
-
-; Temporarily use 8-bit A
-    SEP #$20            ; M=00
+; Temporarily use 8-bit A (in native-16, W=01)
+    SEP #$20            ; M=0 (8-bit A)
     ; ... 8-bit ops ...
-    REP #$20            ; M=01 (back to 16-bit)
+    REP #$20            ; M=1 (back to 16-bit A)
 ```
 
 ---
@@ -313,8 +323,8 @@ All extended instructions use the `$02` prefix.
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
 | TRAP #n | $02 $40 | System call #n |
-| REPE #imm | $02 $60 | ExtP &= ~imm |
-| SEPE #imm | $02 $61 | ExtP \|= imm |
+| REPE #imm | $02 $60 | P[13:8] &= ~imm (W0,W1,rsv,S,R,K) |
+| SEPE #imm | $02 $61 | P[13:8] \|= imm (W0,W1,rsv,S,R,K) |
 | WAI | $CB | Wait for interrupt |
 | STP | $DB | Stop processor |
 
@@ -594,10 +604,7 @@ $FFFF_F000 - $FFFF_FFFF   System registers / Vectors
 ### Initialization (Reset Handler)
 ```asm
 reset:
-    CLC
-    XCE                     ; E=0 (native mode)
-    REP #$30                ; 16-bit A/X/Y
-    REPE #$A0               ; 32-bit A/X/Y
+    SEPE #$03               ; W=11 (32-bit mode)
     SD #$00010000           ; D = data segment
     SB #$00000000           ; B = 0 (flat)
     LDX #$FFFFC000

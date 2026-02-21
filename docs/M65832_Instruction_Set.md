@@ -40,7 +40,7 @@ The M and X flags control operand widths in emulation/native-16 modes:
 | M/X = 10 | 32-bit | 32-bit |
 | M/X = 11 | Reserved | Reserved |
 
-In **emulation mode** (E=1), all operations are 8-bit. In **native-32** (M/X=10), standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
+In **emulation mode** (W=00), all operations are 8-bit. In **native-32** (W=11), standard opcodes are fixed 32-bit; use Extended ALU for 8/16-bit sizing.
 
 ---
 
@@ -965,7 +965,7 @@ In native mode, also restores program bank.
 
 ### Stack Instructions
 
-**32-bit Mode:** In 32-bit mode (M=10), ALL stack operations push/pull 32 bits.
+**32-bit Mode:** In 32-bit mode (W=11), ALL stack operations push/pull 32 bits.
 This ensures consistent stack alignment and simplifies ABI design.
 
 #### Push Instructions
@@ -1423,20 +1423,28 @@ Disables register window. Direct page accesses go to memory at D + offset.
 |------|--------|--------|-------|
 | Immediate | REPE #imm8 | $02 $60 | 3 |
 
-Extended P bits:
-- Bit 7: M1 (accumulator width high bit)
-- Bit 6: M0 (accumulator width low bit)
-- Bit 5: X1 (index width high bit)
-- Bit 4: X0 (index width low bit)
-- Bit 3: E (emulation mode - read-only here)
-- Bit 2: S (supervisor mode)
-- Bit 1: R (register window)
-- Bit 0: K (compatibility mode)
+Extended P bits (6-bit operand maps to P[13:8]):
+- Bit 0: W0 (P[8]) - Width mode bit 0
+- Bit 1: W1 (P[9]) - Width mode bit 1
+- Bit 2: reserved/W2 (P[10]) - Reserved for future 64-bit
+- Bit 3: S (P[11]) - Supervisor mode
+- Bit 4: R (P[12]) - Register window
+- Bit 5: K (P[13]) - Compatibility mode
+
+W bits use thermometer encoding: W=00 (emu), W=01 (native-16), W=11 (32-bit), W=10 (reserved).
+
+Note: REP/SEP operate on P[0:7] (C, Z, I, D, X, M, V, N) — same as 65816.
+REPE/SEPE operate on P[8:13] (W0, W1, reserved, S, R, K).
 
 ```asm
-; Switch to 32-bit mode (M=10, X=10)
-    REP #$30            ; First set M=01, X=01 (16-bit)
-    REPE #$A0           ; Then set M1 and X1 for 32-bit
+; Switch to 32-bit mode from any mode (single instruction)
+    SEPE #$03           ; W=11 (32-bit mode)
+
+; Switch to native-16 mode
+    SEPE #$01           ; W=01 (native-16 mode)
+
+; Switch back to emulation mode
+    REPE #$03           ; W=00 (emulation mode)
 ```
 
 #### SEPE - Set Extended Processor Status
@@ -1904,10 +1912,7 @@ Timer registers are memory-mapped in the MMIO region (addresses shown are full 3
 ```asm
 ; Enter Native-32 mode from reset
 reset:
-    CLC                 ; C = 0
-    XCE                 ; E = 0 (native mode)
-    REP #$30            ; M = 01, X = 01 (16-bit)
-    REPE #$A0           ; M = 10, X = 10 (32-bit)
+    SEPE #$03           ; W = 11 (32-bit mode, single instruction)
     
     ; Set up base registers
     SD #$00010000       ; D = data segment base
@@ -2008,13 +2013,13 @@ sys_write:
 | Z | 1 | Result is zero |
 | I | 2 | IRQ interrupts disabled |
 | D | 3 | BCD arithmetic enabled |
-| X0 | 4 | Index width bit 0 |
-| X1 | 5 | Index width bit 1 |
-| M0 | 6 | Accumulator width bit 0 |
-| M1 | 7 | Accumulator width bit 1 |
-| V | 8 | Signed overflow |
-| N | 9 | Result negative (MSB = 1) |
-| E | 10 | Emulation mode (6502) |
+| X | 4 | Index width (65816-compatible): 0=8-bit, 1=16-bit |
+| M | 5 | Accumulator width (65816-compatible): 0=8-bit, 1=16-bit |
+| V | 6 | Signed overflow |
+| N | 7 | Result negative (MSB = 1) |
+| W0 | 8 | Width mode bit 0 |
+| W1 | 9 | Width mode bit 1 |
+| reserved | 10 | Reserved for future W2 (64-bit) |
 | S | 11 | Supervisor mode |
 | R | 12 | Register window enabled |
 | K | 13 | Compatibility mode |

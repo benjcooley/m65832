@@ -531,39 +531,134 @@ run_test "W_mode 32-bit ALU" "test/test_wmode_alu.asm" "00010000" 200
 echo
 echo "--- 16-bit Flag Width Tests ---"
 
-# Test: SEP #$40 enables 16-bit accumulator (M0=1)
+# Test: 16-bit accumulator in 65816 native mode (W=01, M=0)
 cat > test/test_16bit_acc.asm << 'EOF'
-; Switch from 32-bit to 16-bit accumulator via REP/SEP
+; 16-bit accumulator in 65816 native mode
     .org $1000
     .M32
 
-    ; Start in 32-bit mode (M = "10")
-    ; To get 16-bit (M = "01"), clear M1 and set M0
-    REP #$80        ; Clear M1
-    SEP #$40        ; Set M0 -> M = "01" (16-bit)
+    ; Start in 32-bit mode (W=11). Switch to 65816 native (W=01).
+    ; REPE #$02 clears W1 -> W=11->W=00, then SEPE #$01 sets W0 -> W=00->W=01
+    REPE #$02       ; Clear W1 -> W=00
+    SEPE #$01       ; Set W0 -> W=01 (65816 native)
+    REP #$20        ; Clear M flag -> M=0 (16-bit)
     .M16            ; Tell assembler
     LDA #$1234      ; 16-bit immediate load
     STP
 EOF
 
-run_test "16-bit accumulator via REP/SEP" "test/test_16bit_acc.asm" "00001234" 100
+run_test "16-bit accumulator via W mode" "test/test_16bit_acc.asm" "00001234" 100
 
-# Test: 16-bit index via REP/SEP
+# Test: 16-bit index in 65816 native mode
 cat > test/test_16bit_idx.asm << 'EOF'
-; Switch from 32-bit to 16-bit index via REP/SEP
+; 16-bit index in 65816 native mode
     .org $1000
     .M32
 
-    ; Start in 32-bit (X = "10"), switch to 16-bit (X = "01")
-    REP #$20        ; Clear X1
-    SEP #$10        ; Set X0 -> X = "01" (16-bit)
+    ; Start in 32-bit mode (W=11). Switch to 65816 native (W=01).
+    REPE #$02       ; Clear W1 -> W=00
+    SEPE #$01       ; Set W0 -> W=01 (65816 native)
+    REP #$30        ; Clear M and X flags -> M=0 (16-bit A), X=0 (16-bit X/Y)
+    .M16
     .X16            ; Tell assembler
     LDX #$ABCD      ; 16-bit X load
     TXA              ; A = X (should be $ABCD in lower 16 bits)
     STP
 EOF
 
-run_test "16-bit index via REP/SEP" "test/test_16bit_idx.asm" "0000ABCD" 100
+run_test "16-bit index via W mode" "test/test_16bit_idx.asm" "0000ABCD" 100
+
+# W == E alias verification tests
+echo
+echo "--- W/E Alias Tests ---"
+
+# Test: E is derived from W=00 (emulation mode)
+# Start in 32-bit mode (default), use XCE to enter emulation, then verify E=1
+cat > test/test_we_alias_emu.asm << 'EOF'
+; Verify E=1 when W=00 (emulation mode)
+; Start in 32-bit mode. XCE with C=1 enters emulation (W=00).
+; Then XCE again to read back E (should be 1).
+    .org $1000
+    .M32
+
+    SEC             ; C=1
+    XCE             ; C gets old E (0, since W=11), W becomes 00 (C was 1)
+    ; Now in emulation mode (W=00, E=1). C=0 (old E was 0).
+    ; Read E by doing another XCE:
+    SEC             ; C=1
+    XCE             ; C gets old E (should be 1 since W=00), W=00 again (C was 1)
+    ; C should be 1 (E was 1 in emulation mode)
+    ; Return to 32-bit mode for result reporting
+    SEPE #$03       ; W=00 -> W=11
+    LDA #$00000000
+    BCC emu_notset
+    LDA #$00000001  ; C=1 means E was 1 - correct!
+emu_notset:
+    STP
+EOF
+
+run_test "E=1 when W=00 (emulation)" "test/test_we_alias_emu.asm" "00000001" 200
+
+# Test: XCE C=0 enters native (W=01), E reads as 0
+# Start in 32-bit mode, XCE C=1 -> emu, XCE C=0 -> native, read E
+cat > test/test_we_alias_native.asm << 'EOF'
+; Verify E=0 when W=01 (native mode)
+; Start 32-bit. XCE C=1 -> emu (W=00). CLC, XCE -> native (W=01).
+; Then XCE again to read E (should be 0).
+    .org $1000
+    .M32
+
+    ; Enter emulation mode first
+    SEC             ; C=1
+    XCE             ; W=11->W=00, C=0 (old E=0)
+    ; Now in emulation (W=00). Enter native:
+    CLC             ; C=0
+    XCE             ; C gets old E (1, since W=00), W becomes 01 (native)
+    ; Now in native mode (W=01, E=0). C=1 (old E was 1).
+    ; Read E by doing another XCE:
+    SEC             ; C=1
+    XCE             ; C gets old E (should be 0 since W=01), W=00 (C was 1)
+    ; C should be 0 (E was 0 in native mode)
+    ; Return to 32-bit mode for result reporting
+    SEPE #$03       ; W=00 -> W=11
+    LDA #$00000000
+    BCS nat_wasset
+    LDA #$00000001  ; C=0 means E was 0 - correct!
+    BRA nat_done
+nat_wasset:
+    LDA #$000000FF  ; C=1 means E was 1 - wrong!
+nat_done:
+    STP
+EOF
+
+run_test "E=0 when W=01 (native)" "test/test_we_alias_native.asm" "00000001" 200
+
+# Test: W=11 (32-bit), E reads as 0
+# Already in 32-bit mode by default, just read E via XCE
+cat > test/test_we_alias_32bit.asm << 'EOF'
+; Verify E=0 when W=11 (32-bit mode)
+; Default startup is 32-bit mode (W=11). Read E via XCE.
+    .org $1000
+    .M32
+
+    ; In 32-bit mode (W=11). E should be 0 (W != 00).
+    ; XCE to read E: swaps C and derived E
+    SEC             ; C=1
+    XCE             ; C gets old E (should be 0), W=00 (C was 1)
+    ; C should be 0 (E was 0 in 32-bit mode)
+    ; Return to 32-bit mode
+    SEPE #$03       ; W=00 -> W=11
+    LDA #$00000000
+    BCS bit32_wasset
+    LDA #$00000001  ; C=0 means E was 0 - correct!
+    BRA bit32_done
+bit32_wasset:
+    LDA #$000000FF  ; C=1 means E was 1 - wrong!
+bit32_done:
+    STP
+EOF
+
+run_test "E=0 when W=11 (32-bit)" "test/test_we_alias_32bit.asm" "00000001" 200
 
 # Summary
 echo

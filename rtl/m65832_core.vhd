@@ -133,7 +133,8 @@ architecture rtl of M65832_Core is
     signal P_load              : std_logic;
     
     signal E_mode, S_mode, R_mode : std_logic;
-    signal M_width, X_width       : std_logic_vector(1 downto 0);
+    signal M_flag_s, X_flag_s     : std_logic;
+    signal W_mode_reg             : std_logic_vector(1 downto 0);
     
     ---------------------------------------------------------------------------
     -- ALU Signals
@@ -530,9 +531,10 @@ begin
         E_MODE      => E_mode,
         S_MODE      => S_mode,
         R_MODE      => R_mode,
-        M_WIDTH     => M_width,
-        X_WIDTH     => X_width,
-        
+        M_FLAG      => M_flag_s,
+        X_FLAG      => X_flag_s,
+        W_MODE      => W_mode_reg,
+
         WIDTH_M     => M_width_eff,
         WIDTH_X     => X_width_eff
     );
@@ -611,8 +613,8 @@ begin
         IS_EXTENDED     => is_extended,
         IS_REGALU_EXT   => is_regalu_ext,
         E_MODE          => E_mode,
-        M_WIDTH         => M_width,
-        X_WIDTH         => X_width,
+        M_WIDTH         => M_width_eff,
+        X_WIDTH         => X_width_eff,
         COMPAT_MODE     => compat_mode,
         
         IS_ALU_OP       => IS_ALU_OP,
@@ -680,13 +682,12 @@ begin
     -- Wide mode detection
     ---------------------------------------------------------------------------
     
-W_mode <= '1' when M_width = WIDTH_32 else '0';
-compat_mode <= '1' when M_width = WIDTH_32 else P_reg(P_K);
+W_mode <= '1' when W_mode_reg = WMODE_32BIT or W_mode_reg = WMODE_64BIT else '0';
+compat_mode <= '1' when W_mode = '1' else P_reg(P_K);
 M_width_eff <= WIDTH_32 when ext_ldq = '1' else
                ext_alu_size when ext_alu = '1' else
-               WIDTH_32 when W_mode = '1' else
-               M_width;
-X_width_eff <= WIDTH_32 when W_mode = '1' else X_width;
+               get_data_width(M_flag_s, W_mode_reg);
+X_width_eff <= get_index_width(X_flag_s, W_mode_reg);
     illegal_regalu <= '1' when ((IS_REGALU = '1' or IS_SHIFTER = '1' or IS_EXTEND = '1') and R_mode = '0') else '0';
     
     -- JSL/JML/RTL are illegal in 32-bit mode (use JSR/JMP/RTS instead)
@@ -2627,8 +2628,8 @@ WE <= '1' when (state = ST_WRITE or state = ST_WRITE2 or
     ---------------------------------------------------------------------------
     
     E_FLAG <= E_mode;
-    M_FLAG <= M_width;
-    X_FLAG <= X_width;
+    M_FLAG <= M_width_eff;
+    X_FLAG <= X_width_eff;
     
     ---------------------------------------------------------------------------
     -- ALU Connections (simplified)
@@ -3759,20 +3760,25 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
     
     dp_reg_index_next_plus1 <= std_logic_vector(unsigned(dp_reg_index_next) + 1);
     
-    -- REP/SEP and REPE/SEPE all operate on lower 8 bits of P
-    -- In M65832: bits 6-7 are M0/M1, bits 4-5 are X0/X1
+    -- REP/SEP operate on bits 0-7 (N V M X D I Z C) - 65816 compatible
+    -- REPE/SEPE operate on bits 8-13 (W0 W1 rsv S R K) for mode transitions
+    --   data_buffer bit 0 → W0, bit 1 → W1, bit 2 → (rsv), bit 3 → S, bit 4 → R, bit 5 → K
     p_next <= P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) and (not data_buffer(7 downto 0)))
-              when (IS_REP = '1' or ext_repe = '1') else
+              when IS_REP = '1' else
               P_reg(P_WIDTH-1 downto 8) & (P_reg(7 downto 0) or data_buffer(7 downto 0))
-              when (IS_SEP = '1' or ext_sepe = '1') else
+              when IS_SEP = '1' else
+              (P_reg(13 downto 8) and not data_buffer(5 downto 0)) & P_reg(7 downto 0)
+              when ext_repe = '1' else
+              (P_reg(13 downto 8) or data_buffer(5 downto 0)) & P_reg(7 downto 0)
+              when ext_sepe = '1' else
               P_reg;
     
-    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg, int_step, rti_step, IS_XCE, W_mode)
+    process(state, stack_is_pull, IR, data_buffer, ext_cas, cas_match, ext_sci, sci_success, P_reg, int_step, rti_step, IS_XCE, W_mode, E_mode)
     begin
         p_override <= P_reg;
         p_override_valid <= '0';
         if state = ST_EXECUTE and stack_is_pull = '1' and IR = x"28" then
-            -- PLP: in 32-bit mode load full 16-bit P from data_buffer, else 8-bit
+            -- PLP: in 32-bit mode load full 14-bit P from data_buffer, else 8-bit
             if W_mode = '1' then
                 p_override <= data_buffer(P_WIDTH-1 downto 0);
             else
@@ -3780,21 +3786,22 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
             end if;
             p_override_valid <= '1';
         elsif state = ST_EXECUTE and IS_XCE = '1' then
+            -- XCE: swap C with derived E, then set W accordingly
+            -- E is derived as (W = "00"), not a stored bit
             p_override <= P_reg;
-            p_override(P_C) <= P_reg(P_E);
-            p_override(P_E) <= P_reg(P_C);
+            p_override(P_C) <= E_mode;  -- C gets old derived E
             if P_reg(P_C) = '1' then
-                -- Entering emulation mode: force M/X to 8-bit (11 = compat mode)
-                p_override(P_M0) <= '1';
-                p_override(P_M1) <= '1';
-                p_override(P_X0) <= '1';
-                p_override(P_X1) <= '1';
+                -- C was set: entering emulation mode (W=00)
+                p_override(P_W0) <= '0';
+                p_override(P_W1) <= '0';
+                -- Force M=1, X=1 (8-bit, 65816 emulation convention)
+                p_override(P_M) <= '1';
+                p_override(P_X) <= '1';
             else
-                -- Entering native mode: set M/X to 16-bit (01) for 65816 compatibility
-                p_override(P_M0) <= '1';
-                p_override(P_M1) <= '0';
-                p_override(P_X0) <= '1';
-                p_override(P_X1) <= '0';
+                -- C was clear: entering native 65816 mode (W=01)
+                p_override(P_W0) <= '1';
+                p_override(P_W1) <= '0';
+                -- M and X retain current values (65816 behavior)
             end if;
             p_override_valid <= '1';
         elsif state = ST_RTI_NEXT and rti_step = to_unsigned(0, rti_step'length) then

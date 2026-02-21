@@ -562,7 +562,7 @@ static void interactive_mode(m65832_cpu_t *cpu) {
             /* Simple stack backtrace */
             printf("Stack backtrace (SP=%08X):\n", cpu->s);
             uint32_t sp = cpu->s;
-            int width = (cpu->p & P_E) ? 2 : 4;  /* PC width based on mode */
+            int width = IS_EMU(cpu) ? 2 : 4;  /* PC width based on mode */
             for (int i = 0; i < 16 && sp < cpu->memory_size - width; i++) {
                 uint32_t ret_addr;
                 if (width == 2) {

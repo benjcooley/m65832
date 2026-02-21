@@ -29,34 +29,29 @@ architecture sim of tb_M65832_TCS_Native is
     type mem_t is array (0 to 65535) of std_logic_vector(7 downto 0);
     -- Test at $8000 - enter 32-bit mode, test TCS, then PHA to verify SP
     signal mem : mem_t := (
-        16#8000# => x"18",  -- CLC
-        16#8001# => x"FB",  -- XCE -> native mode
-        16#8002# => x"02",  -- REPE #$40
-        16#8003# => x"60",
-        16#8004# => x"40",
-        16#8005# => x"02",  -- SEPE #$80 -> M=10 (32-bit)
-        16#8006# => x"61",
-        16#8007# => x"80",
+        16#8000# => x"02",  -- SEPE #$03 -> W=11 (32-bit)
+        16#8001# => x"61",
+        16#8002# => x"03",
         -- Now in 32-bit mode. Load A with $0000ABCD
-        16#8008# => x"A9",  -- LDA #$0000ABCD
-        16#8009# => x"CD",
-        16#800A# => x"AB",
-        16#800B# => x"00",
-        16#800C# => x"00",
-        16#800D# => x"1B",  -- TCS -> SP = $0000ABCD
+        16#8003# => x"A9",  -- LDA #$0000ABCD
+        16#8004# => x"CD",
+        16#8005# => x"AB",
+        16#8006# => x"00",
+        16#8007# => x"00",
+        16#8008# => x"1B",  -- TCS -> SP = $0000ABCD
         -- Now load a different value and push it to verify SP location
-        16#800E# => x"A9",  -- LDA #$DEADBEEF
-        16#800F# => x"EF",
-        16#8010# => x"BE",
-        16#8011# => x"AD",
-        16#8012# => x"DE",
-        16#8013# => x"48",  -- PHA -> push to $ABCD-4 = $ABC9
+        16#8009# => x"A9",  -- LDA #$DEADBEEF
+        16#800A# => x"EF",
+        16#800B# => x"BE",
+        16#800C# => x"AD",
+        16#800D# => x"DE",
+        16#800E# => x"48",  -- PHA -> push to $ABCD-4 = $ABC9
         -- TSC and store to verify SP
-        16#8014# => x"3B",  -- TSC -> A = SP
-        16#8015# => x"8D",  -- STA $0200
-        16#8016# => x"00",
-        16#8017# => x"02",
-        16#8018# => x"DB",  -- STP
+        16#800F# => x"3B",  -- TSC -> A = SP
+        16#8010# => x"8D",  -- STA $0200
+        16#8011# => x"00",
+        16#8012# => x"02",
+        16#8013# => x"DB",  -- STP
         others => x"00"
     );
     

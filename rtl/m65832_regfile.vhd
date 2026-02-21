@@ -108,12 +108,13 @@ entity M65832_RegFile is
         FLAG_N_IN       : in  std_logic;
         FLAG_N_LOAD     : in  std_logic;
         
-        -- Mode flags
-        E_MODE          : out std_logic;  -- Emulation mode
+        -- Mode flags (E is derived from W, not stored)
+        E_MODE          : out std_logic;  -- Emulation mode: derived as (W = "00")
         S_MODE          : out std_logic;  -- Supervisor mode
         R_MODE          : out std_logic;  -- Register window mode
-        M_WIDTH         : out std_logic_vector(1 downto 0);  -- Accumulator width
-        X_WIDTH         : out std_logic_vector(1 downto 0);  -- Index width
+        M_FLAG          : out std_logic;  -- M flag (1=8-bit, 0=16-bit; 65816 compatible)
+        X_FLAG          : out std_logic;  -- X flag (1=8-bit, 0=16-bit; 65816 compatible)
+        W_MODE          : out std_logic_vector(1 downto 0);  -- W1:W0 (00=emu, 01=native, 10=32-bit)
         
         ---------------------------------------------------------------------------
         -- Width control for register masking
@@ -191,7 +192,7 @@ begin
             Br   <= (others => '0');
             VBRr <= (others => '0');
             Tr   <= (others => '0');
-            Pr   <= "00110000001100";  -- K=0, E=1, S=1, R=0, M1:M0=00, X1:X0=00, D=1, I=1, Z=0, C=0
+            Pr   <= "00100000111100";  -- K=0, R=0, S=1, (rsv)=0, W=00, N=0, V=0, M=1, X=1, D=1, I=1, Z=0, C=0
         elsif rising_edge(CLK) then
             if EN = '1' then
                 -- Accumulator
@@ -211,20 +212,20 @@ begin
                 
                 -- Stack Pointer
                 if SP_LOAD = '1' then
-                    if Pr(P_E) = '1' then
+                    if (Pr(P_W1) & Pr(P_W0)) = WMODE_6502 then
                         -- Emulation mode: SP high byte locked to $01
                         SPr <= x"000001" & SP_IN(7 downto 0);
                     else
                         SPr <= SP_IN;
                     end if;
                 elsif SP_INC = '1' then
-                    if Pr(P_E) = '1' then
+                    if (Pr(P_W1) & Pr(P_W0)) = WMODE_6502 then
                         SPr(7 downto 0) <= std_logic_vector(unsigned(SPr(7 downto 0)) + 1);
                     else
                         SPr <= std_logic_vector(unsigned(SPr) + 1);
                     end if;
                 elsif SP_DEC = '1' then
-                    if Pr(P_E) = '1' then
+                    if (Pr(P_W1) & Pr(P_W0)) = WMODE_6502 then
                         SPr(7 downto 0) <= std_logic_vector(unsigned(SPr(7 downto 0)) - 1);
                     else
                         SPr <= std_logic_vector(unsigned(SPr) - 1);
@@ -331,12 +332,13 @@ begin
     -- Status register
     P_OUT <= Pr;
     
-    -- Mode flags
-    E_MODE  <= Pr(P_E);
+    -- Mode flags (E derived from W, not stored)
+    E_MODE  <= '1' when (Pr(P_W1) & Pr(P_W0)) = WMODE_6502 else '0';
     S_MODE  <= Pr(P_S);
     R_MODE  <= Pr(P_R);
-    M_WIDTH <= Pr(P_M1) & Pr(P_M0);
-    X_WIDTH <= Pr(P_X1) & Pr(P_X0);
+    M_FLAG  <= Pr(P_M);
+    X_FLAG  <= Pr(P_X);
+    W_MODE  <= Pr(P_W1) & Pr(P_W0);
     
     -- Register window read ports
     process(REG_WIN_EN, RW_ADDR1, RW_ADDR2, RW_WIDTH, RW_BYTE_SEL, RegWindow)

@@ -16,11 +16,8 @@
     .M32
     .X32
 
-    ; Enter 32-bit native mode
-    CLC
-    XCE
-    REP #$30
-    SEPE #$A0
+    ; Enter 32-bit native mode (W=00 → W=11)
+    SEPE #$03
 
     ; Set D=0 so DP addresses map to $0000+
     LDA #0

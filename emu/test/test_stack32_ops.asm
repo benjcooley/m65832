@@ -7,12 +7,8 @@
 
 start:
     ; Enter 32-bit native mode
-    clc
-    xce                     ; Enter native mode (16-bit, M=01)
-    
-    ; Now set M=10 for 32-bit mode using extended instructions
-    .byte $02, $60, $40     ; REPE #$40 - clear M0 (bit 6)
-    .byte $02, $61, $80     ; SEPE #$80 - set M1 (bit 7)
+    ; Enter 32-bit mode (W=00 → W=11)
+    .byte $02, $61, $03     ; SEPE #$03 - set W1+W0 (enter 32-bit mode)
     
     ; Initialize stack pointer to a known location
     lda #$0000FFFC

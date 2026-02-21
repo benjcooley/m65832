@@ -20,9 +20,25 @@
 #define FLAG_TST(cpu, f)    (((cpu)->p & (f)) != 0)
 #define FLAG_PUT(cpu, f, v) do { if (v) FLAG_SET(cpu, f); else FLAG_CLR(cpu, f); } while(0)
 
-/* Register width helpers */
-#define WIDTH_M(cpu)    ((m65832_width_t)(((cpu)->p >> 6) & 3))
-#define WIDTH_X(cpu)    ((m65832_width_t)(((cpu)->p >> 4) & 3))
+/* Register width helpers
+ * W=00 (6502): always 8-bit
+ * W=01 (65816): M/X single-bit controls 8/16
+ * W=10 (32-bit): always 32-bit (M/X ignored)
+ */
+static inline m65832_width_t get_width_m(const m65832_cpu_t *cpu) {
+    int w = GET_W(cpu);
+    if (w == WMODE_6502) return WIDTH_8;
+    if (w >= WMODE_32BIT) return WIDTH_32;
+    return (cpu->p & P_M) ? WIDTH_8 : WIDTH_16;
+}
+static inline m65832_width_t get_width_x(const m65832_cpu_t *cpu) {
+    int w = GET_W(cpu);
+    if (w == WMODE_6502) return WIDTH_8;
+    if (w >= WMODE_32BIT) return WIDTH_32;
+    return (cpu->p & P_X) ? WIDTH_8 : WIDTH_16;
+}
+#define WIDTH_M(cpu)    get_width_m(cpu)
+#define WIDTH_X(cpu)    get_width_x(cpu)
 #define SIZE_M(cpu)     (1 << WIDTH_M(cpu))
 #define SIZE_X(cpu)     (1 << WIDTH_X(cpu))
 #define MASK_M(cpu)     ((1ULL << (8 * SIZE_M(cpu))) - 1)
@@ -33,8 +49,6 @@
 #define SIGN_16         0x8000
 #define SIGN_32         0x80000000
 
-/* Emulation mode check */
-#define IS_EMU(cpu)     FLAG_TST(cpu, P_E)
 #define IS_NATIVE(cpu)  (!IS_EMU(cpu))
 
 /* ============================================================================
@@ -3385,18 +3399,26 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                     case 0x52: /* FENCEW */
                         cycles = 2;
                         break;
-                    case 0x60: /* REPE #imm8 - Clear bits in P (extended, can clear M1/M0/X1/X0) */
+                    case 0x60: /* REPE #imm8 - Clear bits in P upper (bits 8-13) */
+                        /* data byte bit 0→W0, 1→W1, 2→(rsv), 3→S, 4→R, 5→K */
                         val = fetch8(cpu);
-                        /* User mode cannot modify S bit */
-                        if (!FLAG_TST(cpu, P_S)) {
-                            val &= ~P_S;  /* Mask out S bit for user mode */
+                        {
+                            uint16_t upper_mask = (val & 0x3F) << 8;  /* Map to P bits 8-13 */
+                            /* User mode cannot modify S bit */
+                            if (!FLAG_TST(cpu, P_S)) {
+                                upper_mask &= ~P_S;
+                            }
+                            cpu->p &= ~upper_mask;
                         }
-                        cpu->p &= ~val;
                         cycles = 3;
                         break;
-                    case 0x61: /* SEPE #imm8 - Set bits in P (extended, can set M1/M0/X1/X0) */
+                    case 0x61: /* SEPE #imm8 - Set bits in P upper (bits 8-13) */
+                        /* data byte bit 0→W0, 1→W1, 2→(rsv), 3→S, 4→R, 5→K */
                         val = fetch8(cpu);
-                        cpu->p |= val;
+                        {
+                            uint16_t upper_mask = (val & 0x3F) << 8;  /* Map to P bits 8-13 */
+                            cpu->p |= upper_mask;
+                        }
                         cycles = 3;
                         break;
                     case 0x70: /* PHD - Push D (32-bit) */
@@ -4231,40 +4253,29 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             FLAG_CLR(cpu, P_V);
             cycles = 2;
             break;
-        case 0xC2: /* REP #imm */
+        case 0xC2: /* REP #imm - clears bits in P[7:0] (N V M X D I Z C) */
             val = fetch8(cpu);
-            /* User mode cannot modify S bit */
-            if (!FLAG_TST(cpu, P_S)) {
-                val &= ~P_S;  /* Mask out S bit for user mode */
-            }
-            cpu->p &= ~val;
+            cpu->p &= ~(val & 0xFF);  /* Only affect bits 0-7 */
             cycles = 3;
             break;
-        case 0xE2: /* SEP #imm */
+        case 0xE2: /* SEP #imm - sets bits in P[7:0] (N V M X D I Z C) */
             val = fetch8(cpu);
-            /* User mode cannot set S bit (privilege escalation) */
-            if (!FLAG_TST(cpu, P_S)) {
-                if (val & P_S) {
-                    cpu->trap = TRAP_PRIVILEGE;
-                    cpu->trap_addr = cpu->pc - 2;
-                    cpu->running = false;
-                    cycles = 3;
-                    break;
-                }
-            }
-            cpu->p |= val;
-            /* Note: M65832 allows width changes in emulation mode (unlike 65816) */
+            cpu->p |= (val & 0xFF);  /* Only affect bits 0-7 */
             cycles = 3;
             break;
         case 0xFB: /* XCE - Exchange Carry and Emulation */
             {
                 bool c = FLAG_TST(cpu, P_C);
-                bool e = FLAG_TST(cpu, P_E);
+                bool e = IS_EMU(cpu);  /* E is derived from W == 0 */
                 FLAG_PUT(cpu, P_C, e);
-                FLAG_PUT(cpu, P_E, c);
-                if (FLAG_TST(cpu, P_E)) {
-                    /* Entering emulation mode - M65832 does NOT force 8-bit width */
+                if (c) {
+                    /* C was set: entering emulation mode (W=00) */
+                    SET_W(cpu, WMODE_6502);
+                    cpu->p |= P_M | P_X;  /* Force M=1, X=1 (8-bit) */
                     cpu->s = 0x100 | (cpu->s & 0xFF);  /* Stack limited to page 1 */
+                } else {
+                    /* C was clear: entering native 65816 mode (W=01) */
+                    SET_W(cpu, WMODE_65816);
                 }
             }
             cycles = 2;
@@ -4439,10 +4450,9 @@ void m65832_emu_reset(m65832_cpu_t *cpu) {
     cpu->t = 0;
     cpu->vbr = 0;
     
-    /* RTL reset state: P = 0x300C
-     * E=1 (emulation), S=1 (supervisor), I=1 (IRQ disabled), D=1 (decimal)
-     * M=00 (8-bit in emu), X=00 (8-bit in emu) */
-    cpu->p = P_E | P_S | P_I | P_D;
+    /* RTL reset state: W=00 (emulation), S=1, I=1, D=1, M=1, X=1
+     * E is derived from W=00 (emulation mode). M=1 and X=1 for 8-bit. */
+    cpu->p = P_S | P_I | P_D | P_M | P_X;  /* W=00 implicitly (all W bits clear) */
     cpu->s = 0x000001FF;  /* 6502-compatible stack pointer */
     
     /* MMU registers reset */
@@ -4489,12 +4499,8 @@ void m65832_emu_reset(m65832_cpu_t *cpu) {
 void m65832_emu_enter_native32(m65832_cpu_t *cpu) {
     if (!cpu) return;
     
-    /* Clear emulation flag, set 32-bit mode */
-    cpu->p &= ~P_E;                    /* E=0: native mode */
-    cpu->p &= ~(P_M0 | P_M1);          /* Clear M bits */
-    cpu->p |= P_M1;                    /* M=10: 32-bit A */
-    cpu->p &= ~(P_X0 | P_X1);          /* Clear X bits */
-    cpu->p |= P_X1;                    /* X=10: 32-bit X/Y */
+    /* Set W=10 (32-bit mode), clear D. M/X are ignored in 32-bit mode. */
+    SET_W(cpu, WMODE_32BIT);
     cpu->p &= ~P_D;                    /* D=0: binary mode */
     cpu->s = 0x0000FFFF;               /* Full stack range */
 }
@@ -5051,7 +5057,7 @@ bool m65832_flag_i(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_I); }
 bool m65832_flag_d(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_D); }
 bool m65832_flag_v(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_V); }
 bool m65832_flag_n(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_N); }
-bool m65832_flag_e(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_E); }
+bool m65832_flag_e(m65832_cpu_t *cpu) { return IS_EMU(cpu); }
 bool m65832_flag_s(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_S); }
 bool m65832_flag_r(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_R); }
 bool m65832_flag_k(m65832_cpu_t *cpu) { return FLAG_TST(cpu, P_K); }
@@ -5112,8 +5118,9 @@ bool m65832_remove_watchpoint(m65832_cpu_t *cpu, uint32_t addr) {
 }
 
 void m65832_print_state(m65832_cpu_t *cpu) {
-    const char *mode = IS_EMU(cpu) ? "EMU" : "NAT";
-    /* M65832: Width is controlled by M1:M0 and X1:X0 regardless of E mode */
+    const char *modes[] = {"EMU", "NAT16", "NAT32", "NAT64"};
+    const char *mode = modes[GET_W(cpu) & 3];
+    /* M65832: Width is controlled by W mode and M/X flags */
     int width_a = SIZE_M(cpu);
     int width_x = SIZE_X(cpu);
     
@@ -5131,7 +5138,7 @@ void m65832_print_state(m65832_cpu_t *cpu) {
            FLAG_TST(cpu, P_K) ? 'K' : '-',
            FLAG_TST(cpu, P_R) ? 'R' : '-',
            FLAG_TST(cpu, P_S) ? 'S' : '-',
-           FLAG_TST(cpu, P_E) ? 'E' : '-',
+           IS_EMU(cpu) ? 'E' : '-',
            FLAG_TST(cpu, P_D) ? 'D' : '-',
            FLAG_TST(cpu, P_I) ? 'I' : '-',
            FLAG_TST(cpu, P_Z) ? 'Z' : '-',
@@ -5159,9 +5166,13 @@ int m65832_disassemble(m65832_cpu_t *cpu, uint32_t addr, char *buf, size_t bufsi
     M65832DisCtx ctx;
     m65832_dis_init(&ctx);
     ctx.emu_mode = IS_EMU(cpu) ? 1 : 0;
-    ctx.m_flag = WIDTH_M(cpu);
-    ctx.x_flag = WIDTH_X(cpu);
-    
+    /* Map WIDTH enum (0,1,2) to WMODE encoding (0,1,3) for disassembler */
+    int wm = WIDTH_M(cpu);
+    int wx = WIDTH_X(cpu);
+    ctx.m_flag = (wm == WIDTH_32) ? WMODE_32BIT : wm;
+    ctx.x_flag = (wx == WIDTH_32) ? WMODE_32BIT : wx;
+    ctx.r_flag = FLAG_TST(cpu, P_R) ? 1 : 0;
+
     return m65832_disasm(instbuf, 8, addr, buf, bufsize, &ctx);
 }
 

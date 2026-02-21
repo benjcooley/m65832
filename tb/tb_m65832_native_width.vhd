@@ -2,20 +2,20 @@
 -- Test native mode width switching (8-bit, 16-bit, 32-bit)
 --
 -- Verifies:
---   1. M/X flags control data width in native non-32-bit mode
---   2. In W_mode (M=10), all standard instructions are 32-bit
---   3. In W_mode, X_width is forced to 32-bit regardless of X flags
+--   1. M/X flags control data width in native mode (W=01)
+--   2. In 32-bit mode (W=11), all standard instructions are 32-bit
+--   3. In W=11 mode, X_width is forced to 32-bit regardless of X flag
 --
--- Test sequence:
---   T1: Enter native mode (CLC;XCE) -> M=01,X=01 (16-bit)
+-- Test sequence (new thermometer W encoding):
+--   T1: SEPE #$01 -> W=01 (native), REP #$30 -> M=0,X=0 (16-bit)
 --       LDA #$1234 -> store $0200 (expect 16-bit store: 34 12)
---   T2: REPE #$40 -> M=00 (8-bit)
+--   T2: SEP #$20 -> M=1 (8-bit in native mode)
 --       LDA #$AB -> store $0204 (expect 8-bit store: AB)
---   T3: SEPE #$80 -> M=10 (32-bit, W_mode active)
+--   T3: SEPE #$03 -> W=11 (32-bit mode)
 --       LDA #$DEADBEEF -> store $0208 (expect 32-bit store)
---   T4: While M=10 (W_mode), set X flags to 00 (8-bit)
---       LDX #$CAFEBABE -> store $020C (expect 32-bit: X forced by W_mode)
---   T5: Switch M back to 01 (16-bit), exit W_mode
+--   T4: While W=11, REP #$10 to clear X flag (but X forced 32-bit by W=11)
+--       LDX #$CAFEBABE -> store $020C (expect 32-bit: X forced by W=11)
+--   T5: REPE #$02 -> W=01 (native), REP #$20 -> M=0 (16-bit)
 --       LDA #$AABB -> store $0210 (expect 16-bit store: BB AA)
 
 library IEEE;
@@ -48,83 +48,79 @@ architecture sim of tb_M65832_Native_Width is
     signal mem : mem_t := (
         -- ===== Test program at $8000 =====
 
-        -- T1: Enter native mode, test 16-bit LDA
-        16#8000# => x"18",  -- CLC
-        16#8001# => x"FB",  -- XCE -> native mode, M=01 (16-bit), X=01 (16-bit)
-        16#8002# => x"A9",  -- LDA #$1234 (16-bit imm, M=01)
-        16#8003# => x"34",
-        16#8004# => x"12",
-        16#8005# => x"8D",  -- STA $0200 (16-bit store)
-        16#8006# => x"00",
-        16#8007# => x"02",
+        -- T1: Enter native mode (W=01), set 16-bit M/X
+        16#8000# => x"02",  -- SEPE #$01 -> W=01 (native)
+        16#8001# => x"61",
+        16#8002# => x"01",
+        16#8003# => x"C2",  -- REP #$30 -> M=0, X=0 (16-bit)
+        16#8004# => x"30",
+        16#8005# => x"A9",  -- LDA #$1234 (16-bit imm)
+        16#8006# => x"34",
+        16#8007# => x"12",
+        16#8008# => x"8D",  -- STA $0200 (16-bit store)
+        16#8009# => x"00",
+        16#800A# => x"02",
 
-        -- T2: Switch to 8-bit, test 8-bit LDA
-        16#8008# => x"02",  -- REPE #$40 (clear M0: M goes 01->00 = 8-bit)
-        16#8009# => x"60",
-        16#800A# => x"40",
-        16#800B# => x"A9",  -- LDA #$AB (8-bit imm, M=00)
-        16#800C# => x"AB",
-        16#800D# => x"8D",  -- STA $0204 (8-bit store)
-        16#800E# => x"04",
-        16#800F# => x"02",
+        -- T2: Switch to 8-bit via SEP #$20 (M=1)
+        16#800B# => x"E2",  -- SEP #$20 -> M=1 (8-bit)
+        16#800C# => x"20",
+        16#800D# => x"A9",  -- LDA #$AB (8-bit imm)
+        16#800E# => x"AB",
+        16#800F# => x"8D",  -- STA $0204 (8-bit store)
+        16#8010# => x"04",
+        16#8011# => x"02",
 
-        -- T3: Switch to 32-bit (W_mode), test 32-bit LDA
-        16#8010# => x"02",  -- SEPE #$80 (set M1: M goes 00->10 = 32-bit)
-        16#8011# => x"61",
-        16#8012# => x"80",
-        16#8013# => x"A9",  -- LDA #$DEADBEEF (32-bit imm, W_mode)
-        16#8014# => x"EF",
-        16#8015# => x"BE",
-        16#8016# => x"AD",
-        16#8017# => x"DE",
-        16#8018# => x"8D",  -- STA $0208 (32-bit store)
-        16#8019# => x"08",
-        16#801A# => x"02",
+        -- T3: Switch to 32-bit mode (W=11)
+        16#8012# => x"02",  -- SEPE #$03 -> W=11 (32-bit)
+        16#8013# => x"61",
+        16#8014# => x"03",
+        16#8015# => x"A9",  -- LDA #$DEADBEEF (32-bit imm)
+        16#8016# => x"EF",
+        16#8017# => x"BE",
+        16#8018# => x"AD",
+        16#8019# => x"DE",
+        16#801A# => x"8D",  -- STA $0208 (32-bit store)
+        16#801B# => x"08",
+        16#801C# => x"02",
 
-        -- T4: While M=10 (W_mode active), set X flags to 00 (would be 8-bit)
-        --     but X should be FORCED to 32-bit by W_mode
-        16#801B# => x"02",  -- REPE #$30 (clear X1 and X0: X goes to 00)
-        16#801C# => x"60",
-        16#801D# => x"30",  -- #$30 = bits 5,4 = X1,X0
-        16#801E# => x"A2",  -- LDX #$CAFEBABE (32-bit: X forced by W_mode)
-        16#801F# => x"BE",
-        16#8020# => x"BA",
-        16#8021# => x"FE",
-        16#8022# => x"CA",
-        16#8023# => x"8E",  -- STX $020C (32-bit store)
-        16#8024# => x"0C",
-        16#8025# => x"02",
+        -- T4: While W=11, clear X flag (but X forced 32-bit by W=11)
+        16#801D# => x"C2",  -- REP #$10 -> X=0 (would be 16-bit, but forced 32 by W=11)
+        16#801E# => x"10",
+        16#801F# => x"A2",  -- LDX #$CAFEBABE (32-bit: X forced by W=11)
+        16#8020# => x"BE",
+        16#8021# => x"BA",
+        16#8022# => x"FE",
+        16#8023# => x"CA",
+        16#8024# => x"8E",  -- STX $020C (32-bit store)
+        16#8025# => x"0C",
+        16#8026# => x"02",
 
-        -- T5: Exit W_mode: clear M1, set M0 -> M=01 (16-bit)
-        16#8026# => x"02",  -- REPE #$80 (clear M1: M goes 10->00)
-        16#8027# => x"60",
-        16#8028# => x"80",
-        16#8029# => x"02",  -- SEPE #$40 (set M0: M goes 00->01 = 16-bit)
-        16#802A# => x"61",
-        16#802B# => x"40",
-        16#802C# => x"A9",  -- LDA #$AABB (16-bit imm, M=01)
+        -- T5: Exit 32-bit: REPE #$02 -> W=01 (native), REP #$20 -> M=0 (16-bit)
+        16#8027# => x"02",  -- REPE #$02 -> clear W1 -> W=01 (native)
+        16#8028# => x"60",
+        16#8029# => x"02",
+        16#802A# => x"C2",  -- REP #$20 -> M=0 (16-bit, since M was 1 from T2)
+        16#802B# => x"20",
+        16#802C# => x"A9",  -- LDA #$AABB (16-bit imm)
         16#802D# => x"BB",
         16#802E# => x"AA",
         16#802F# => x"8D",  -- STA $0210 (16-bit store)
         16#8030# => x"10",
         16#8031# => x"02",
 
-        -- Completion: write marker to $0300
-        16#8032# => x"02",  -- SEPE #$80 (set M1: back to 32-bit for marker)
+        -- Completion: switch to 32-bit for marker write
+        16#8032# => x"02",  -- SEPE #$03 -> W=11 (32-bit)
         16#8033# => x"61",
-        16#8034# => x"80",
-        16#8035# => x"02",  -- REPE #$40 (clear M0: M=10)
-        16#8036# => x"60",
-        16#8037# => x"40",
-        16#8038# => x"A9",  -- LDA #$00000042 (32-bit)
-        16#8039# => x"42",
-        16#803A# => x"00",
+        16#8034# => x"03",
+        16#8035# => x"A9",  -- LDA #$00000042 (32-bit)
+        16#8036# => x"42",
+        16#8037# => x"00",
+        16#8038# => x"00",
+        16#8039# => x"00",
+        16#803A# => x"8D",  -- STA $0300
         16#803B# => x"00",
-        16#803C# => x"00",
-        16#803D# => x"8D",  -- STA $0300
-        16#803E# => x"00",
-        16#803F# => x"03",
-        16#8040# => x"DB",  -- STP
+        16#803C# => x"03",
+        16#803D# => x"DB",  -- STP
 
         others => x"00"
     );

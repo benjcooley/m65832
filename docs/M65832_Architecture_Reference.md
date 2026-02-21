@@ -115,7 +115,7 @@ Value:    $78    $56    $34    $12     ; Represents $12345678
 │  │  │32-bit │  │32-bit │  │32-bit │  │32-bit │  │  32-bit   │ │ │
 │  │  └───────┘  └───────┘  └───────┘  └───────┘  └───────────┘ │ │
 │  │  ┌─────────────────────────────────────────────────────────┐ │ │
-│  │  │  P: C Z I D X1 X0 M1 M0 V N E S R K (14 bits)          │ │ │
+│  │  │  P: C Z I D X M V N W0 W1 rsv S R K (14 bits)           │ │ │
 │  │  └─────────────────────────────────────────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                              │                                   │
@@ -167,25 +167,37 @@ Value:    $78    $56    $34    $12     ; Represents $12345678
 
 #### 3.1.1 Accumulator (A)
 
-The primary arithmetic register, supporting 8, 16, or 32-bit operations based on the M flag state.
+The primary arithmetic register, supporting 8, 16, or 32-bit operations based on M flag and W bits.
 
-| M1:M0 | Width | Bits Used | Notation |
-|-------|-------|-----------|----------|
-| 00    | 8-bit | A[7:0]    | .A       |
-| 01    | 16-bit| A[15:0]   | .W       |
-| 10    | 32-bit| A[31:0]   | .L       |
-| 11    | Reserved | — | — |
+In emulation/native-16 modes, width is controlled by the M flag (bit 5 of P):
+- M=0: 8-bit accumulator
+- M=1: 16-bit accumulator
+
+In 32-bit mode (W=11), the accumulator is always 32-bit; M is ignored.
+
+| Mode | Width | Bits Used | Notation |
+|------|-------|-----------|----------|
+| Emu (W=00) | 8-bit | A[7:0] | .A |
+| Native M=0 (W=01) | 8-bit | A[7:0] | .A |
+| Native M=1 (W=01) | 16-bit | A[15:0] | .W |
+| 32-bit (W=11) | 32-bit | A[31:0] | .L |
 
 #### 3.1.2 Index Registers (X, Y)
 
-Used for indexed addressing modes. Width controlled by X flag.
+Used for indexed addressing modes. Width controlled by X flag and W bits.
 
-| X1:X0 | Width | Bits Used |
-|-------|-------|-----------|
-| 00    | 8-bit | [7:0]     |
-| 01    | 16-bit| [15:0]    |
-| 10    | 32-bit| [31:0]    |
-| 11    | Reserved | — |
+In emulation/native-16 modes, width is controlled by the X flag (bit 4 of P):
+- X=0: 8-bit index registers
+- X=1: 16-bit index registers
+
+In 32-bit mode (W=11), index registers are always 32-bit; X is ignored.
+
+| Mode | Width | Bits Used |
+|------|-------|-----------|
+| Emu (W=00) | 8-bit | [7:0] |
+| Native X=0 (W=01) | 8-bit | [7:0] |
+| Native X=1 (W=01) | 16-bit | [15:0] |
+| 32-bit (W=11) | 32-bit | [31:0] |
 
 #### 3.1.3 Stack Pointer (S)
 
@@ -257,7 +269,7 @@ The status register is a 14-bit internal register extending the 65816 model. The
 Internal P Register (14 bits):
  Bit 13  12  11  10   9   8   7   6   5   4   3   2   1   0
     ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
-    │ K │ R │ S │ E │ N │ V │M1 │M0 │X1 │X0 │ D │ I │ Z │ C │
+    │ K │ R │ S │rsv│W1 │W0 │ N │ V │ M │ X │ D │ I │ Z │ C │
     └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
@@ -271,34 +283,58 @@ Internal P Register (14 bits):
 | 1 | Z | Zero - set if result is zero |
 | 2 | I | IRQ Disable - mask IRQ when set |
 | 3 | D | Decimal - enable BCD arithmetic (8/16-bit only) |
-| 8 | V | Overflow - set on signed overflow |
-| 9 | N | Negative - set if result has MSB=1 |
+| 6 | V | Overflow - set on signed overflow |
+| 7 | N | Negative - set if result has MSB=1 |
 
 #### Width Control Flags
 
+| Bit | Name | Description |
+|-----|------|-------------|
+| 4 | X | Index width (65816-compatible position): 0=8-bit, 1=16-bit |
+| 5 | M | Accumulator width (65816-compatible position): 0=8-bit, 1=16-bit |
+
+These single-bit M and X flags are at the same positions as the 65816 (bit 5 = M, bit 4 = X). REP/SEP operate on P[0:7] (C, Z, I, D, X, M, V, N) exactly as on the 65816.
+
+#### Width Mode (W) Bits — Thermometer Encoding
+
 | Bits | Name | Description |
 |------|------|-------------|
-| 5:4 | X1:X0 | Index width: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved |
-| 7:6 | M1:M0 | Accumulator width: 00=8-bit, 01=16-bit, 10=32-bit, 11=reserved |
+| 8 | W0 | Width mode bit 0 |
+| 9 | W1 | Width mode bit 1 |
+| 10 | reserved | Reserved for future W2 (64-bit mode) |
+
+The W bits use thermometer encoding to select the processor width mode:
+
+| W1:W0 | Mode | Description |
+|-------|------|-------------|
+| 00 | 6502 Emulation | 8-bit, 64KB via VBR (E is derived: E = W==00) |
+| 01 | 65816 Native | 16-bit default, M/X control widths |
+| 11 | 32-bit Native | Full 32-bit mode, M/X ignored |
+| 10 | Reserved | Reserved for future use |
+
+Future: W2 bit (P[10]) enables 64-bit mode (W=111).
+
+The E flag is no longer stored directly; it is **derived** from W=00. When W=00, the processor is in emulation mode (E=1 equivalent). Any other W value means native mode (E=0 equivalent).
+
+Any mode transition can be done in a single SEPE or REPE instruction thanks to the thermometer encoding. SEPE works from any mode, including emulation mode.
 
 #### Mode/Privilege Flags
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| 10 | E | Emulation mode: 1=6502 mode, 0=Native mode |
 | 11 | S | Supervisor: 1=Supervisor privilege, 0=User privilege |
 | 12 | R | Register Window: 1=DP accesses register file, 0=DP accesses memory |
 | 13 | K | Compatibility: 1=illegal opcodes become NOP |
 
 #### Stack Operations and P Register Format
 
-**32-bit Mode:** In 32-bit mode (M=10), ALL stack operations push/pull 32 bits.
+**32-bit Mode:** In 32-bit mode (W=11), ALL stack operations push/pull 32 bits.
 This includes PHP/PLP, PHA/PLA, PHX/PLX, PHY/PLY, PHD/PLD, PHB/PLB, JSR/RTS.
 Note: JSL and RTL are **illegal** in 32-bit mode (reserved for M65864).
 
 When pushed to the stack (PHP/PLP), flags are packed as follows:
 
-**8-bit mode (emulation):** Single byte pushed
+**8-bit mode (emulation, W=00):** Single byte pushed
 ```
  Bit 7   6   5   4   3   2   1   0
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
@@ -306,16 +342,16 @@ When pushed to the stack (PHP/PLP), flags are packed as follows:
     └───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
-**32-bit mode:** Full 16-bit P register pushed (zero-extended to 32 bits)
+**32-bit mode (W=11):** Full 14-bit P register pushed (zero-extended to 32 bits)
 ```
- Bits 31-16: Zero
- Bits 15-8 (extended byte):
+ Bits 31-14: Zero
+ Bits 13-8 (extended byte):
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
-    │M1 │M0 │X1 │X0 │ E │ S │ R │ K │
+    │ K │ R │ S │rsv│W1 │W0 │ 0 │ 0 │
     └───┴───┴───┴───┴───┴───┴───┴───┘
  Bits 7-0 (standard byte):
     ┌───┬───┬───┬───┬───┬───┬───┬───┐
-    │ N │ V │ 1 │ B │ D │ I │ Z │ C │
+    │ N │ V │ M │ X │ D │ I │ Z │ C │
     └───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
@@ -346,55 +382,64 @@ This gives 6502-style short encodings with register-machine performance.
 
 > **RTL Reference:** Mode handling in `m65832_core.vhd`, width functions in `m65832_pkg.vhd`
 
-### 4.1 Emulation Mode (E=1)
+### 4.1 Emulation Mode (W=00)
 
-Binary-compatible 6502 behavior:
+Binary-compatible 6502 behavior (E is derived from W=00):
 - 8-bit A, X, Y (enforced by `get_data_width`/`get_index_width` functions)
 - 16-bit PC (relative to VBR)
 - Stack at VBR + $0100-$01FF (high byte of SP locked to $01)
 - Zero Page at VBR + $0000-$00FF
 - 64KB address space window (VBR-relative)
 
-Enter via: `SEC : XCE` (exchange carry with E flag)
+Enter via: `REPE #$03` (clear W1:W0) or legacy `SEC : XCE`
 
-### 4.2 Native-16 Mode (E=0, M=01, X=01)
+### 4.2 Native-16 Mode (W=01)
 
 65816-compatible behavior:
-- 16-bit A, X, Y (or 8-bit via M/X flags)
+- M/X flags control register widths (8 or 16-bit)
 - 16-bit PC (B register extends to 32-bit)
 - Full 32-bit address space via B register
 - Stepping stone for 65816 code migration
 
-### 4.3 Native-32 Mode (E=0, M=10, X=10)
+Enter via: `SEPE #$01` (set W0, W=01)
+
+### 4.3 Native-32 Mode (W=11)
 
 Full 32-bit operation:
-- 32-bit A, X, Y
+- 32-bit A, X, Y (M/X flags ignored)
 - 32-bit PC
-- 32-bit stack pointer (when W=1)
+- 32-bit stack pointer
 - Flat 32-bit virtual addressing
 - Paging to 65-bit physical addresses
 
-Enter via: `CLC : XCE` then `REP #$A0` (set M1, X1)
+Enter via: `SEPE #$03` (set W1:W0, W=11)
 
 ### 4.4 Mode Transition Summary
 
+Thanks to the thermometer W encoding, any mode transition can be done with a single SEPE or REPE instruction. SEPE works from any mode, including emulation mode.
+
 ```
                     ┌─────────────────┐
-                    │  Reset (E=1)    │
+                    │  Reset (W=00)   │
                     │  Emulation Mode │
                     └────────┬────────┘
-                             │ CLC : XCE
+                             │ SEPE #$01
                              ▼
                     ┌─────────────────┐
                     │  Native-16      │
-                    │  E=0, M=01,X=01 │
+                    │  W=01, M/X ctrl │
                     └────────┬────────┘
-                             │ REP #$A0
+                             │ SEPE #$03
                              ▼
                     ┌─────────────────┐
                     │  Native-32      │
-                    │  E=0, M=10,X=10 │
+                    │  W=11           │
                     └─────────────────┘
+
+Direct transitions are also possible:
+  Emu → 32-bit:  SEPE #$03  (single instruction)
+  32-bit → Emu:  REPE #$03  (single instruction)
+  32-bit → 16:   REPE #$02  (clear W1, keep W0)
 ```
 
 ---
@@ -434,7 +479,7 @@ $FFFF_F000 - $FFFF_FFFF   Exception vectors, system registers
 
 ### 5.3 Stack Operations
 
-Native mode stack (W=1):
+Native mode stack (W!=00):
 - S is 32-bit, points anywhere
 - Push: `S ← S - width; [S] ← value`
 - Pull: `value ← [S]; S ← S + width`
@@ -514,9 +559,9 @@ In 32-bit mode:
 Operand is part of instruction. In native-32 mode, traditional instructions are fixed 32-bit and M/X is ignored for sizing; use Extended ALU for 8/16-bit immediates. In emulation/native-16, width follows M/X.
 
 ```asm
-; 65816 native sizing (M/X-controlled)
-LDA #$12        ; 8-bit immediate (M=00)
-LDA #$1234      ; 16-bit immediate (M=01)
+; 65816 native sizing (M/X-controlled, W=01)
+LDA #$12        ; 8-bit immediate (M=0)
+LDA #$1234      ; 16-bit immediate (M=1)
 
 ; 32-bit native sizing (traditional instructions are fixed 32-bit)
 LDA #$12345678  ; 32-bit immediate
@@ -851,7 +896,7 @@ Traditional (always 32-bit in 32-bit mode).
 
 #### JMP - Jump
 
-**8/16-bit mode (M=00 or M=01):**
+**8/16-bit mode (W=00 or W=01):**
 | Syntax | Opcode | Bytes | Description |
 |--------|--------|-------|-------------|
 | JMP $XXXX | $4C | 3 | PC = abs16 |
@@ -859,7 +904,7 @@ Traditional (always 32-bit in 32-bit mode).
 | JMP ($XXXX,X) | $7C | 3 | PC = [abs16 + X] (read 16-bit target) |
 | JML $XXXXXX | $5C | 4 | PC = abs24 (24-bit long jump) |
 
-**32-bit mode (M=10):**
+**32-bit mode (W=11):**
 | Syntax | Opcode | Bytes | Description |
 |--------|--------|-------|-------------|
 | JMP $XXXXXXXX | $4C | 5 | PC = abs32 (32-bit absolute) |
@@ -870,13 +915,13 @@ Traditional (always 32-bit in 32-bit mode).
 
 #### JSR - Jump to Subroutine
 
-**8/16-bit mode (M=00 or M=01):**
+**8/16-bit mode (W=00 or W=01):**
 | Syntax | Opcode | Bytes | Description |
 |--------|--------|-------|-------------|
 | JSR $XXXX | $20 | 3 | Push PC-1 (16-bit); PC = abs16 |
 | JSL $XXXXXX | $22 | 4 | Push PC-1 (24-bit); PC = abs24 |
 
-**32-bit mode (M=10):**
+**32-bit mode (W=11):**
 | Syntax | Opcode | Bytes | Description |
 |--------|--------|-------|-------------|
 | JSR $XXXXXXXX | $20 | 5 | Push PC-1 (32-bit); PC = abs32 |
@@ -1103,25 +1148,36 @@ FENCEW          Order all stores
 
 #### REPE - REP for Extended Flags
 ```
-REPE #imm8      Clear bits in P[7:0] where imm8 bit is 1
+REPE #imm8      Clear bits in P[13:8] where imm8 bit is 1
 ```
-Like REP but as an extended instruction. Used to modify M65832's width flags:
-- Bit 7: M1 (clear with REPE #$80)
-- Bit 6: M0 (clear with REPE #$40)
-- Bit 5: X1 (clear with REPE #$20)
-- Bit 4: X0 (clear with REPE #$10)
+Like REP but operates on the upper (extended) P register bits. The 6-bit operand maps to:
+- Bit 0: W0 (P[8]) - Width mode bit 0
+- Bit 1: W1 (P[9]) - Width mode bit 1
+- Bit 2: reserved/W2 (P[10]) - Reserved for future 64-bit
+- Bit 3: S (P[11]) - Supervisor mode
+- Bit 4: R (P[12]) - Register window
+- Bit 5: K (P[13]) - Compatibility mode
 
-Example: Enter 32-bit mode (M=10): `REPE #$40` then `SEPE #$80`
+Example: Enter emulation mode: `REPE #$03` (clear W1:W0, W=00)
+Example: Drop from 32-bit to native-16: `REPE #$02` (clear W1, keep W0)
 
 #### SEPE - SEP for Extended Flags
 ```
-SEPE #imm8      Set bits in P[7:0] where imm8 bit is 1
+SEPE #imm8      Set bits in P[13:8] where imm8 bit is 1
 ```
-Like SEP but as an extended instruction. Used to modify M65832's width flags.
+Like SEP but operates on the upper (extended) P register bits. Same operand bit mapping as REPE.
+SEPE works from any mode, including emulation mode.
+
+Example: Enter native-16: `SEPE #$01` (set W0, W=01)
+Example: Enter 32-bit mode: `SEPE #$03` (set W1:W0, W=11)
+Example: Enter 32-bit from emulation in one instruction: `SEPE #$03`
+
+Note: REP/SEP operate on P[0:7] (C, Z, I, D, X, M, V, N) — same as the 65816.
+REPE/SEPE operate on P[8:13] (W0, W1, reserved, S, R, K).
 
 ### 8.18 Stack Operations in 32-bit Mode
 
-**In 32-bit mode (M=10), ALL standard stack operations automatically use 32-bit widths:**
+**In 32-bit mode (W=11), ALL standard stack operations automatically use 32-bit widths:**
 - PHA/PLA, PHX/PLX, PHY/PLY: 32-bit
 - PHP/PLP: 32-bit (P is zero-extended to 32 bits)
 - PHD/PLD, PHB/PLB: 32-bit
@@ -1383,7 +1439,7 @@ Supervisor-only (privilege violation trap if S=0):
 - Modify PTBR, MMUCR, ASID, or other MMU control registers
 - Execute SVBR (Set VBR)
 - Access system register MMIO space ($FFFFF000-$FFFFF0FF)
-- Modify E, S bits directly via SEPE/REPE
+- Modify W, S bits directly via SEPE/REPE
 - Execute STP (Stop Processor)
 - Execute WAI (Wait for Interrupt) in some configurations
 
@@ -1575,9 +1631,9 @@ The M65832 supports three operating modes with different assembly conventions:
 
 | Mode | Width Flags | Data Sizes | Addressing | Use Case |
 |------|-------------|------------|------------|----------|
-| **6502 Emulation** | E=1 | 8-bit only | 16-bit (VBR-relative) | Classic 6502 code |
-| **65816 Native** | E=0, M/X=00 or 01 | 8/16-bit via M/X | 24-bit bank:offset | 65816 compatible |
-| **32-bit Native** | E=0, M/X=10 | 32-bit default; 8/16 via Extended ALU | B+16 or 32-bit | Modern M65832 code |
+| **6502 Emulation** | W=00 (E derived) | 8-bit only | 16-bit (VBR-relative) | Classic 6502 code |
+| **65816 Native** | W=01, M/X flags | 8/16-bit via M/X | 24-bit bank:offset | 65816 compatible |
+| **32-bit Native** | W=11 | 32-bit default; 8/16 via Extended ALU | B+16 or 32-bit | Modern M65832 code |
 
 ### 15.2 Data/Address Size by Mode
 
@@ -1763,11 +1819,8 @@ LDA [$XX],Y         ; Long indirect indexed
 
 start:
     ; Enter native-32 mode
-    CLC
-    XCE                     ; E=0
-    REP #$30                ; M=01, X=01 (16-bit first)
-    REPE #$A0               ; M=10, X=10 (32-bit)
-    
+    SEPE #$03               ; W=11 (32-bit mode, single instruction)
+
     ; Set up base registers
     SB #$B0000000           ; B = UART base
     SD #$00010000           ; D = direct page for locals

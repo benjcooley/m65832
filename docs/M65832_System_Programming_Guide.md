@@ -36,7 +36,7 @@ The M65832 status register is 14 bits internally:
 Internal P Register (14 bits):
 Bit:  13  12  11  10   9   8   7   6   5   4   3   2   1   0
      ┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐
-     │ K │ R │ S │ E │ N │ V │M1 │M0 │X1 │X0 │ D │ I │ Z │ C │
+     │ K │ R │ S │rsv│W1 │W0 │ N │ V │ M │ X │ D │ I │ Z │ C │
      └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
@@ -46,25 +46,33 @@ Bit:  13  12  11  10   9   8   7   6   5   4   3   2   1   0
 | 1 | Z | Zero flag |
 | 2 | I | IRQ disable (1 = disabled) |
 | 3 | D | Decimal mode (BCD arithmetic, 8/16-bit only) |
-| 4 | X0 | Index width bit 0 |
-| 5 | X1 | Index width bit 1 |
-| 6 | M0 | Accumulator width bit 0 |
-| 7 | M1 | Accumulator width bit 1 |
-| 8 | V | Overflow flag |
-| 9 | N | Negative flag |
-| 10 | E | Emulation mode (1 = 6502 emulation) |
+| 4 | X | Index width (65816-compatible position): 0=8-bit, 1=16-bit |
+| 5 | M | Accumulator width (65816-compatible position): 0=8-bit, 1=16-bit |
+| 6 | V | Overflow flag |
+| 7 | N | Negative flag |
+| 8 | W0 | Width mode bit 0 |
+| 9 | W1 | Width mode bit 1 |
+| 10 | reserved | Reserved for future W2 (64-bit mode) |
 | 11 | S | Supervisor mode (1 = supervisor privilege) |
 | 12 | R | Register window enable (1 = DP accesses register file) |
 | 13 | K | Compatibility mode (1 = illegal opcodes become NOP) |
 
 ### 2.3 Width Encoding
 
-| M1:M0 / X1:X0 | Width |
-|---------------|-------|
-| 00 | 8-bit |
-| 01 | 16-bit |
-| 10 | 32-bit |
-| 11 | Reserved |
+The W bits use thermometer encoding to select processor width mode:
+
+| W1:W0 | Mode | Description |
+|-------|------|-------------|
+| 00 | 6502 Emulation | 8-bit, E is derived (E = W==00) |
+| 01 | 65816 Native | M/X flags control widths |
+| 11 | 32-bit Native | Full 32-bit, M/X ignored |
+| 10 | Reserved | Reserved for future use |
+
+Single-bit M and X at 65816-compatible positions (bit 5 = M, bit 4 = X):
+- REP/SEP operate on P[0:7] (C, Z, I, D, X, M, V, N) — same as 65816
+- REPE/SEPE operate on P[8:13] (W0, W1, reserved, S, R, K)
+
+Future: W2 bit (P[10]) for 64-bit mode (W=111).
 
 ### 2.4 Stack Pointer Behavior
 
@@ -84,7 +92,7 @@ The following operations require supervisor mode (S=1). Executing them with S=0 
 | Modify ASID | Set address space ID |
 | Access MMIO ($FFFFF0xx) | System register space |
 | STP | Stop processor |
-| SEPE with S bit | Attempt to enter supervisor mode directly |
+| SEPE with S bit (bit 3) | Attempt to enter supervisor mode directly |
 
 ### 2.6 Entering Supervisor Mode
 
@@ -304,7 +312,7 @@ When an exception occurs:
 ; Exception entry (automatic, done by hardware)
 ; Stack after exception:
 ;   [SP+0]  P_low (standard flags)
-;   [SP+1]  P_high (extended flags: M1,M0,X1,X0,E,S,R,K)
+;   [SP+1]  P_high (extended flags: K,R,S,rsv,W1,W0,0,0)
 ;   [SP+2]  PC byte 0
 ;   [SP+3]  PC byte 1
 ;   [SP+4]  PC byte 2
@@ -562,11 +570,10 @@ skip_regwin_restore:
 ### 5.4 The Magic: RTI Restores Everything
 
 The key insight is that **RTI pulls the complete P register**, including:
-- E flag (emulation mode)
+- W1:W0 (width mode - determines emu/native-16/32-bit; E is derived from W=00)
 - S flag (privilege level - returns to user mode if saved S=0)
 - R flag (register window enable)
-- M1:M0 (accumulator width)
-- X1:X0 (index width)
+- M, X flags (accumulator/index widths for native-16 mode)
 
 This means a single RTI instruction:
 1. Restores the processor mode (6502/65816/32-bit)
@@ -582,11 +589,11 @@ This means a single RTI instruction:
 
 The M65832 can run processes in three modes simultaneously:
 
-| Mode | E | M1:M0 | X1:X0 | Description |
-|------|---|-------|-------|-------------|
-| 6502 Emulation | 1 | — | — | 8-bit, 64KB via VBR |
-| 65816 Native-16 | 0 | 01 | 01 | 16-bit compatible |
-| M65832 Native-32 | 0 | 10 | 10 | Full 32-bit |
+| Mode | W1:W0 | M/X | Description |
+|------|-------|-----|-------------|
+| 6502 Emulation | 00 | ignored | 8-bit, 64KB via VBR (E derived) |
+| 65816 Native-16 | 01 | active | M/X control widths |
+| M65832 Native-32 | 11 | ignored | Full 32-bit |
 
 The kernel always runs in Native-32 supervisor mode.
 
@@ -599,12 +606,12 @@ setup_6502_process:
     JSR alloc_task
     TAX                     ; X = task pointer
     
-    ; Set E=1 in saved P (emulation mode)
-    ; Extended P byte: M1 M0 X1 X0 E S R K
-    ;                   0  0  0  0  1 0 0 0 = $08
-    LDA #$08
-    STA TASK_P+1,X          ; Extended P
-    LDA #$30                ; Standard flags (M=1, X=1 ignored in E=1)
+    ; Set W=00 in saved P (emulation mode, E derived from W=00)
+    ; Extended P byte: K R S rsv W1 W0 0 0
+    ;                  0 0 0  0   0  0 0 0 = $00
+    LDA #$00
+    STA TASK_P+1,X          ; Extended P (W=00 = emulation)
+    LDA #$00                ; Standard flags (M/X ignored in emu mode)
     STA TASK_P,X
     
     ; Set VBR to process's 64KB window
@@ -645,11 +652,11 @@ setup_65816_process:
     JSR alloc_task
     TAX
     
-    ; E=0, M=01, X=01 (16-bit native)
-    ; Extended P: M1=0 M0=1 X1=0 X0=1 E=0 S=0 R=0 K=0 = $50
-    LDA #$50
+    ; W=01 (native-16 mode)
+    ; Extended P byte: K=0 R=0 S=0 rsv=0 W1=0 W0=1 0 0 = $01
+    LDA #$01
     STA TASK_P+1,X
-    LDA #$30                ; D=0, I=0
+    LDA #$30                ; Standard flags: M=1, X=1 (16-bit widths)
     STA TASK_P,X
     
     ; Set B to base address
@@ -670,9 +677,9 @@ setup_32bit_process:
     JSR alloc_task
     TAX
     
-    ; E=0, M=10, X=10, R=1 (32-bit with register window)
-    ; Extended P: M1=1 M0=0 X1=1 X0=0 E=0 S=0 R=1 K=0 = $A4
-    LDA #$A4
+    ; W=11, R=1 (32-bit with register window)
+    ; Extended P byte: K=0 R=1 S=0 rsv=0 W1=1 W0=1 0 0 = $13
+    LDA #$13
     STA TASK_P+1,X
     LDA #$00                ; Standard flags clear
     STA TASK_P,X
@@ -697,7 +704,7 @@ setup_32bit_process:
 │                                                                 │
 │  Process 1: C64 Game            Process 2: SNES Game            │
 │  ┌─────────────────────┐       ┌─────────────────────┐          │
-│  │ Mode: E=1 (6502)    │       │ Mode: E=0, M=01     │          │
+│  │ Mode: W=00 (6502)   │       │ Mode: W=01, M/X     │          │
 │  │ VBR: $10000000      │       │ B: $20000000        │          │
 │  │ Address: 64KB       │       │ Address: 16MB       │          │
 │  │ Running: Pac-Man    │       │ Running: SMW        │          │
@@ -705,7 +712,7 @@ setup_32bit_process:
 │                                                                 │
 │  Process 3: Linux Shell         Kernel                          │
 │  ┌─────────────────────┐       ┌─────────────────────┐          │
-│  │ Mode: E=0, M=10     │       │ Mode: E=0, M=10     │          │
+│  │ Mode: W=11          │       │ Mode: W=11           │          │
 │  │ R=1 (reg window)    │       │ S=1 (supervisor)    │          │
 │  │ Address: Full 4GB   │       │ Manages all above   │          │
 │  │ Running: bash       │       │                     │          │
@@ -719,13 +726,13 @@ setup_32bit_process:
 ```
 Time    Active Process    Mode        Notes
 ─────────────────────────────────────────────────────────
-0ms     Process 1         E=1 6502    Playing Pac-Man
-10ms    [Timer IRQ]       Supervisor  Scheduler runs
-10ms    Process 3         M=10 32-bit bash waiting
-20ms    [Timer IRQ]       Supervisor  Scheduler runs
-20ms    Process 2         M=01 16-bit SMW running
-30ms    [Timer IRQ]       Supervisor  Scheduler runs
-30ms    Process 1         E=1 6502    Back to Pac-Man
+0ms     Process 1         W=00 6502    Playing Pac-Man
+10ms    [Timer IRQ]       Supervisor   Scheduler runs
+10ms    Process 3         W=11 32-bit  bash waiting
+20ms    [Timer IRQ]       Supervisor   Scheduler runs
+20ms    Process 2         W=01 16-bit  SMW running
+30ms    [Timer IRQ]       Supervisor   Scheduler runs
+30ms    Process 1         W=00 6502    Back to Pac-Man
 ...
 ```
 

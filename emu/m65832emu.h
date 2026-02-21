@@ -94,34 +94,59 @@ extern "C" {
 typedef struct m65832_cpu m65832_cpu_t;
 typedef struct m6502_cpu m6502_cpu_t;
 
-/* Register width modes (from M1:M0 and X1:X0 flags) */
+/* Register width modes */
 typedef enum {
     WIDTH_8  = 0,   /* 8-bit */
     WIDTH_16 = 1,   /* 16-bit */
     WIDTH_32 = 2,   /* 32-bit */
 } m65832_width_t;
 
-/* Status Register (P) flags */
+/* W mode constants (W1:W0) */
+#define WMODE_6502   0  /* 00: 6502 emulation mode */
+#define WMODE_65816  1  /* 01: 65816 native mode */
+#define WMODE_32BIT  3  /* 11: 32-bit mode (thermometer encoding) */
+/* W=10 reserved (future W2 bit for 64-bit: W=111) */
+
+/*
+ * Status Register (P) flags
+ *
+ * Bits 0-7 are IDENTICAL to the 65816: N V M X D I Z C
+ * Bits 8-9 are W1:W0 (processor mode)
+ * Bit 10 is reserved (E is derived from W, not stored)
+ * Bits 11-13 are privilege/feature flags
+ *
+ * E (emulation mode) is NOT a stored flag. It is derived: E = (W == 0).
+ * XCE swaps C with derived E and sets W accordingly.
+ */
 typedef enum {
-    /* Standard 6502 flags (byte 0) */
-    P_C = 0x0001,   /* Carry */
-    P_Z = 0x0002,   /* Zero */
-    P_I = 0x0004,   /* IRQ Disable */
-    P_D = 0x0008,   /* Decimal (BCD) mode */
-    /* Bits 4-5 unused in byte 0 */
-    
-    /* Extended flags (byte 1) */
-    P_X0 = 0x0010,  /* Index width bit 0 */
-    P_X1 = 0x0020,  /* Index width bit 1 */
-    P_M0 = 0x0040,  /* Accumulator width bit 0 */
-    P_M1 = 0x0080,  /* Accumulator width bit 1 */
-    P_V  = 0x0100,  /* Overflow */
-    P_N  = 0x0200,  /* Negative */
-    P_E  = 0x0400,  /* Emulation mode */
-    P_S  = 0x0800,  /* Supervisor mode */
-    P_R  = 0x1000,  /* Register window enabled */
-    P_K  = 0x2000,  /* Compatibility mode (illegal ops = NOP) */
+    /* Bits 0-7: 65816-compatible byte (pushed by PHP) */
+    P_C  = 0x0001,  /* [0] Carry */
+    P_Z  = 0x0002,  /* [1] Zero */
+    P_I  = 0x0004,  /* [2] IRQ Disable */
+    P_D  = 0x0008,  /* [3] Decimal (BCD) mode */
+    P_X  = 0x0010,  /* [4] Index width (1=8-bit, 0=16-bit; 65816 compat) */
+    P_M  = 0x0020,  /* [5] Accumulator width (1=8-bit, 0=16-bit; 65816 compat) */
+    P_V  = 0x0040,  /* [6] Overflow */
+    P_N  = 0x0080,  /* [7] Negative */
+
+    /* Bits 8-9: W mode (set via SEPE/REPE) */
+    P_W0 = 0x0100,  /* [8] Wide mode bit 0 */
+    P_W1 = 0x0200,  /* [9] Wide mode bit 1 */
+
+    /* Bit 10: reserved (E is derived from W) */
+
+    /* Bits 11-13: privilege/feature flags */
+    P_S  = 0x0800,  /* [11] Supervisor mode */
+    P_R  = 0x1000,  /* [12] Register window enabled */
+    P_K  = 0x2000,  /* [13] Compatibility mode (illegal ops = NOP) */
 } m65832_flags_t;
+
+/* W mode field mask and shift */
+#define P_W_MASK  (P_W0 | P_W1)
+#define P_W_SHIFT 8
+#define GET_W(cpu)      (((cpu)->p >> P_W_SHIFT) & 3)
+#define SET_W(cpu, w)   do { (cpu)->p = ((cpu)->p & ~P_W_MASK) | (((w) & 3) << P_W_SHIFT); } while(0)
+#define IS_EMU(cpu)     (GET_W(cpu) == WMODE_6502)
 
 /* Memory access type (for callbacks) */
 typedef enum {

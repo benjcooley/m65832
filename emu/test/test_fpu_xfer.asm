@@ -7,11 +7,8 @@
     .M32
     .X32
 
-    ; Enter 32-bit native mode
-    CLC
-    XCE
-    REP #$30
-    SEPE #$A0
+    ; Enter 32-bit native mode (W=00 → W=11)
+    SEPE #$03
 
     ; ----- Step 1: Load F0 via ATOF/TTOF with known 64-bit pattern -----
     ; Target: F0 = 0x4002000000000000 (double 2.25)

@@ -230,24 +230,27 @@ struct task_struct {
 The 14-bit status register is stored as 16 bits in memory:
 
 ```
-Byte 0 (low): C Z I D X0 X1 M0 M1 (standard 65816-like)
-Byte 1 (high): V N E S R K -- -- (extended flags)
+Byte 0 (low): C Z I D X M V N (standard 65816-compatible, P[7:0])
+Byte 1 (high): W0 W1 rsv S R K -- -- (extended flags, P[13:8])
 
 Internal mapping:
   Bit 0:  C  (Carry)
   Bit 1:  Z  (Zero)
   Bit 2:  I  (IRQ disable)
   Bit 3:  D  (Decimal mode)
-  Bit 4:  X0 (Index width bit 0)
-  Bit 5:  X1 (Index width bit 1)
-  Bit 6:  M0 (Accumulator width bit 0)
-  Bit 7:  M1 (Accumulator width bit 1)
-  Bit 8:  V  (Overflow)
-  Bit 9:  N  (Negative)
-  Bit 10: E  (Emulation mode)
+  Bit 4:  X  (Index width, 65816-compatible position)
+  Bit 5:  M  (Accumulator width, 65816-compatible position)
+  Bit 6:  V  (Overflow)
+  Bit 7:  N  (Negative)
+  Bit 8:  W0 (Width mode bit 0)
+  Bit 9:  W1 (Width mode bit 1)
+  Bit 10: reserved (future W2 for 64-bit)
   Bit 11: S  (Supervisor mode)
   Bit 12: R  (Register window enable)
   Bit 13: K  (Compatibility mode)
+
+W encoding (thermometer): 00=emu, 01=native-16, 11=32-bit, 10=reserved
+E is derived: E = (W==00)
 ```
 
 ### 3.3 Context Switch
@@ -833,10 +836,7 @@ kernel_entry:
     ; We're now in virtual address space with paging enabled
     
     ; Ensure we're in 32-bit supervisor mode
-    CLC
-    XCE                     ; E=0 (native mode)
-    REP #$30                ; M=01, X=01
-    REPE #$A0               ; M=10, X=10 (32-bit)
+    SEPE #$03               ; W=11 (32-bit mode)
     
     ; Set up kernel stack
     LDX #$8FFFF000          ; Top of kernel stack

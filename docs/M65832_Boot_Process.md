@@ -104,8 +104,7 @@ The boot ROM is written in M65832 assembly (`boot/bootrom.s`) and assembled with
 The boot ROM (~200 lines of assembly) performs:
 
 1. **CPU initialization**
-   - `CLC` / `XCE` to enter native mode
-   - `REP #$30` / `REPE #$A0` for 32-bit native mode (M=10, X=10)
+   - `SEPE #$03` to enter 32-bit native mode (W=11)
    - Set supervisor mode (S=1, already set at reset)
    - Initialize stack pointer to `$0000FFFF`
 
@@ -310,9 +309,8 @@ When the boot ROM jumps to the kernel, the CPU state is:
 |---------------|--------------------------|----------------------------------|
 | PC            | `0x00100000`             | Physical kernel load address     |
 | S flag        | `1`                      | Supervisor mode                  |
-| E flag        | `0`                      | Native mode (not emulation)      |
-| M bits        | `10`                     | 32-bit accumulator               |
-| X bits        | `10`                     | 32-bit index registers           |
+| W bits        | `11`                     | 32-bit mode (W1:W0 = 11)        |
+| E (derived)   | `0`                      | Native mode (E derived from W!=00) |
 | I flag        | `1`                      | IRQs disabled                    |
 | MMU           | Off                      | Physical addressing              |
 | R0            | `0x00001000`             | Pointer to boot_params           |

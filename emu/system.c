@@ -50,7 +50,7 @@ void system_config_init(system_config_t *config) {
  * ========================================================================= */
 
 static uint8_t system_pull8(m65832_cpu_t *cpu) {
-    if (cpu->p & P_E) {
+    if (IS_EMU(cpu)) {
         cpu->s = 0x100 | ((cpu->s + 1) & 0xFF);
         return cpu->memory[0x100 + (cpu->s & 0xFF)];
     }

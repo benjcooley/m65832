@@ -225,7 +225,7 @@ static int process_cmd(dbg_state_t *dbg, const char *line) {
     else if (strcmp(cmd, "bt") == 0 || strcmp(cmd, "backtrace") == 0) {
         rsp_printf(dbg, "Backtrace (SP=%08X):\n", cpu->s);
         uint32_t sp = cpu->s;
-        int width = (cpu->p & P_E) ? 2 : 4;
+        int width = IS_EMU(cpu) ? 2 : 4;
         for (int i = 0; i < 16 && sp < cpu->memory_size - width; i++) {
             uint32_t ret;
             if (width == 2) {
@@ -615,7 +615,7 @@ static int process_cmd(dbg_state_t *dbg, const char *line) {
          * Read return address from stack: in 32-bit mode, SP points at last pushed byte,
          * return address is at SP+3..SP+6 (status word at SP+1..SP+2, then RA).
          * For JSR: stack has [RA-1] (32-bit), so RA = read32(SP+1) + 1 */
-        int width = (cpu->p & P_E) ? 2 : 4;
+        int width = IS_EMU(cpu) ? 2 : 4;
         uint32_t ret_addr;
         if (width == 4) {
             ret_addr = m65832_emu_read8(cpu, cpu->s + 1) |

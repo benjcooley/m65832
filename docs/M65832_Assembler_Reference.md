@@ -647,8 +647,9 @@ All extended instructions are prefixed with opcode $02.
 
 ```asm
     TRAP #$10           ; System trap with 8-bit code
-    REPE #$A0           ; Clear extended P bits
-    SEPE #$A0           ; Set extended P bits
+    REPE #$03           ; Clear W bits (enter emulation mode)
+    SEPE #$03           ; Set W bits (enter 32-bit mode)
+    SEPE #$01           ; Set W0 only (enter native-16 mode)
 ```
 
 ### Temp Register
