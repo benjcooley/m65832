@@ -355,9 +355,9 @@ All extended instructions use the `$02` prefix.
 | Instruction | Encoding | Operation |
 |-------------|----------|-----------|
 | LDQ dp | $02 $9C | A:T = [dp] (64-bit) |
-| LDQ abs | $02 $9D | A:T = [abs] |
+| LDQ (dp),Y | $02 $9D | A:T = [[dp]+Y] (64-bit indirect indexed) |
 | STQ dp | $02 $9E | [dp] = A:T |
-| STQ abs | $02 $9F | [abs] = A:T |
+| STQ (dp),Y | $02 $9F | [[dp]+Y] = A:T (indirect indexed) |
 
 ### Extended ALU ($80-$97)
 

@@ -662,10 +662,10 @@ All extended instructions are prefixed with opcode $02.
 ### 64-bit Operations
 
 ```asm
-    LDQ $20             ; Load 64-bit: T:A = [DP]
-    LDQ $1234           ; Load 64-bit: T:A = [absolute]
-    STQ $20             ; Store 64-bit: [DP] = T:A
-    STQ $1234           ; Store 64-bit: [absolute] = T:A
+    LDQ R8              ; Load 64-bit from DP: A:T = [R8]
+    LDQ (R0),Y          ; Load 64-bit indirect indexed: A:T = [[R0]+Y]
+    STQ R8              ; Store 64-bit to DP: [R8] = A:T
+    STQ (R0),Y          ; Store 64-bit indirect indexed: [[R0]+Y] = A:T
 ```
 
 ### Load Effective Address
