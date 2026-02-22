@@ -370,7 +370,7 @@ run_roundtrip "32-bit round-trip (FPU transfers)" \
 
 run_roundtrip "32-bit round-trip (extended: LDQ/STQ/LEA)" \
     "test/test_roundtrip_32bit.asm" "-m32 -x32 -o 0x8000" \
-    'LDQ R8' 'LDQ B+$1234' 'STQ R12' 'STQ B+$2345' \
+    'LDQ R8' 'LDQ (R0),Y' 'STQ R12' 'STQ (R1),Y' \
     'LEA R8' 'LEA R8,X' 'LEA B+$1234' 'LEA B+$1234,X'
 
 # Extended ALU round-trip tests ($02 $80-$97)

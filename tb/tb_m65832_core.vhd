@@ -3680,11 +3680,12 @@ begin
         check_mem(16#0345#, x"0C", "RSET MULU dp");
         
         -----------------------------------------------------------------------
-        -- TEST 98: LDQ/STQ absolute (64-bit)
+        -- TEST 98: LDQ/STQ (dp),Y indirect indexed (64-bit)
         -----------------------------------------------------------------------
         report "";
-        report "TEST 98: LDQ/STQ abs";
+        report "TEST 98: LDQ/STQ (dp),Y";
         
+        -- Source data at $0500 (8 bytes = 64-bit quad)
         poke(16#0500#, x"01");
         poke(16#0501#, x"02");
         poke(16#0502#, x"03");
@@ -3694,48 +3695,61 @@ begin
         poke(16#0506#, x"13");
         poke(16#0507#, x"14");
         
+        -- Pointer at DP $10 -> $0500 (base address for indirect)
+        poke(16#0010#, x"00");
+        poke(16#0011#, x"05");
+        poke(16#0012#, x"00");
+        poke(16#0013#, x"00");
+        -- Pointer at DP $14 -> $0600 (destination for STQ)
+        poke(16#0014#, x"00");
+        poke(16#0015#, x"06");
+        poke(16#0016#, x"00");
+        poke(16#0017#, x"00");
+        
         -- SEPE #$03 -> W=11 (32-bit)
         poke(16#8000#, x"02");  -- SEPE #$03
         poke(16#8001#, x"61");
         poke(16#8002#, x"03");  -- set W1+W0 -> W=11 (32-bit)
-        poke(16#8003#, x"02");  -- EXT prefix
-        poke(16#8004#, x"9D");  -- LDQ abs
-        poke(16#8005#, x"00");  -- low
-        poke(16#8006#, x"05");  -- high
-        poke(16#8007#, x"8D");  -- STA abs
-        poke(16#8008#, x"20");  -- $0520
-        poke(16#8009#, x"05");
-        poke(16#800A#, x"02");  -- EXT prefix
-        poke(16#800B#, x"9F");  -- STQ abs
-        poke(16#800C#, x"10");  -- low
-        poke(16#800D#, x"05");  -- high
-        poke(16#800E#, x"8D");  -- STA abs
-        poke(16#800F#, x"28");  -- $0528
-        poke(16#8010#, x"05");
+        -- LDY #$00 (Y=0, no offset)
+        poke(16#8003#, x"A0");  -- LDY #imm32
+        poke(16#8004#, x"00");
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        -- LDQ ($10),Y -> load 64 bits from [$0500+Y] into A:T
+        poke(16#8008#, x"02");  -- EXT prefix
+        poke(16#8009#, x"9D");  -- LDQ (dp),Y
+        poke(16#800A#, x"10");  -- dp=$10 (pointer to $0500)
+        -- STA $0520 (save A low word for verification)
+        poke(16#800B#, x"8D");  -- STA abs
+        poke(16#800C#, x"20");  -- $0520
+        poke(16#800D#, x"05");
+        -- STQ ($14),Y -> store 64 bits from A:T to [$0600+Y]
+        poke(16#800E#, x"02");  -- EXT prefix
+        poke(16#800F#, x"9F");  -- STQ (dp),Y
+        poke(16#8010#, x"14");  -- dp=$14 (pointer to $0600)
         poke(16#8011#, x"00");  -- BRK
         
         rst_n <= '0';
         wait_cycles(10);
         rst_n <= '1';
-        wait_cycles(380);
+        wait_cycles(400);
         
-        check_mem(16#0520#, x"01", "LDQ A byte0");
-        check_mem(16#0521#, x"02", "LDQ A byte1");
-        check_mem(16#0522#, x"03", "LDQ A byte2");
-        check_mem(16#0523#, x"04", "LDQ A byte3");
-        check_mem(16#0528#, x"01", "A after STQ byte0");
-        check_mem(16#0529#, x"02", "A after STQ byte1");
-        check_mem(16#052A#, x"03", "A after STQ byte2");
-        check_mem(16#052B#, x"04", "A after STQ byte3");
+        -- Verify A low word was loaded correctly
+        check_mem(16#0520#, x"01", "LDQ (dp),Y A byte0");
+        check_mem(16#0521#, x"02", "LDQ (dp),Y A byte1");
+        check_mem(16#0522#, x"03", "LDQ (dp),Y A byte2");
+        check_mem(16#0523#, x"04", "LDQ (dp),Y A byte3");
         
-        check_mem(16#0510#, x"01", "STQ abs byte0");
-        check_mem(16#0511#, x"02", "STQ abs byte1");
-        check_mem(16#0512#, x"03", "STQ abs byte2");
-        check_mem(16#0513#, x"04", "STQ abs byte3");
-        check_mem(16#0514#, x"11", "STQ abs byte4");
-        check_mem(16#0515#, x"12", "STQ abs byte5");
-        check_mem(16#0516#, x"13", "STQ abs byte6");
-        check_mem(16#0517#, x"14", "STQ abs byte7");
+        -- Verify STQ wrote all 8 bytes to $0600
+        check_mem(16#0600#, x"01", "STQ (dp),Y byte0");
+        check_mem(16#0601#, x"02", "STQ (dp),Y byte1");
+        check_mem(16#0602#, x"03", "STQ (dp),Y byte2");
+        check_mem(16#0603#, x"04", "STQ (dp),Y byte3");
+        check_mem(16#0604#, x"11", "STQ (dp),Y byte4");
+        check_mem(16#0605#, x"12", "STQ (dp),Y byte5");
+        check_mem(16#0606#, x"13", "STQ (dp),Y byte6");
+        check_mem(16#0607#, x"14", "STQ (dp),Y byte7");
         
         -----------------------------------------------------------------------
         -- TEST 99: LDQ/STQ dp in RSET
@@ -7057,6 +7071,68 @@ begin
         wait_cycles(200);
         
         check_mem(16#0630#, x"A5", "TBA sets N flag");
+        
+        -----------------------------------------------------------------------
+        -- TEST 135: LDQ/STQ (dp),Y with non-zero Y offset
+        -----------------------------------------------------------------------
+        report "";
+        report "TEST 135: LDQ/STQ (dp),Y indexed";
+        
+        -- Source data at $0508 (8 bytes, offset $08 from $0500 base)
+        poke(16#0508#, x"AA");
+        poke(16#0509#, x"BB");
+        poke(16#050A#, x"CC");
+        poke(16#050B#, x"DD");
+        poke(16#050C#, x"EE");
+        poke(16#050D#, x"FF");
+        poke(16#050E#, x"11");
+        poke(16#050F#, x"22");
+        
+        -- Pointer at DP $20 -> $0500 (base)
+        poke(16#0020#, x"00");
+        poke(16#0021#, x"05");
+        poke(16#0022#, x"00");
+        poke(16#0023#, x"00");
+        -- Pointer at DP $24 -> $0700 (destination base)
+        poke(16#0024#, x"00");
+        poke(16#0025#, x"07");
+        poke(16#0026#, x"00");
+        poke(16#0027#, x"00");
+        
+        -- SEPE #$03 -> W=11 (32-bit)
+        poke(16#8000#, x"02");  -- SEPE #$03
+        poke(16#8001#, x"61");
+        poke(16#8002#, x"03");
+        -- LDY #$08 (Y=8, offset into array)
+        poke(16#8003#, x"A0");  -- LDY #imm32
+        poke(16#8004#, x"08");
+        poke(16#8005#, x"00");
+        poke(16#8006#, x"00");
+        poke(16#8007#, x"00");
+        -- LDQ ($20),Y -> load from $0500+8=$0508
+        poke(16#8008#, x"02");
+        poke(16#8009#, x"9D");
+        poke(16#800A#, x"20");
+        -- STQ ($24),Y -> store to $0700+8=$0708
+        poke(16#800B#, x"02");
+        poke(16#800C#, x"9F");
+        poke(16#800D#, x"24");
+        poke(16#800E#, x"00");  -- BRK
+        
+        rst_n <= '0';
+        wait_cycles(10);
+        rst_n <= '1';
+        wait_cycles(400);
+        
+        -- Verify STQ wrote 8 bytes to $0708
+        check_mem(16#0708#, x"AA", "LDQ/STQ (dp),Y+8 byte0");
+        check_mem(16#0709#, x"BB", "LDQ/STQ (dp),Y+8 byte1");
+        check_mem(16#070A#, x"CC", "LDQ/STQ (dp),Y+8 byte2");
+        check_mem(16#070B#, x"DD", "LDQ/STQ (dp),Y+8 byte3");
+        check_mem(16#070C#, x"EE", "LDQ/STQ (dp),Y+8 byte4");
+        check_mem(16#070D#, x"FF", "LDQ/STQ (dp),Y+8 byte5");
+        check_mem(16#070E#, x"11", "LDQ/STQ (dp),Y+8 byte6");
+        check_mem(16#070F#, x"22", "LDQ/STQ (dp),Y+8 byte7");
         
         -----------------------------------------------------------------------
         -- Summary

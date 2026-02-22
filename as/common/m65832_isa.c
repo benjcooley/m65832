@@ -176,9 +176,9 @@ const M65_ExtInstruction m65_ext_instructions[] = {
     { "TAT",    0x9B, M65_AM_IMP  },
     /* 64-bit load/store */
     { "LDQ",    0x9C, M65_AM_DP   },
-    { "LDQ",    0x9D, M65_AM_ABS  },
+    { "LDQ",    0x9D, M65_AM_INDY },
     { "STQ",    0x9E, M65_AM_DP   },
-    { "STQ",    0x9F, M65_AM_ABS  },
+    { "STQ",    0x9F, M65_AM_INDY },
     /* LEA */
     { "LEA",    0xA0, M65_AM_DP   },
     { "LEA",    0xA1, M65_AM_DPX  },

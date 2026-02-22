@@ -497,6 +497,7 @@ EOF
 run_test "JSR (dp) indirect call" "test/test_jmp_jsr_dp.asm" "CAFEBABE" 300
 run_test "Register window isolation" "test/test_regwindow.asm" "00000001" 500
 run_test "FPU xfer FTOA/FTOT/ATOF/TTOF" "test/test_fpu_xfer.asm" "00000001" 500
+run_test "FP callee-save (F14 STF.S/LDF.S round-trip)" "test/test_fp_callee_save.asm" "0000000E" 300
 
 # W_mode (32-bit native mode) width tests
 echo
@@ -695,6 +696,76 @@ echo
 echo "--- Long Addressing Illegal in W=11 Tests ---"
 
 run_test_trap "LDA long illegal in W=11" "test/test_long_illegal.asm" "ILLEGAL_OP" 200
+
+# LDQ/STQ (dp),Y tests
+echo
+echo "--- LDQ/STQ (dp),Y Tests ---"
+
+cat > test/test_ldq_stq_indy.asm << 'EOF'
+; Test LDQ/STQ (dp),Y indirect indexed
+; Load 64-bit quad from pointer+Y, store to different pointer+Y
+    .org $1000
+    .M32
+    .X32
+    SEPE #$03         ; W=11 (32-bit)
+
+    ; Set up source data at $2000
+    LDA #$AABBCCDD
+    STA $00002000
+    LDA #$11223344
+    STA $00002004
+
+    ; Set up pointer in R0 -> $2000
+    LDA #$00002000
+    STA R0
+    ; Set up pointer in R1 -> $3000
+    LDA #$00003000
+    STA R1
+
+    ; Y = 0
+    LDY #$00000000
+    ; LDQ (R0),Y -> A:T = 64 bits at $2000
+    LDQ (R0),Y
+    ; STQ (R1),Y -> store to $3000
+    STQ (R1),Y
+
+    ; Verify: load back A from $3000
+    LDA $00003000      ; should be $AABBCCDD
+    STP
+EOF
+
+run_test "LDQ/STQ (dp),Y basic" "test/test_ldq_stq_indy.asm" "AABBCCDD" 500
+
+cat > test/test_ldq_stq_indy_offset.asm << 'EOF'
+; Test LDQ/STQ (dp),Y with non-zero Y offset
+    .org $1000
+    .M32
+    .X32
+    SEPE #$03
+
+    ; Source data at $2010 (offset $10 from base $2000)
+    LDA #$DEADBEEF
+    STA $00002010
+    LDA #$CAFEBABE
+    STA $00002014
+
+    ; Pointer in R0 -> $2000
+    LDA #$00002000
+    STA R0
+    ; Pointer in R1 -> $3000
+    LDA #$00003000
+    STA R1
+
+    ; Y = $10
+    LDY #$00000010
+    LDQ (R0),Y         ; load from $2000+$10=$2010
+    STQ (R1),Y         ; store to $3000+$10=$3010
+
+    LDA $00003010      ; should be $DEADBEEF
+    STP
+EOF
+
+run_test "LDQ/STQ (dp),Y with offset" "test/test_ldq_stq_indy_offset.asm" "DEADBEEF" 500
 
 # Summary
 echo

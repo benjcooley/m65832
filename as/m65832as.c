@@ -1885,7 +1885,8 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 emit_word(as, op.value & 0xFFFF);
                 break;
             case AM_IND:
-                /* DP indirect - emit single byte */
+            case AM_INDY:
+                /* DP indirect / indirect indexed - emit single byte */
                 emit_byte(as, op.value & 0xFF);
                 break;
             default:

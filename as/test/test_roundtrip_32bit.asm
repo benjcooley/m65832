@@ -145,9 +145,9 @@
 
 ; 64-bit load/store
     LDQ R8
-    LDQ B+$1234
+    LDQ (R0),Y
     STQ R12
-    STQ B+$2345
+    STQ (R1),Y
 
 ; LEA
     LEA R8

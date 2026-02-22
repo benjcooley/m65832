@@ -236,9 +236,9 @@ After the `$02` prefix byte:
 | $9B | TAT | Transfer A to T |
 | **64-bit Load/Store ($9C-$9F)** | | |
 | $9C [dp] | LDQ dp | Load quad (A:T = [dp]) |
-| $9D [abs16] | LDQ abs | Load quad |
+| $9D [dp] | LDQ (dp),Y | Load quad indirect indexed |
 | $9E [dp] | STQ dp | Store quad ([dp] = A:T) |
-| $9F [abs16] | STQ abs | Store quad |
+| $9F [dp] | STQ (dp),Y | Store quad indirect indexed |
 | **Load Effective Address ($A0-$A3)** | | |
 | $A0 [dp] | LEA dp | A = D + dp |
 | $A1 [dp] | LEA dp,X | A = D + dp + X |
@@ -1655,7 +1655,15 @@ Loads 64 bits into A (low) and T (high).
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
 | Direct Page | LDQ dp | $02 $9C | 3 |
-| Absolute | LDQ abs | $02 $9D | 4 |
+| Indirect Indexed | LDQ (dp),Y | $02 $9D | 3 |
+
+**Flags Affected:** None (32-bit mode)
+
+```asm
+; Copy 64-bit value via pointer
+    LDY #offset
+    LDQ (src_ptr),Y    ; A:T = 64 bits at [src_ptr]+Y
+```
 
 #### STQ - Store Quad
 
@@ -1664,7 +1672,23 @@ Stores A (low) and T (high) as 64 bits.
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
 | Direct Page | STQ dp | $02 $9E | 3 |
-| Absolute | STQ abs | $02 $9F | 4 |
+| Indirect Indexed | STQ (dp),Y | $02 $9F | 3 |
+
+**Flags Affected:** None
+
+```asm
+; 64-bit memcpy loop (8 bytes per iteration)
+    LDY #0
+.loop:
+    LDQ (src_ptr),Y
+    STQ (dst_ptr),Y
+    TYA
+    CLC
+    ADC #8
+    TAY
+    CPY length
+    BCC .loop
+```
 
 ---
 

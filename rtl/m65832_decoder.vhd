@@ -310,9 +310,9 @@ begin
                 
                 -- 64-bit load/store (A=low, T=high)
                 when x"9C" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- LDQ dp
-                when x"9D" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- LDQ abs
+                when x"9D" => ADDR_MODE <= "1010"; INSTR_LEN <= "011";  -- LDQ (dp),Y
                 when x"9E" => ADDR_MODE <= "0010"; INSTR_LEN <= "011";  -- STQ dp
-                when x"9F" => ADDR_MODE <= "0101"; INSTR_LEN <= "100";  -- STQ abs
+                when x"9F" => ADDR_MODE <= "1010"; INSTR_LEN <= "011";  -- STQ (dp),Y
                 
                 -- FPU load/store (64-bit) with register byte
                 -- Format: $02 $Bx $rr [operand] where rr is register byte

@@ -63,9 +63,9 @@ TEMP_TEST:
 ; 64-bit load/store
 QUAD_TEST:
     LDQ $20             ; $02 $9C $20
-    LDQ $1234           ; $02 $9D $34 $12
+    LDQ (R0),Y          ; $02 $9D $00
     STQ $30             ; $02 $9E $30
-    STQ $2345           ; $02 $9F $45 $23
+    STQ (R1),Y          ; $02 $9F $04
 
 ; LEA
 LEA_TEST:

@@ -279,7 +279,7 @@ static const ExtOpcodeEntry ext_opcode_table[256] = {
     { NULL,     AM_UNKNOWN }, { "TAB",    AM_IMP  }, { "TBA",    AM_IMP  }, { "TXB",    AM_IMP  },
     { "TBX",    AM_IMP  }, { "TYB",    AM_IMP  }, { "TBY",    AM_IMP  }, { NULL,  AM_UNKNOWN },
     { NULL,     AM_UNKNOWN }, { NULL,  AM_UNKNOWN }, { "TTA",    AM_IMP  }, { "TAT",    AM_IMP  },
-    { "LDQ",    AM_DP   }, { "LDQ",    AM_ABS  }, { "STQ",    AM_DP   }, { "STQ",    AM_ABS  },
+    { "LDQ",    AM_DP   }, { "LDQ",    AM_INDY }, { "STQ",    AM_DP   }, { "STQ",    AM_INDY },
     /* 0xA0-0xAF: LEA, TSPB, JMP/JSR (dp) indirect */
     { "LEA",    AM_DP   }, { "LEA",    AM_DPX  }, { "LEA",    AM_ABS  }, { "LEA",    AM_ABSX },
     { "TSPB",   AM_IMP  }, { "JMP",    AM_IND  }, { "JSR",    AM_IND  }, { NULL,  AM_UNKNOWN },

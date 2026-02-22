@@ -3628,14 +3628,14 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         addr = addr_dp(cpu);
                         cpu->a = mem_read32(cpu, addr);
                         cpu->t = mem_read32(cpu, addr + 4);
-                        update_nz32(cpu, cpu->a);
+                        if (width_m != 4) update_nz32(cpu, cpu->a);
                         cycles = 6;
                         break;
-                    case 0x9D: /* LDQ abs - Load 64-bit */
-                        addr = addr_abs(cpu);
+                    case 0x9D: /* LDQ (dp),Y - Load 64-bit indirect indexed */
+                        addr = addr_dpiy(cpu);
                         cpu->a = mem_read32(cpu, addr);
                         cpu->t = mem_read32(cpu, addr + 4);
-                        update_nz32(cpu, cpu->a);
+                        if (width_m != 4) update_nz32(cpu, cpu->a);
                         cycles = 7;
                         break;
                     case 0x9E: /* STQ dp - Store 64-bit (A=low, T=high) */
@@ -3644,8 +3644,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         mem_write32(cpu, addr + 4, cpu->t);
                         cycles = 6;
                         break;
-                    case 0x9F: /* STQ abs - Store 64-bit */
-                        addr = addr_abs(cpu);
+                    case 0x9F: /* STQ (dp),Y - Store 64-bit indirect indexed */
+                        addr = addr_dpiy(cpu);
                         mem_write32(cpu, addr, cpu->a);
                         mem_write32(cpu, addr + 4, cpu->t);
                         cycles = 7;
