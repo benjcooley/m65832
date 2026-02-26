@@ -25,6 +25,61 @@
 
 #define M65832_GUEST_FD_MAX 32
 
+/*
+ * Guest open(2) flag values come from picolibc/newlib and do not match host
+ * platform bit encodings (notably on macOS). Translate guest flags explicitly
+ * before calling host open().
+ */
+#define GUEST_O_RDONLY    0x00000000u
+#define GUEST_O_WRONLY    0x00000001u
+#define GUEST_O_RDWR      0x00000002u
+#define GUEST_O_ACCMODE   0x00000003u
+#define GUEST_O_CREAT     0x00000040u
+#define GUEST_O_TRUNC     0x00000200u
+#define GUEST_O_APPEND    0x00000400u
+#define GUEST_O_EXCL      0x00000800u
+#define GUEST_O_SYNC      0x00002000u
+#define GUEST_O_NONBLOCK  0x00004000u
+#define GUEST_O_NOCTTY    0x00008000u
+#define GUEST_O_CLOEXEC   0x00040000u
+#define GUEST_O_NOFOLLOW  0x00100000u
+#define GUEST_O_DIRECTORY 0x00200000u
+
+static int sandbox_translate_open_flags(uint32_t guest_flags) {
+    int host_flags = 0;
+
+    switch (guest_flags & GUEST_O_ACCMODE) {
+        case GUEST_O_RDONLY: host_flags |= O_RDONLY; break;
+        case GUEST_O_WRONLY: host_flags |= O_WRONLY; break;
+        case GUEST_O_RDWR:   host_flags |= O_RDWR; break;
+        default:
+            /* Invalid access mode; let host open fail consistently. */
+            host_flags |= O_RDONLY;
+            break;
+    }
+
+    if (guest_flags & GUEST_O_CREAT) host_flags |= O_CREAT;
+    if (guest_flags & GUEST_O_TRUNC) host_flags |= O_TRUNC;
+    if (guest_flags & GUEST_O_APPEND) host_flags |= O_APPEND;
+    if (guest_flags & GUEST_O_EXCL) host_flags |= O_EXCL;
+    if (guest_flags & GUEST_O_SYNC) host_flags |= O_SYNC;
+    if (guest_flags & GUEST_O_NONBLOCK) host_flags |= O_NONBLOCK;
+#ifdef O_NOCTTY
+    if (guest_flags & GUEST_O_NOCTTY) host_flags |= O_NOCTTY;
+#endif
+#ifdef O_CLOEXEC
+    if (guest_flags & GUEST_O_CLOEXEC) host_flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+    if (guest_flags & GUEST_O_NOFOLLOW) host_flags |= O_NOFOLLOW;
+#endif
+#ifdef O_DIRECTORY
+    if (guest_flags & GUEST_O_DIRECTORY) host_flags |= O_DIRECTORY;
+#endif
+
+    return host_flags;
+}
+
 typedef struct {
     uint16_t st_dev;
     uint16_t st_ino;
@@ -197,7 +252,8 @@ bool sandbox_fs_handle_syscall(system_state_t *sys, uint8_t trap_code) {
                 sandbox_set_ret(sys, (uint32_t)-EACCES);
                 return true;
             }
-            int host_fd = open(host_path, (int)a2, (mode_t)a3);
+            int host_flags = sandbox_translate_open_flags(a2);
+            int host_fd = open(host_path, host_flags, (mode_t)a3);
             if (host_fd < 0) {
                 sandbox_set_ret(sys, (uint32_t)-errno);
                 return true;
