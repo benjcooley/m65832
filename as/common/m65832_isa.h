@@ -87,6 +87,7 @@ typedef struct {
     uint8_t opcode;       /* Base opcode ($80=LD, $81=ST, etc.) */
     int is_unary;         /* 1 for INC/DEC/ASL/LSR/ROL/ROR/STZ */
     int allows_mem_dest;  /* 1 if destination can be memory */
+    int is_flagless;      /* 1 if $42 prefix variant (X-prefixed, no flag updates) */
 } M65_ExtALUInstruction;
 
 /* Shifter instruction ($02 $98 prefix) */

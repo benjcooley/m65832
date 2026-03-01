@@ -599,6 +599,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     AddrMode mode;
     int prefix_len = 0;
     int is_ext = 0;
+    int is_flagless = 0;
     int m_flag = ctx->m_flag;
     int x_flag = ctx->x_flag;
     
@@ -607,24 +608,30 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
         x_flag = 3;
     }
 
-    if (m_flag >= 3 && opcode == 0x42) {
-        snprintf(out, out_size, ".BYTE $42");
-        return 1;
-    }
-
-    /* Check for extended prefix ($02) */
+    /* Check for extended prefix ($02) or flagless extended prefix ($42, 32-bit mode only) */
     if (opcode == 0x02 && buflen > 1) {
         is_ext = 1;
+        prefix_len = 1;
+        opcode = buf[1];
+    } else if (opcode == 0x42 && buflen > 1 && m_flag >= 3) {
+        is_ext = 1;
+        is_flagless = 1;
         prefix_len = 1;
         opcode = buf[1];
     }
     
     /* Look up instruction */
     if (is_ext) {
-        const char *ext_alu = get_ext_alu_name(opcode);
-        if (ext_alu) {
+        const char *ext_alu_base = get_ext_alu_name(opcode);
+        char ext_alu_buf[16];
+        const char *ext_alu = ext_alu_base;
+        if (ext_alu_base && is_flagless) {
+            snprintf(ext_alu_buf, sizeof(ext_alu_buf), "X%s", ext_alu_base);
+            ext_alu = ext_alu_buf;
+        }
+        if (ext_alu_base) {
             if (buflen < 3) {
-                snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                snprintf(out, out_size, ".BYTE $%02X,$%02X", is_flagless ? 0x42 : 0x02, opcode);
                 return 2;
             }
             uint8_t mode = buf[2];
@@ -636,7 +643,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
             char dest_str[16];
             if (target) {
                 if (buflen <= (size_t)index) {
-                    snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                    snprintf(out, out_size, ".BYTE $%02X,$%02X", is_flagless ? 0x42 : 0x02, opcode);
                     return 2;
                 }
                 if (ctx->r_flag) format_dp_reg(dest_str, sizeof(dest_str), buf[index++]);
@@ -686,7 +693,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
                     default: need = 0; break;
                 }
                 if (buflen < (size_t)(index + need)) {
-                    snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+                    snprintf(out, out_size, ".BYTE $%02X,$%02X", is_flagless ? 0x42 : 0x02, opcode);
                     return 2;
                 }
                 switch (addr_mode) {
@@ -860,8 +867,8 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
                 return index;
             }
             if (target == 0 && (opcode == 0x80 || opcode == 0x81)) {
-                /* A-targeted LD/ST: use LDA/STA mnemonic without "A," prefix */
-                const char *mnem = (opcode == 0x80) ? "LDA" : "STA";
+                const char *mnem = (opcode == 0x80) ? (is_flagless ? "XLDA" : "LDA") :
+                                                       (is_flagless ? "XSTA" : "STA");
                 snprintf(out, out_size, "%s%s %s", mnem, suffix, src_str);
             } else {
                 /* Register-targeted or other A-targeted ALU ops */
@@ -924,7 +931,7 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
         
         const ExtOpcodeEntry *entry = &ext_opcode_table[opcode];
         if (!entry->mnemonic) {
-            snprintf(out, out_size, ".BYTE $02,$%02X", opcode);
+            snprintf(out, out_size, ".BYTE $%02X,$%02X", is_flagless ? 0x42 : 0x02, opcode);
             return 2;
         }
         mnemonic = entry->mnemonic;

@@ -523,19 +523,30 @@ Emulation mode:
 Most instructions preserve 6502/65816 encodings. M65832 extensions use:
 
 1. **Extended Opcode Page ($02 prefix)**: Extended operations including sized ALU
+2. **Flagless Extended Page ($42 prefix, 32-bit mode only)**: Same as $02 but suppresses all flag updates
 
 ```
-Standard instruction:     [opcode] [operand...]
-32-bit absolute address:  [opcode] [32-bit operand]
-Extended operation:       [$02] [ext-opcode] [mode] [operand...]
+Standard instruction:         [opcode] [operand...]
+32-bit absolute address:      [opcode] [32-bit operand]
+Extended operation:           [$02] [ext-opcode] [mode] [operand...]
+Extended flagless operation:  [$42] [ext-opcode] [mode] [operand...]  (32-bit mode only)
 ```
 
 In 32-bit mode:
 - Traditional instructions use 32-bit data by default
 - For 8-bit or 16-bit operations, use Extended ALU (`$02 $80-$97`) with size in mode byte
 - Address size is determined by operand format (B+16 vs 32-bit absolute)
+- For flagless ALU operations in 32-bit mode, use `$42` prefix with X-prefixed mnemonics (XADC, XAND, etc.)
 
-> **Note:** The $02 opcode is COP in emulation mode (E=1). In native mode (E=0), it serves as the extended opcode prefix.
+> **Note:** The $02 opcode is COP in emulation mode (E=1). In native mode (E=0), it serves as the extended opcode prefix. The $42 opcode is WDM in emulation and native 8/16-bit modes; **in 32-bit mode only (W=11)**, it serves as the flagless extended prefix.
+
+#### Flagless Prefix Design Rationale
+
+The `$42` prefix enables out-of-order execution by allowing ALU operations to complete without creating a dependency on the flags register. An OoO core can dispatch flagless instructions independently of any prior flag-producing instruction, increasing instruction-level parallelism.
+
+The VHDL implementation reuses the existing ALU datapath by adding a single `SUPPRESS_FLAGS` control signal that gates all flag register write-back when `$42` is the prefix byte. This adds minimal FPGA resource usage.
+
+**Transfer instructions** (TAX, TXA, TAY, TYA, TSX, TXY, TYX, TCD, TDC, TSC, TAB, TBA, TXB, TBX, TYB, TBY, TTA) do not set flags **in 32-bit mode**, eliminating the need for flagless variants. In **8/16-bit modes**, these transfers set N and Z flags per 65816 convention (except TXS and TCS, which never set flags).
 
 ### 6.3 Instruction Timing (Cycles)
 
@@ -1692,7 +1703,7 @@ STP                     ; $DB
 - 32-bit addresses MUST be written with 8 hex digits: `$A0001234`
 - B+offset MUST be written as `B+$XXXX` with exactly 4 hex digits
 - For sized operations (8/16-bit), use Extended ALU not traditional instructions
-- `$42` is reserved/unused in 32-bit mode
+- `$42` is the flagless extended prefix in 32-bit mode (XADC, XAND, etc.)
 
 #### 65816 Mode Assembly Syntax
 

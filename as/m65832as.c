@@ -1189,8 +1189,24 @@ static int parse_ext_alu_dest(Assembler *as, const char *s, int *target, uint8_t
 static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     Operand op;
     int size_code = -1;
+    int flagless_prefix = 0;
     
     str_upper(mnemonic);
+    
+    /* Detect X-prefixed flagless mnemonics (e.g., XADC, XAND, XINC) */
+    if (mnemonic[0] == 'X' && mnemonic[1] != '\0' && mnemonic[1] != 'B' && mnemonic[1] != 'C') {
+        /* X followed by a valid extended ALU mnemonic => flagless $42 prefix.
+         * Exclude XBA (swap bytes) and XCE (exchange carry/emulation). */
+        char test_mnem[32];
+        strncpy(test_mnem, mnemonic + 1, sizeof(test_mnem) - 1);
+        test_mnem[sizeof(test_mnem) - 1] = '\0';
+        char *dot = strchr(test_mnem, '.');
+        if (dot) *dot = '\0';
+        if (m65_find_extalu_instruction(test_mnem)) {
+            flagless_prefix = 1;
+            memmove(mnemonic, mnemonic + 1, strlen(mnemonic));
+        }
+    }
     
     if (!strip_size_suffix(mnemonic, &size_code)) {
         error(as, "invalid size suffix");
@@ -1465,9 +1481,17 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
         }
     }
 
-    /* Extended ALU instructions ($02 $80-$97) */
+    /* Extended ALU instructions ($02 $80-$97, or $42 $80-$97 for flagless) */
     const ExtALUOp *ext_alu = find_ext_alu_op(mnemonic);
     if (ext_alu) {
+        if (flagless_prefix) {
+            uint8_t opc = ext_alu->opcode;
+            if (opc == 0x80 || opc == 0x81 || opc == 0x97 ||
+                opc == 0x87 || opc == 0x88 || opc == 0x89 || opc == 0x8A) {
+                error(as, "X prefix not valid for %s (already flagless or flag-only)", mnemonic);
+                return 0;
+            }
+        }
         const char *p = skip_whitespace(operand);
         /* In 32-bit mode, traditional mnemonics (LDA, STA, etc.) with absolute addresses
          * must use Extended ALU since standard opcodes only support B-relative.
@@ -1502,7 +1526,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
             }
             free(pre_operand);
         }
-        int use_ext_alu = (size_code >= 0 || dest_starts_reg ||
+        int use_ext_alu = (flagless_prefix || size_code >= 0 || dest_starts_reg ||
                            strcmp(mnemonic, "LD") == 0 || strcmp(mnemonic, "ST") == 0 ||
                            (as->m_flag == 2 && is_traditional_mnemonic && !is_immediate && !is_dp_mode));
         if (ext_alu->is_unary && !dest_starts_reg && size_code < 0 && !ext_alu->allows_mem_dest) {
@@ -1833,7 +1857,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
                 }
             }
 
-            emit_byte(as, 0x02);
+            emit_byte(as, flagless_prefix ? 0x42 : 0x02);
             emit_byte(as, ext_alu->opcode);
             emit_byte(as, (uint8_t)((size << 6) | (target ? 0x20 : 0x00) | (addr_mode & 0x1F)));
             if (target) emit_byte(as, dest_dp);

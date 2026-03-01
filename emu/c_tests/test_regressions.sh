@@ -7,6 +7,7 @@ cd "$SCRIPT_DIR"
 
 PASSED=0
 FAILED=0
+HEAVY_CYCLES=500000
 
 run_test() {
     local output
@@ -48,6 +49,21 @@ echo ""
 echo "--- Branch Offset Bug (2026-01-27) ---"
 echo "Bug: Branch instructions with immediate offsets weren't adjusted for PC-relative"
 run_test "regress_branch_offset.c" "00000532"          # 1330 = 0x532
+
+echo ""
+echo "--- Select/CMOV Lowering Bug (2026-02-22) ---"
+echo "Bug: disjoint OR lowering caused incorrect __ffs/select behavior"
+run_test "regress_select_cmov.c" "00000000" "$HEAVY_CYCLES"
+
+echo ""
+echo "--- ROL Encoding Bug (2026-02-22) ---"
+echo "Bug: rotate/bit-clear codegen mismatch in clear_bit/init_array pattern"
+run_test "regress_rol_encoding.c" "00000000" "$HEAVY_CYCLES"
+
+echo ""
+echo "--- Varargs String Pointer Bug (2026-02-22) ---"
+echo "Bug: va_arg(%s) fetched incorrect pointer value"
+run_test "regress_varargs_string.c" "00000000" "$HEAVY_CYCLES"
 
 echo ""
 echo "=========================================="

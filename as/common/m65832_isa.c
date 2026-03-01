@@ -231,31 +231,43 @@ const M65_ExtInstruction m65_ext_instructions[] = {
 
 /* Extended ALU instructions ($02 $80-$97) */
 const M65_ExtALUInstruction m65_extalu_instructions[] = {
-    /* Register-targeted extended ALU */
-    { "LD",   0x80, 0, 0 },
-    { "ST",   0x81, 0, 1 },
+    /* Register-targeted extended ALU ($02 prefix) */
+    { "LD",   0x80, 0, 0, 0 },
+    { "ST",   0x81, 0, 1, 0 },
     /* Traditional mnemonic aliases (for A-targeted with size suffix) */
-    { "LDA",  0x80, 0, 0 },
-    { "STA",  0x81, 0, 1 },
+    { "LDA",  0x80, 0, 0, 0 },
+    { "STA",  0x81, 0, 1, 0 },
     /* Arithmetic/Logic */
-    { "ADC",  0x82, 0, 0 },
-    { "SBC",  0x83, 0, 0 },
-    { "AND",  0x84, 0, 0 },
-    { "ORA",  0x85, 0, 0 },
-    { "EOR",  0x86, 0, 0 },
-    { "CMP",  0x87, 0, 0 },
-    { "BIT",  0x88, 0, 0 },
-    { "TSB",  0x89, 0, 1 },
-    { "TRB",  0x8A, 0, 1 },
+    { "ADC",  0x82, 0, 0, 0 },
+    { "SBC",  0x83, 0, 0, 0 },
+    { "AND",  0x84, 0, 0, 0 },
+    { "ORA",  0x85, 0, 0, 0 },
+    { "EOR",  0x86, 0, 0, 0 },
+    { "CMP",  0x87, 0, 0, 0 },
+    { "BIT",  0x88, 0, 0, 0 },
+    { "TSB",  0x89, 0, 1, 0 },
+    { "TRB",  0x8A, 0, 1, 0 },
     /* Unary operations */
-    { "INC",  0x8B, 1, 0 },
-    { "DEC",  0x8C, 1, 0 },
-    { "ASL",  0x8D, 1, 0 },
-    { "LSR",  0x8E, 1, 0 },
-    { "ROL",  0x8F, 1, 0 },
-    { "ROR",  0x90, 1, 0 },
-    { "STZ",  0x97, 0, 1 },
-    { NULL, 0, 0, 0 }
+    { "INC",  0x8B, 1, 0, 0 },
+    { "DEC",  0x8C, 1, 0, 0 },
+    { "ASL",  0x8D, 1, 0, 0 },
+    { "LSR",  0x8E, 1, 0, 0 },
+    { "ROL",  0x8F, 1, 0, 0 },
+    { "ROR",  0x90, 1, 0, 0 },
+    { "STZ",  0x97, 0, 1, 0 },
+    /* Flagless X-prefixed variants ($42 prefix) */
+    { "XADC", 0x82, 0, 0, 1 },
+    { "XSBC", 0x83, 0, 0, 1 },
+    { "XAND", 0x84, 0, 0, 1 },
+    { "XORA", 0x85, 0, 0, 1 },
+    { "XEOR", 0x86, 0, 0, 1 },
+    { "XINC", 0x8B, 1, 0, 1 },
+    { "XDEC", 0x8C, 1, 0, 1 },
+    { "XASL", 0x8D, 1, 0, 1 },
+    { "XLSR", 0x8E, 1, 0, 1 },
+    { "XROL", 0x8F, 1, 0, 1 },
+    { "XROR", 0x90, 1, 0, 1 },
+    { NULL, 0, 0, 0, 0 }
 };
 
 /* Shifter instructions ($02 $98 prefix) */

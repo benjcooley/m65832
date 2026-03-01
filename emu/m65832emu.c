@@ -1464,6 +1464,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
     int8_t rel8;
     int16_t rel16;
     uint8_t ext_op;
+    int suppress_flags = 0;
 
     switch (opcode) {
         /* ============ LDA ============ */
@@ -2608,29 +2609,31 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
 
         /* ============ Transfers ============ */
+        /* In 8/16-bit modes: N,Z set per 65816 convention.
+         * In 32-bit mode: no flags affected (OoO pipeline friendly). */
         case 0xAA: /* TAX */
             cpu->x = cpu->a & MASK_X(cpu);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_m != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 2;
             break;
         case 0xA8: /* TAY */
             cpu->y = cpu->a & MASK_X(cpu);
-            update_nz(cpu, cpu->y, width_x);
+            if (width_m != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 2;
             break;
         case 0x8A: /* TXA */
             cpu->a = cpu->x & MASK_M(cpu);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 2;
             break;
         case 0x98: /* TYA */
             cpu->a = cpu->y & MASK_M(cpu);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 2;
             break;
         case 0xBA: /* TSX */
             cpu->x = cpu->s & MASK_X(cpu);
-            update_nz(cpu, cpu->x, width_x);
+            if (width_m != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 2;
             break;
         case 0x9A: /* TXS */
@@ -2640,22 +2643,22 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0x9B: /* TXY */
             cpu->y = cpu->x;
-            update_nz(cpu, cpu->y, width_x);
+            if (width_m != 4) update_nz(cpu, cpu->y, width_x);
             cycles = 2;
             break;
         case 0xBB: /* TYX */
             cpu->x = cpu->y;
-            update_nz(cpu, cpu->x, width_x);
+            if (width_m != 4) update_nz(cpu, cpu->x, width_x);
             cycles = 2;
             break;
         case 0x5B: /* TCD */
             cpu->d = cpu->a;
-            update_nz16(cpu, (uint16_t)cpu->d);
+            if (width_m != 4) update_nz16(cpu, (uint16_t)cpu->d);
             cycles = 2;
             break;
         case 0x7B: /* TDC */
             cpu->a = cpu->d & MASK_M(cpu);
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 2;
             break;
         case 0x1B: /* TCS */
@@ -2665,7 +2668,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             break;
         case 0x3B: /* TSC */
             cpu->a = cpu->s;
-            update_nz(cpu, cpu->a, width_m);
+            if (width_m != 4) update_nz(cpu, cpu->a, width_m);
             cycles = 2;
             break;
 
@@ -3040,10 +3043,9 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cycles = 7;
             break;
         case 0x02: /* Extended prefix (M65832 allows in both modes) */
-            /* Note: M65832 VHDL tests use $02 as EXT prefix even in emulation mode.
-             * This differs from standard 65816 which has COP in emulation mode.
-             * For M65832 compatibility, always treat $02 as extended prefix. */
+        ext_prefix_dispatch:
             {
+                uint16_t saved_p = cpu->p;
                 ext_op = fetch8(cpu);
                 cycles = 3;  /* Base for extended */
                 switch (ext_op) {
@@ -3560,7 +3562,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     case 0x92: /* TBA - B to A */
                         cpu->a = cpu->b;
-                        update_nz32(cpu, cpu->a);
+                        if (width_m != 4) update_nz32(cpu, cpu->a);
                         cycles = 2;
                         break;
                     case 0x93: /* TXB - X to B */
@@ -3570,7 +3572,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     case 0x94: /* TBX - B to X */
                         cpu->x = cpu->b;
-                        update_nz32(cpu, cpu->x);
+                        if (width_m != 4) update_nz32(cpu, cpu->x);
                         cycles = 2;
                         break;
                     case 0x95: /* TYB - Y to B */
@@ -3580,7 +3582,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         break;
                     case 0x96: /* TBY - B to Y */
                         cpu->y = cpu->b;
-                        update_nz32(cpu, cpu->y);
+                        if (width_m != 4) update_nz32(cpu, cpu->y);
                         cycles = 2;
                         break;
                     
@@ -3615,7 +3617,7 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                     /* === T Register Transfers === */
                     case 0x9A: /* TTA - T to A */
                         cpu->a = cpu->t;
-                        update_nz32(cpu, cpu->a);
+                        if (width_m != 4) update_nz32(cpu, cpu->a);
                         cycles = 2;
                         break;
                     case 0x9B: /* TAT - A to T */
@@ -4301,6 +4303,8 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                         }
                         break;
                 }
+                if (suppress_flags)
+                    cpu->p = saved_p;
             }
             break;
         case 0x40: /* RTI - Return from Interrupt */
@@ -4320,16 +4324,21 @@ static int execute_instruction(m65832_cpu_t *cpu) {
             cycles = 6;
             break;
 
-        case 0x42: { /* WDM sig -- 2-byte instruction (65816 spec) */
-            uint8_t sig = fetch8(cpu);
-            if (sig == 0x01 && cpu->dbg_irq) {
-                /* "Kernel loaded" signal: debugger re-inserts breakpoints */
-                if (cpu->dbg_kernel_ready) *cpu->dbg_kernel_ready = 1;
-                *cpu->dbg_irq = 1;
+        case 0x42: /* Flagless extended prefix (32-bit mode only) */
+            if (width_m == 4) {
+                suppress_flags = 1;
+                goto ext_prefix_dispatch;
             }
-            cycles = 2;
-            break;
-        }
+            /* WDM in emulation and native 8/16-bit modes */
+            {
+                uint8_t sig = fetch8(cpu);
+                if (sig == 0x01 && cpu->dbg_irq) {
+                    if (cpu->dbg_kernel_ready) *cpu->dbg_kernel_ready = 1;
+                    *cpu->dbg_irq = 1;
+                }
+                cycles = 2;
+                break;
+            }
 
         /* ============ Flag instructions ============ */
         case 0x18: /* CLC */

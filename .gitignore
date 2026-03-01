@@ -88,3 +88,14 @@ emu/c_tests/**/*_crt0.s
 emu/c_tests/baremetal/**/*.ld
 emu/c_tests/regression/*.ld
 emu/c_tests/tests/*.ld
+
+# vcore working directory (separate repo: rsd-m65832)
+vcode/
+
+# Scratch/debug files at repo root
+/test*.c
+/test*.s
+/sscanf.s
+/syscalls*.s
+/syscalls*.c
+/lldb_script.txt

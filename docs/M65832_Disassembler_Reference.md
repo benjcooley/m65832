@@ -351,9 +351,9 @@ The disassembler uses a 256-entry lookup table for standard 6502/65816 opcodes, 
 - Addressing mode
 - Operand size (may depend on M/X flags)
 
-### Extended Opcodes ($02 Prefix)
+### Extended Opcodes ($02 and $42 Prefixes)
 
-When opcode $02 is encountered, the next byte is looked up in a separate extended opcode table for M65832 instructions:
+When opcode $02 is encountered, the next byte is looked up in a separate extended opcode table for M65832 instructions. The `$42` prefix (**32-bit mode only**, W=11) produces the same instruction but with an "X" prefix on the mnemonic, indicating that flags are not modified. In emulation and native 8/16-bit modes, `$42` is the WDM instruction:
 - MUL, DIV operations ($00-$07)
 - Atomic instructions ($10-$15): CAS, LLI, SCI
 - Memory fences ($50-$52)
@@ -369,7 +369,8 @@ When opcode $02 is encountered, the next byte is looked up in a separate extende
 
 Extended ALU instructions have a mode byte following the opcode:
 
-**Format:** `$02 [op] [mode] [dest_dp?] [src...]`
+**Format:** `$02 [op] [mode] [dest_dp?] [src...]` (flag-setting)
+**Format:** `$42 [op] [mode] [dest_dp?] [src...]` (flagless, X-prefixed — 32-bit mode only)
 
 **Mode byte:** `[size:2][target:1][addr_mode:5]`
 

@@ -9,8 +9,10 @@ A complete, verified reference for all M65832 instructions.
 The M65832 extends the WDC 65C816 instruction set with:
 - **32-bit operations** in native-32 mode; 8/16 via Extended ALU
 - **Extended ALU** ($02 $80-$97) with mode byte for 8/16/32-bit sized operations
+- **Flagless ALU** ($42 prefix, **32-bit mode only**) for out-of-order pipeline support (XADC, XAND, etc.)
 - **New instructions** for multiply, divide, atomics, and system control
-- **Extended opcode page ($02)** for new operations
+- **Extended opcode page ($02)** for new operations; **$42** for flagless variants (**32-bit mode only**)
+- **Transfer instructions** do not set flags in **32-bit mode** (set N, Z in 8/16-bit modes per 65816 convention)
 
 ### Compatibility Note
 
@@ -28,6 +30,7 @@ All standard 6502 and 65816 opcodes are preserved. The M65832 adds capabilities 
 | Standard + imm | `[opcode] [imm8/16/32]` | 2-5 bytes |
 | Standard + addr | `[opcode] [addr8/16/32]` | 2-5 bytes |
 | Extended | `[$02] [ext-op] [mode] [operands...]` | 3+ bytes |
+| Extended Flagless | `[$42] [ext-op] [mode] [operands...]` | 3+ bytes (32-bit mode only) |
 
 ### Operand Width Rules
 
@@ -62,8 +65,8 @@ In **emulation mode** (W=00), all operations are 8-bit. In **native-32** (W=11),
 3x   BMI      AND      AND      ---      BIT      AND      ROL      ---
      rel      (dp),Y   (dp)     ---      dp,X     dp,X     dp,X     ---
 
-4x   RTI      EOR      (3)      ---      MVP      EOR      LSR      ---
-     impl     (dp,X)   prefix   ---      src,dst  dp       dp       ---
+4x   RTI      EOR      XEXT/WDM ---      MVP      EOR      LSR      ---
+     impl     (dp,X)   (1)      ---      src,dst  dp       dp       ---
 
 5x   BVC      EOR      EOR      ---      MVN      EOR      LSR      ---
      rel      (dp),Y   (dp)     ---      src,dst  dp,X     dp,X     ---
@@ -217,7 +220,7 @@ After the `$02` prefix byte:
 | $8F [mode] [dest?] [src...] | ROL | Rotate left |
 | $90 [mode] [dest?] [src...] | ROR | Rotate right |
 | $97 [mode] [dest?] [src...] | STZ | Store zero |
-| **B Register Transfers ($91-$96, $A4)** | | |
+| **B Register Transfers ($91-$96, $A4)** | | Flags: NZ in 8/16-bit (for TBA, TBX, TBY); none in 32-bit |
 | $91 | TAB | Transfer A to B |
 | $92 | TBA | Transfer B to A |
 | $93 | TXB | Transfer X to B |
@@ -231,7 +234,7 @@ After the `$02` prefix byte:
 | $98 [op\|cnt] [dest] [src] | SHL/SHR/SAR/ROL/ROR | Multi-bit shift (see below) |
 | **Extend Operations ($99)** | | |
 | $99 [subop] [dest] [src] | SEXT/ZEXT/CLZ/CTZ/POPCNT | Extend operations (see below) |
-| **T Register Transfers ($9A-$9B)** | | |
+| **T Register Transfers ($9A-$9B)** | | Flags: TTA sets NZ in 8/16-bit; none in 32-bit |
 | $9A | TTA | Transfer T to A |
 | $9B | TAT | Transfer A to T |
 | **64-bit Load/Store ($9C-$9F)** | | |
@@ -276,6 +279,47 @@ FPU load/store register byte encoding:
 | $CB-$CF | (reserved) | Trap to software emulation |
 | $DB-$DF | (reserved) | Trap to software emulation |
 | $E6-$FF | (illegal) | Illegal opcode trap |
+
+### Flagless Extended Prefix ($42) — 32-bit Mode Only
+
+The `$42` prefix byte acts as a flagless variant of the `$02` extended prefix. Instructions encoded with `$42` instead of `$02` execute identically but **do not modify any processor status flags** (N, Z, C, V). This is designed for out-of-order processor cores where eliminating false flag dependencies improves pipeline throughput.
+
+**Availability:** The `$42` prefix is **only valid in 32-bit mode (W=11)**. In emulation mode (W=00) and native 8/16-bit mode (W=01), `$42` retains its standard WDM (reserved) behavior.
+
+**Encoding:** `$42 [ext-op] [mode] [dest_dp if target=1] [source_operand...]`
+
+The instruction format, mode byte, addressing modes, and operand encoding are identical to the `$02` prefix. Only the flag behavior differs.
+
+**Supported Instructions:** The `$42` prefix is supported for extended ALU instructions that normally set flags:
+
+| $42 Mnemonic | $02 Equivalent | Operation | Flags Suppressed |
+|--------------|----------------|-----------|-----------------|
+| XADC | ADC ($82) | Add with carry | N, Z, C, V |
+| XSBC | SBC ($83) | Subtract with borrow | N, Z, C, V |
+| XAND | AND ($84) | Logical AND | N, Z |
+| XORA | ORA ($85) | Logical OR | N, Z |
+| XEOR | EOR ($86) | Exclusive OR | N, Z |
+| XINC | INC ($8B) | Increment | N, Z |
+| XDEC | DEC ($8C) | Decrement | N, Z |
+| XASL | ASL ($8D) | Arithmetic shift left | N, Z, C |
+| XLSR | LSR ($8E) | Logical shift right | N, Z, C |
+| XROL | ROL ($8F) | Rotate left | N, Z, C |
+| XROR | ROR ($90) | Rotate right | N, Z, C |
+
+**Not Applicable:** The following instructions should **not** use the `$42` prefix:
+
+- **Flag-setting instructions** (CMP, BIT, TSB, TRB): Their primary purpose is to set flags; a flagless variant would be useless.
+- **Already flagless instructions** (LD, ST, STZ, LEA, MUL, DIV, FPU ops): These already do not set flags under the `$02` prefix. While `$42` is functionally identical for these, it is considered **unsupported** and the `$02` variant must be used.
+
+**Usage Example:**
+
+```asm
+XADC.W R0, R1      ; $42 $82 [mode]: R0 = R0 + R1 (16-bit), no flags modified
+XINC R4             ; $42 $8B [mode]: R4 = R4 + 1, no flags modified
+XASL A              ; $42 $8D [mode]: A <<= 1, no flags modified
+```
+
+---
 
 ### Extended ALU Instructions ($02 $80-$97)
 
@@ -1003,20 +1047,26 @@ This ensures consistent stack alignment and simplifies ABI design.
 
 ### Transfer Instructions
 
-| Instruction | Opcode | Operation | Flags |
-|-------------|--------|-----------|-------|
-| TAX | $AA | X = A | N, Z |
-| TXA | $8A | A = X | N, Z |
-| TAY | $A8 | Y = A | N, Z |
-| TYA | $98 | A = Y | N, Z |
-| TSX | $BA | X = S | N, Z |
-| TXS | $9A | S = X | — |
-| TXY | $9B | Y = X | N, Z |
-| TYX | $BB | X = Y | N, Z |
-| TCD | $5B | D = A (16-bit C) | N, Z |
-| TDC | $7B | A = D (16-bit C) | N, Z |
-| TCS | $1B | S = A (16-bit C) | — |
-| TSC | $3B | A = S (16-bit C) | N, Z |
+In **32-bit mode (W=11)**, transfer instructions do **not** modify processor flags. This supports efficient out-of-order pipelining by eliminating false flag dependencies.
+
+In **8/16-bit modes (W=00, W=01)**, transfer instructions set N and Z flags per 65816 convention (except TXS and TCS, which never set flags on any processor).
+
+| Instruction | Opcode | Operation | Flags (8/16-bit) | Flags (32-bit) |
+|-------------|--------|-----------|------------------|----------------|
+| TAX | $AA | X = A | NZ | — |
+| TXA | $8A | A = X | NZ | — |
+| TAY | $A8 | Y = A | NZ | — |
+| TYA | $98 | A = Y | NZ | — |
+| TSX | $BA | X = S | NZ | — |
+| TXS | $9A | S = X | — | — |
+| TXY | $9B | Y = X | NZ | — |
+| TYX | $BB | X = Y | NZ | — |
+| TCD | $5B | D = A (16-bit C) | NZ | — |
+| TDC | $7B | A = D (16-bit C) | NZ | — |
+| TCS | $1B | S = A (16-bit C) | — | — |
+| TSC | $3B | A = S (16-bit C) | NZ | — |
+
+**65816 Compatibility Note:** In 8/16-bit modes, transfer flag behavior is identical to the 65816. In 32-bit mode, transfers never set flags. Code running in 32-bit mode that needs flag updates after a transfer must add an explicit comparison or test instruction (e.g., `TAX` followed by `CPX #0`).
 
 ---
 
@@ -1523,7 +1573,7 @@ The B register is the base register for absolute addressing. These extended inst
 |------|--------|--------|-------|
 | Implied | TAB | $02 $91 | 2 |
 
-**Flags Affected:** None (like TXS)
+**Flags Affected:** None
 
 **Example:**
 ```asm
@@ -1537,7 +1587,7 @@ The B register is the base register for absolute addressing. These extended inst
 |------|--------|--------|-------|
 | Implied | TBA | $02 $92 | 2 |
 
-**Flags Affected:** N, Z (based on transferred value)
+**Flags Affected:** N, Z (8/16-bit modes only); none in 32-bit mode
 
 #### TXB - Transfer X to B
 
@@ -1553,7 +1603,7 @@ The B register is the base register for absolute addressing. These extended inst
 |------|--------|--------|-------|
 | Implied | TBX | $02 $94 | 2 |
 
-**Flags Affected:** N, Z (based on transferred value)
+**Flags Affected:** N, Z (8/16-bit modes only); none in 32-bit mode
 
 #### TYB - Transfer Y to B
 
@@ -1569,7 +1619,7 @@ The B register is the base register for absolute addressing. These extended inst
 |------|--------|--------|-------|
 | Implied | TBY | $02 $96 | 2 |
 
-**Flags Affected:** N, Z (based on transferred value)
+**Flags Affected:** N, Z (8/16-bit modes only); none in 32-bit mode
 
 #### TSPB - Transfer Stack Pointer to B
 
@@ -1638,11 +1688,15 @@ The T register holds the high word from 64-bit multiply results and the remainde
 |------|--------|--------|-------|
 | Implied | TTA | $02 $9A | 2 |
 
+**Flags Affected:** N, Z (8/16-bit modes only); none in 32-bit mode
+
 #### TAT - Transfer A to T
 
 | Mode | Syntax | Opcode | Bytes |
 |------|--------|--------|-------|
 | Implied | TAT | $02 $9B | 2 |
+
+**Flags Affected:** None
 
 ---
 
@@ -1707,7 +1761,7 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 - Data size is encoded in the mode byte (bits 7-6): BYTE, WORD, or LONG
 - Address mode is encoded in the mode byte (bits 4-0)
 - Use `.B`, `.W`, `.L` suffixes in assembly
-- `$42` is reserved/unused in 32-bit mode
+- `$42` is the flagless extended prefix in 32-bit mode (XADC, XAND, etc.)
 
 **For sized operations, use Extended ALU:**
 ```asm
@@ -2026,6 +2080,143 @@ sys_write:
     ; Kernel returns result in R0
     RTS
 ```
+
+---
+
+## Flagless X-Prefixed Instructions ($42 Page) — 32-bit Mode Only
+
+The following instructions use the `$42` extended prefix instead of `$02`, producing identical results but suppressing all flag updates. Each is documented as a separate instruction with its own mnemonic.
+
+**Availability:** The `$42` prefix is **only valid in 32-bit mode (W=11)**. In emulation mode (W=00) and native 8/16-bit mode (W=01), the `$42` byte is the WDM (reserved) instruction and does not act as an extended prefix.
+
+### XADC - Add with Carry (Flagless)
+
+**Operation:** `dest = dest + src + C` (flags unchanged)
+
+**Encoding:** `$42 $82 [mode] [dest_dp?] [source...]`
+
+Performs the same addition as ADC, reading the carry flag as input, but does not update N, Z, C, or V flags. Useful when the arithmetic result is needed but subsequent instructions should not depend on flag state.
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XSBC - Subtract with Borrow (Flagless)
+
+**Operation:** `dest = dest - src - ~C` (flags unchanged)
+
+**Encoding:** `$42 $83 [mode] [dest_dp?] [source...]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XAND - Logical AND (Flagless)
+
+**Operation:** `dest = dest & src` (flags unchanged)
+
+**Encoding:** `$42 $84 [mode] [dest_dp?] [source...]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XORA - Logical OR (Flagless)
+
+**Operation:** `dest = dest | src` (flags unchanged)
+
+**Encoding:** `$42 $85 [mode] [dest_dp?] [source...]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XEOR - Exclusive OR (Flagless)
+
+**Operation:** `dest = dest ^ src` (flags unchanged)
+
+**Encoding:** `$42 $86 [mode] [dest_dp?] [source...]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XINC - Increment (Flagless)
+
+**Operation:** `dest = dest + 1` (flags unchanged)
+
+**Encoding:** `$42 $8B [mode] [dest_dp?]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XDEC - Decrement (Flagless)
+
+**Operation:** `dest = dest - 1` (flags unchanged)
+
+**Encoding:** `$42 $8C [mode] [dest_dp?]`
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XASL - Arithmetic Shift Left (Flagless)
+
+**Operation:** `dest = dest << 1` (flags unchanged)
+
+**Encoding:** `$42 $8D [mode] [dest_dp?]`
+
+The MSB is discarded (not placed in carry).
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XLSR - Logical Shift Right (Flagless)
+
+**Operation:** `dest = dest >> 1` (flags unchanged)
+
+**Encoding:** `$42 $8E [mode] [dest_dp?]`
+
+The LSB is discarded (not placed in carry).
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XROL - Rotate Left (Flagless)
+
+**Operation:** `{dest, bit} = {C, dest} << 1` (flags unchanged)
+
+**Encoding:** `$42 $8F [mode] [dest_dp?]`
+
+Reads carry flag as input but does not update it. The MSB that would normally go into carry is discarded.
+
+| Flags Affected | None |
+|----------------|------|
+
+---
+
+### XROR - Rotate Right (Flagless)
+
+**Operation:** `{bit, dest} = {dest, C} >> 1` (flags unchanged)
+
+**Encoding:** `$42 $90 [mode] [dest_dp?]`
+
+Reads carry flag as input but does not update it. The LSB that would normally go into carry is discarded.
+
+| Flags Affected | None |
+|----------------|------|
 
 ---
 

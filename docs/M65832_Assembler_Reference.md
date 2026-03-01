@@ -739,7 +739,8 @@ All extended instructions are prefixed with opcode $02.
 
 Extended ALU operations with explicit size, target, and addressing mode.
 
-**Encoding:** `$02 [op] [mode] [dest_dp?] [src...]`
+**Encoding:** `$02 [op] [mode] [dest_dp?] [src...]` (flag-setting)
+**Encoding:** `$42 [op] [mode] [dest_dp?] [src...]` (flagless, X-prefixed — **32-bit mode only**)
 
 **Mode byte:** `[size:2][target:1][addr_mode:5]`
 - Size: 00=BYTE (.B), 01=WORD (.W), 10=LONG (default)
@@ -789,6 +790,23 @@ Extended ALU operations with explicit size, target, and addressing mode.
 | $8F | ROL | rotate left through C |
 | $90 | ROR | rotate right through C |
 | $97 | STZ | [addr] = 0 |
+
+#### Flagless X-Prefixed Variants ($42 Prefix — 32-bit Mode Only)
+
+**Available only in 32-bit mode (W=11).** In emulation and native 8/16-bit modes, `$42` is WDM.
+
+Prefix any supported mnemonic with `X` to use the `$42` flagless prefix:
+
+```asm
+    ; Flagless arithmetic (no N, Z, C, V updates)
+    XADC.W R0, R1         ; R0 = R0 + R1 + C (16-bit, no flags)
+    XSBC R0, #1           ; R0 = R0 - 1 - !C (32-bit, no flags)
+    XINC.B R5             ; R5 = R5 + 1 (8-bit, no flags)
+    XASL A                ; A <<= 1 (32-bit, no flags)
+    XAND.W R3, R4         ; R3 = R3 & R4 (16-bit, no flags)
+```
+
+**Not valid with X prefix:** LD, ST, STZ (already flagless), CMP, BIT, TSB, TRB (flag-only purpose).
 
 ### Barrel Shifter Instructions ($98)
 
@@ -916,7 +934,7 @@ In 32-bit mode, distinguish between B-relative and absolute addressing:
     ; INVALID in 32-bit mode:
     ; LDA $1234             ; Ambiguous - use B+$1234 instead
     ; LDA $A0001234         ; Uses Extended ALU: LD Rn, $A0001234
-    ; $42 is reserved/unused in 32-bit mode
+    ; $42 is the flagless extended prefix in 32-bit mode
 ```
 
 ### WAI and STP

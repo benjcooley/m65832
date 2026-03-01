@@ -190,6 +190,7 @@ architecture rtl of M65832_Core is
     signal IS_PER, IS_WAI, IS_STP, IS_XCE         : std_logic;
     signal IS_REP, IS_SEP, IS_WDM                 : std_logic;
     signal IS_EXT_OP                              : std_logic;
+    signal SUPPRESS_FLAGS                         : std_logic;
     signal IS_RSET, IS_RCLR, IS_SB, IS_SVBR       : std_logic;
     signal IS_CAS, IS_LLI, IS_SCI                 : std_logic;
     signal ILLEGAL_OP                              : std_logic;
@@ -671,10 +672,12 @@ begin
         REGALU_SRC_MODE => REGALU_SRC_MODE,
         REGALU_DEST_DP  => REGALU_DEST_DP,
         
+        SUPPRESS_FLAGS  => SUPPRESS_FLAGS,
+
         IS_SHIFTER      => IS_SHIFTER,
         SHIFT_OP        => SHIFT_OP,
         SHIFT_COUNT     => SHIFT_COUNT,
-        
+
         IS_EXTEND       => IS_EXTEND,
         EXTEND_OP       => EXTEND_OP
     );
@@ -3862,12 +3865,13 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                  P_reg(P_I);
     
     -- Carry flag load: CLC/SEC, ADC/SBC/CMP, or shift/rotate operations
-    flag_c_load <= '1' when state = ST_EXECUTE and 
-                   (IS_SHIFTER = '1' or
+    -- $42 prefix (SUPPRESS_FLAGS) gates off carry updates for ALU/RMW/shifter ops
+    flag_c_load <= '1' when state = ST_EXECUTE and
+                   ((IS_SHIFTER = '1' and SUPPRESS_FLAGS = '0') or
                     fpu_flag_c_load = '1' or
-                    (IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC
-                    (IS_ALU_OP = '1' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
-                    (IS_RMW_OP = '1' and (RMW_OP = "000" or RMW_OP = "001" or 
+                    (IS_FLAG_OP = '1' and (IR = x"18" or IR = x"38")) or  -- CLC, SEC (never suppressed)
+                    (IS_ALU_OP = '1' and SUPPRESS_FLAGS = '0' and (ALU_OP = "011" or ALU_OP = "110" or ALU_OP = "111")) or  -- ADC, CMP, SBC
+                    (IS_RMW_OP = '1' and SUPPRESS_FLAGS = '0' and (RMW_OP = "000" or RMW_OP = "001" or
                                           RMW_OP = "010" or RMW_OP = "011")))  -- ASL, ROL, LSR, ROR
                    else '0';
     
@@ -3888,11 +3892,14 @@ is_bit_op <= '1' when ((IS_ALU_OP = '1' and ALU_OP = "001" and
                                 (IS_RMW_OP = '1' and RMW_OP = "101")))    -- LDX/LDY
                     else '0';
     
+    -- N/Z/V flag load: gated by SUPPRESS_FLAGS for $42 flagless prefix.
+    -- Transfers set N,Z in 8/16-bit modes (65816 compat) but NOT in 32-bit mode.
     flag_nzv_load <= '1' when state = ST_EXECUTE and
                      (fpu_flag_load = '1' or
-                      ext_flag_load = '1' or
-                      (IS_ALU_OP = '1' and ALU_OP /= "100" and load_no_flags = '0') or  -- ALU except STA
-                      (IS_RMW_OP = '1' and RMW_OP /= "100" and load_no_flags = '0'))    -- RMW except STX/STY
+                      (ext_flag_load = '1' and SUPPRESS_FLAGS = '0') or
+                      (IS_ALU_OP = '1' and ALU_OP /= "100" and load_no_flags = '0' and SUPPRESS_FLAGS = '0') or
+                      (IS_RMW_OP = '1' and RMW_OP /= "100" and load_no_flags = '0' and SUPPRESS_FLAGS = '0') or
+                      (IS_TRANSFER = '1' and W_mode = '0'))
                      else '0';
     
     ---------------------------------------------------------------------------

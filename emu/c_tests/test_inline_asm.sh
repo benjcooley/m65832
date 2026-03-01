@@ -115,6 +115,10 @@ echo "--- Transfer Instructions ---"
 run_inline_asm_test "inline_asm_transfers" "inline_asm/test_inline_asm_transfers.c"
 
 echo ""
+echo "--- Stack-Relative Addressing ---"
+run_inline_asm_test "inline_asm_stack_rel" "inline_asm/test_inline_asm_stack_rel.c"
+
+echo ""
 echo "========================================"
 echo "Summary: $PASS passed, $FAIL failed, $SKIP skipped"
 echo "========================================"

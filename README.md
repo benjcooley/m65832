@@ -49,6 +49,8 @@ See [LICENSE.md](LICENSE.md) for complete licensing details.
 - **[Architecture Reference](docs/M65832_Architecture_Reference.md)** - Complete CPU specification
 - **[Instruction Set](docs/M65832_Instruction_Set.md)** - Detailed opcode reference
 - **[Quick Reference](docs/M65832_Quick_Reference.md)** - Programmer's cheat sheet
+- **[Fixed32 Encoding](docs/M65832_Fixed32_Encoding.md)** - Fixed-width 32-bit instruction encoding for native mode
+- **[vcore Roadmap](docs/M65832_vcore_Roadmap.md)** - Modern OoO processor pipeline plan and staging
 
 ### Tools
 - **[Assembler Reference](docs/M65832_Assembler_Reference.md)** - Assembler usage, syntax, and directives

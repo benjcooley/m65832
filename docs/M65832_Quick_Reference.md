@@ -233,14 +233,20 @@ In Native-32 (W=11), standard opcodes are fixed 32-bit; use Extended ALU for 8/1
 | PER rel16 | Push PC + rel | $62 | 32-bit |
 
 ### Transfers
-| Instruction | Operation | Opcode | Flags |
-|-------------|-----------|--------|-------|
-| TAX / TXA | A ↔ X | $AA/$8A | NZ |
-| TAY / TYA | A ↔ Y | $A8/$98 | NZ |
-| TXY / TYX | X ↔ Y | $9B/$BB | NZ |
-| TSX / TXS | S → X / X → S | $BA/$9A | NZ/— |
-| TCD / TDC | A → D / D → A | $5B/$7B | NZ |
-| TCS / TSC | A → S / S → A | $1B/$3B | —/NZ |
+In **32-bit mode**: no flags affected (OoO pipeline friendly).
+In **8/16-bit modes**: N, Z set per 65816 convention (except TXS, TCS which never set flags).
+
+| Instruction | Operation | Opcode | Flags (8/16-bit) | Flags (32-bit) |
+|-------------|-----------|--------|------------------|----------------|
+| TAX / TXA | A ↔ X | $AA/$8A | NZ | — |
+| TAY / TYA | A ↔ Y | $A8/$98 | NZ | — |
+| TXY / TYX | X ↔ Y | $9B/$BB | NZ | — |
+| TSX | S → X | $BA | NZ | — |
+| TXS | X → S | $9A | — | — |
+| TCD | A → D | $5B | NZ | — |
+| TDC | D → A | $7B | NZ | — |
+| TCS | A → S | $1B | — | — |
+| TSC | S → A | $3B | NZ | — |
 
 ### Status Flags
 | Instruction | Operation | Opcode |
@@ -274,7 +280,7 @@ Setup: X=src, Y=dst, A=count-1
 
 ## M65832 Extended Instructions
 
-All extended instructions use the `$02` prefix.
+All extended instructions use the `$02` prefix. In **32-bit mode only**, the `$42` prefix provides flagless variants (X-prefixed mnemonics). In 8/16-bit and emulation modes, `$42` is WDM.
 
 ### Multiply/Divide
 | Instruction | Encoding | Operation |
@@ -329,15 +335,17 @@ All extended instructions use the `$02` prefix.
 | STP | $DB | Stop processor |
 
 ### B Register Transfers
-| Instruction | Encoding | Operation | Flags |
-|-------------|----------|-----------|-------|
-| TAB | $02 $91 | B = A | — |
-| TBA | $02 $92 | A = B | N, Z |
-| TXB | $02 $93 | B = X | — |
-| TBX | $02 $94 | X = B | N, Z |
-| TYB | $02 $95 | B = Y | — |
-| TBY | $02 $96 | Y = B | N, Z |
-| TSPB | $02 $A4 | B = SP | — |
+In **32-bit mode**: no flags affected. In **8/16-bit modes**: TBA, TBX, TBY set N, Z.
+
+| Instruction | Encoding | Operation | Flags (8/16-bit) | Flags (32-bit) |
+|-------------|----------|-----------|------------------|----------------|
+| TAB | $02 $91 | B = A | — | — |
+| TBA | $02 $92 | A = B | NZ | — |
+| TXB | $02 $93 | B = X | — | — |
+| TBX | $02 $94 | X = B | NZ | — |
+| TYB | $02 $95 | B = Y | — | — |
+| TBY | $02 $96 | Y = B | NZ | — |
+| TSPB | $02 $A4 | B = SP | — | — |
 
 ### DP Indirect Control Flow
 | Instruction | Encoding | Operation | Flags |
@@ -346,10 +354,12 @@ All extended instructions use the `$02` prefix.
 | JSR (dp) | $02 $A6 dp | Push PC, PC = [dp] | — |
 
 ### T Register Transfers
-| Instruction | Encoding | Operation | Flags |
-|-------------|----------|-----------|-------|
-| TTA | $02 $9A | A = T | N, Z |
-| TAT | $02 $9B | T = A | — |
+In **32-bit mode**: no flags affected. In **8/16-bit modes**: TTA sets N, Z.
+
+| Instruction | Encoding | Operation | Flags (8/16-bit) | Flags (32-bit) |
+|-------------|----------|-----------|------------------|----------------|
+| TTA | $02 $9A | A = T | NZ | — |
+| TAT | $02 $9B | T = A | — | — |
 
 ### 64-bit Load/Store
 | Instruction | Encoding | Operation |
@@ -404,11 +414,33 @@ $0A abs,Y       $1A X
                 $1D (sr,S),Y
 ```
 
+### Flagless Extended ALU ($42 prefix — 32-bit mode only)
+
+**Available only in 32-bit mode (W=11).** In emulation and native 8/16-bit modes, `$42` is the WDM instruction.
+
+Same encoding as $02 Extended ALU, but **no flags are modified**. X-prefixed mnemonics:
+
+| Mnemonic | Encoding | Operation |
+|----------|----------|-----------|
+| XADC | $42 $82 [mode] ... | dest += src + C (no flags) |
+| XSBC | $42 $83 [mode] ... | dest -= src + !C (no flags) |
+| XAND | $42 $84 [mode] ... | dest &= src (no flags) |
+| XORA | $42 $85 [mode] ... | dest \|= src (no flags) |
+| XEOR | $42 $86 [mode] ... | dest ^= src (no flags) |
+| XINC | $42 $8B [mode] ... | dest++ (no flags) |
+| XDEC | $42 $8C [mode] ... | dest-- (no flags) |
+| XASL | $42 $8D [mode] ... | dest <<= 1 (no flags) |
+| XLSR | $42 $8E [mode] ... | dest >>= 1 (no flags) |
+| XROL | $42 $8F [mode] ... | rotate left (no flags) |
+| XROR | $42 $90 [mode] ... | rotate right (no flags) |
+
 **Examples:**
 ```asm
 LD.B R0, R1      ; 02 80 20 00 04  (5 bytes)
 ADC.W R0, #$1234 ; 02 82 78 00 34 12  (6 bytes)
+XADC.W R0, #$1234 ; 42 82 78 00 34 12  (flagless)
 INC.B A          ; 02 8B 00  (3 bytes)
+XINC.B A         ; 42 8B 00  (flagless)
 ```
 
 ### Barrel Shifter ($98)
@@ -534,7 +566,7 @@ ADC.B A, R1             ; 8-bit add
 ; WAI/STP (standard 65816)
 WAI                     ; $CB
 STP                     ; $DB
-; $42 is reserved/unused in 32-bit mode
+; $42 is the flagless extended prefix in 32-bit mode
 ```
 
 ---

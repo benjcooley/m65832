@@ -126,10 +126,11 @@ entity M65832_Decoder is
         IS_WDM          : out std_logic;  -- Reserved for extension
         
         -- M65832 Extensions
-        IS_EXT_OP       : out std_logic;  -- Extended opcode ($02 prefix)
-        EXT_ALU         : out std_logic;  -- Extended ALU operation ($02 $80-$97)
+        IS_EXT_OP       : out std_logic;  -- Extended opcode ($02/$42 prefix)
+        EXT_ALU         : out std_logic;  -- Extended ALU operation ($02/$42 $80-$97)
         EXT_ALU_SIZE    : out std_logic_vector(1 downto 0);  -- Extended ALU data size (from mode)
         EXT_ADDR32      : out std_logic;  -- Extended ALU uses 32-bit absolute operand
+        SUPPRESS_FLAGS  : out std_logic;  -- $42 prefix: suppress flag updates (flagless ALU)
         IS_RSET         : out std_logic;  -- Enable register window
         IS_RCLR         : out std_logic;  -- Disable register window
         IS_SB           : out std_logic;  -- Set B register
@@ -225,6 +226,7 @@ begin
         EXT_ALU   <= '0';
         EXT_ALU_SIZE <= WIDTH_32;
         EXT_ADDR32 <= '0';
+        SUPPRESS_FLAGS <= '0';
         IS_RSET   <= '0';
         IS_RCLR   <= '0';
         IS_SB     <= '0';
@@ -530,7 +532,11 @@ begin
                     elsif IR = x"92" then
                         IS_ALU_OP <= '1'; ALU_OP <= "100"; ADDR_MODE <= "1000"; INSTR_LEN <= "010";  -- STA (dp)
                     elsif IR = x"42" then
-                        IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- Reserved (WDM)
+                        if E_MODE = '0' and M_WIDTH = WIDTH_32 then
+                            IS_EXT_OP <= '1'; SUPPRESS_FLAGS <= '1'; INSTR_LEN <= "010";
+                        else
+                            IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- WDM in emu/native 8/16
+                        end if;
                     elsif IR = x"C2" then
                         IS_REP <= '1'; IS_FLAG_OP <= '1'; ADDR_MODE <= "0001"; INSTR_LEN <= "010";  -- REP #imm
                     elsif IR = x"E2" then
@@ -610,6 +616,12 @@ begin
                                 IS_COP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";
                             else
                                 IS_EXT_OP <= '1'; INSTR_LEN <= "010";  -- Extended opcode prefix
+                            end if;
+                        when x"42" =>  -- Flagless extended prefix (32-bit mode only)
+                            if E_MODE = '0' and M_WIDTH = WIDTH_32 then
+                                IS_EXT_OP <= '1'; SUPPRESS_FLAGS <= '1'; INSTR_LEN <= "010";
+                            else
+                                IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- WDM in emu/native 8/16
                             end if;
                         when x"40" => IS_RTI <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";
                         when x"60" => IS_RTS <= '1'; IS_JUMP <= '1'; INSTR_LEN <= "001";
@@ -696,7 +708,7 @@ begin
                         
                         -- Control
                         when x"EA" => IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- NOP
-                        when x"42" => IS_WDM <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "010";  -- Reserved (WDM)
+                        -- $42 handled in "00" group above as flagless extended prefix
                         when x"CB" => IS_WAI <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- WAI
                         when x"DB" => IS_STP <= '1'; IS_CONTROL <= '1'; INSTR_LEN <= "001";  -- STP
                         

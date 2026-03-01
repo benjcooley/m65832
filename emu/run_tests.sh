@@ -80,6 +80,84 @@ run_test_flag() {
     fi
 }
 
+# Helper to verify a flag is NOT set
+run_test_noflag() {
+    local name="$1"
+    local asm_file="$2"
+    local flag_letter="$3"
+    local cycles="$4"
+
+    echo -n "Test: $name... "
+
+    if ! $ASSEMBLER "$asm_file" -o "${asm_file%.asm}.bin" > /dev/null 2>&1; then
+        echo "FAIL (assembly failed)"
+        FAIL=$((FAIL + 1))
+        return
+    fi
+
+    output=$($EMULATOR -c "$cycles" -s "${asm_file%.asm}.bin" 2>&1)
+
+    # Extract flags bracket contents using sed (macOS-compatible)
+    flags=$(echo "$output" | sed -n 's/.*P:.*\[\([^]]*\)\].*/\1/p')
+    if echo "$flags" | grep -q "$flag_letter"; then
+        echo "FAIL (flag $flag_letter should NOT be set)"
+        echo "$output" | grep "P:"
+        FAIL=$((FAIL + 1))
+    else
+        echo "PASS"
+        PASS=$((PASS + 1))
+    fi
+}
+
+# Helper to verify exact flags pattern (set_flags present, clear_flags absent)
+run_test_flags() {
+    local name="$1"
+    local asm_file="$2"
+    local set_flags="$3"      # flags that must be set (e.g. "NZ")
+    local clear_flags="$4"    # flags that must be clear (e.g. "ZC")
+    local cycles="$5"
+
+    echo -n "Test: $name... "
+
+    if ! $ASSEMBLER "$asm_file" -o "${asm_file%.asm}.bin" > /dev/null 2>&1; then
+        echo "FAIL (assembly failed)"
+        FAIL=$((FAIL + 1))
+        return
+    fi
+
+    output=$($EMULATOR -c "$cycles" -s "${asm_file%.asm}.bin" 2>&1)
+
+    # Extract flags bracket contents using sed (macOS-compatible)
+    flags=$(echo "$output" | sed -n 's/.*P:.*\[\([^]]*\)\].*/\1/p')
+    local ok=1
+    local fail_reason=""
+
+    for (( i=0; i<${#set_flags}; i++ )); do
+        local f="${set_flags:$i:1}"
+        if ! echo "$flags" | grep -q "$f"; then
+            ok=0
+            fail_reason="$fail_reason $f should be set"
+        fi
+    done
+
+    for (( i=0; i<${#clear_flags}; i++ )); do
+        local f="${clear_flags:$i:1}"
+        if echo "$flags" | grep -q "$f"; then
+            ok=0
+            fail_reason="$fail_reason $f should be clear"
+        fi
+    done
+
+    if [ "$ok" -eq 1 ]; then
+        echo "PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL ($fail_reason )"
+        echo "$output" | grep "P:"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 # Helper function to run a test and verify a trap occurs
 run_test_trap() {
     local name="$1"
@@ -431,18 +509,22 @@ EOF
 
 run_test "TAB/TBA transfer" "test/test_tab_tba.asm" "12345678" 200
 
-# Test 19: TBA sets N flag
+# Test 19: TBA does NOT set N flag in 32-bit mode (transfers are flagless in 32-bit)
 cat > test/test_tba_flags.asm << 'EOF'
-; Test TBA sets N flag for negative value
+; Test TBA does NOT set N flag in 32-bit mode
+; Transfers are flagless in 32-bit mode (OoO pipeline friendly)
     .org $1000
     .M32
-    
-    SB #$80000000    ; B = $80000000 (negative)
-    TBA              ; A = B, should set N flag
+
+    CLC                   ; Clear carry, leaves N=0
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    SB #$80000000         ; B = $80000000 (negative)
+    TBA                   ; A = B, should NOT set N flag in 32-bit mode
     STP
 EOF
 
-run_test_flag "TBA sets N flag" "test/test_tba_flags.asm" "N" 200
+run_test_flag "TBA no flags in 32-bit" "test/test_tba_flags.asm" "Z" 200
 
 # Test 20: TSPB - Transfer Stack Pointer to B
 cat > test/test_tspb.asm << 'EOF'
@@ -766,6 +848,410 @@ cat > test/test_ldq_stq_indy_offset.asm << 'EOF'
 EOF
 
 run_test "LDQ/STQ (dp),Y with offset" "test/test_ldq_stq_indy_offset.asm" "DEADBEEF" 500
+
+# ============================================================
+# Transfer Flag Behavior Tests
+# ============================================================
+echo
+echo "--- Transfer Flag Behavior (32-bit vs 16-bit) ---"
+
+# --- 32-bit mode: transfers must NOT modify flags ---
+
+cat > test/test_xfer_txa_32_noflag.asm << 'EOF'
+; TXA should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    LDX #$80000000        ; X = negative value
+    TXA                   ; A = X; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TXA no flags in 32-bit" "test/test_xfer_txa_32_noflag.asm" "Z" "N" 200
+
+cat > test/test_xfer_tay_32_noflag.asm << 'EOF'
+; TAY should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0, C=1
+    LDA #$FFFFFFFF        ; A = negative (flags unchanged, LDA no flags in 32-bit)
+    TAY                   ; Y = A; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TAY no flags in 32-bit" "test/test_xfer_tay_32_noflag.asm" "Z" "N" 200
+
+cat > test/test_xfer_tax_32_noflag.asm << 'EOF'
+; TAX should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    LDA #$80000000        ; A = negative value
+    TAX                   ; X = A; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TAX no flags in 32-bit" "test/test_xfer_tax_32_noflag.asm" "Z" "N" 200
+
+cat > test/test_xfer_tya_32_noflag.asm << 'EOF'
+; TYA should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    LDY #$DEADBEEF
+    TYA                   ; A = Y; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TYA no flags in 32-bit" "test/test_xfer_tya_32_noflag.asm" "Z" "N" 200
+
+cat > test/test_xfer_tsx_32_noflag.asm << 'EOF'
+; TSX should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    TSX                   ; X = S; flags must NOT change
+    STP
+EOF
+
+run_test_flag "TSX no flags in 32-bit" "test/test_xfer_tsx_32_noflag.asm" "Z" 200
+
+cat > test/test_xfer_txy_32_noflag.asm << 'EOF'
+; TXY should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    LDX #$CAFEBABE
+    TXY                   ; Y = X; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TXY no flags in 32-bit" "test/test_xfer_txy_32_noflag.asm" "Z" "N" 200
+
+cat > test/test_xfer_tyx_32_noflag.asm << 'EOF'
+; TYX should NOT modify flags in 32-bit mode
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0
+    LDY #$CAFEBABE
+    TYX                   ; X = Y; flags must NOT change
+    STP
+EOF
+
+run_test_flags "TYX no flags in 32-bit" "test/test_xfer_tyx_32_noflag.asm" "Z" "N" 200
+
+# --- 16-bit mode: transfers MUST modify flags (65816 compatibility) ---
+
+cat > test/test_xfer_txa_16_setflag.asm << 'EOF'
+; TXA MUST set N flag in 16-bit mode (65816 compat)
+    .org $1000
+    .M32
+
+    ; Switch to 65816 native 16-bit mode
+    REPE #$02             ; Clear W1 -> W=00
+    SEPE #$01             ; Set W0 -> W=01 (65816 native)
+    REP #$30              ; M=0, X=0 -> 16-bit A and X/Y
+    .M16
+    .X16
+
+    LDA #$0000
+    CMP #$0000            ; Z=1, N=0
+    LDX #$8000            ; X = negative (16-bit)
+    TXA                   ; A = X; should set N, clear Z
+    STP
+EOF
+
+run_test_flags "TXA sets N in 16-bit" "test/test_xfer_txa_16_setflag.asm" "N" "Z" 200
+
+cat > test/test_xfer_tay_16_setflag.asm << 'EOF'
+; TAY MUST set Z flag in 16-bit mode (65816 compat)
+    .org $1000
+    .M32
+
+    REPE #$02
+    SEPE #$01
+    REP #$30
+    .M16
+    .X16
+
+    SEC                   ; C=1 to set known flag state
+    LDA #$0000            ; A = 0
+    TAY                   ; Y = 0; should set Z
+    STP
+EOF
+
+run_test_flag "TAY sets Z in 16-bit" "test/test_xfer_tay_16_setflag.asm" "Z" 200
+
+cat > test/test_xfer_tya_16_setflag.asm << 'EOF'
+; TYA MUST set N flag in 16-bit mode
+    .org $1000
+    .M32
+
+    REPE #$02
+    SEPE #$01
+    REP #$30
+    .M16
+    .X16
+
+    LDA #$0000
+    CMP #$0000            ; Z=1, N=0
+    LDY #$FFFF            ; Y = negative (16-bit)
+    TYA                   ; A = Y; should set N, clear Z
+    STP
+EOF
+
+run_test_flags "TYA sets N in 16-bit" "test/test_xfer_tya_16_setflag.asm" "N" "Z" 200
+
+# ============================================================
+# Flagless Extended Prefix ($42) Tests
+# ============================================================
+echo
+echo "--- Flagless Extended Prefix (\$42) Tests ---"
+
+# XADC: addition without flag modification
+cat > test/test_xadc_noflag.asm << 'EOF'
+; XADC: flagless ADC - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    CLC
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0, C=1
+    CLC                   ; C=0 (needed for ADC), Z still from CMP
+    XADC #$00000005       ; A = 0 + 5 = 5; flags must NOT change
+    STP
+EOF
+
+run_test "XADC result correct" "test/test_xadc_noflag.asm" "00000005" 200
+
+cat > test/test_xadc_preserves_z.asm << 'EOF'
+; XADC must preserve Z flag (not clear it even though result != 0)
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1
+    CLC
+    XADC #$00000042       ; A = $42, but Z must remain set
+    STP
+EOF
+
+run_test_flags "XADC preserves Z" "test/test_xadc_preserves_z.asm" "Z" "" 200
+
+cat > test/test_xadc_preserves_n.asm << 'EOF'
+; XADC must not set N even on negative result
+    .org $1000
+    .M32
+
+    LDA #$00000001
+    CMP #$00000001        ; Z=1, N=0, C=1
+    SEC                   ; C=1 for known state
+    XADC #$7FFFFFFF       ; A = 1 + $7FFFFFFF + 1 = $80000001; N must NOT be set
+    STP
+EOF
+
+run_test_noflag "XADC does not set N" "test/test_xadc_preserves_n.asm" "N" 200
+
+# XSBC: subtraction without flag modification
+cat > test/test_xsbc_noflag.asm << 'EOF'
+; XSBC: flagless SBC - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    SEC
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, N=0, C=1
+    LDA #$00000050
+    XSBC #$00000020       ; A = $50 - $20 = $30; flags must NOT change (Z stays from CMP)
+    STP
+EOF
+
+run_test "XSBC result correct" "test/test_xsbc_noflag.asm" "00000030" 200
+
+# XAND: logical AND without flag modification
+cat > test/test_xand_noflag.asm << 'EOF'
+; XAND: flagless AND - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1
+    LDA #$FF00FF00
+    XAND #$0F0F0F0F       ; A = $0F000F00; Z must remain set
+    STP
+EOF
+
+run_test "XAND result correct" "test/test_xand_noflag.asm" "0F000F00" 200
+run_test_flag "XAND preserves Z" "test/test_xand_noflag.asm" "Z" 200
+
+# XORA: logical OR without flag modification
+cat > test/test_xora_noflag.asm << 'EOF'
+; XORA: flagless ORA - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1
+    LDA #$00FF0000
+    XORA #$000000FF       ; A = $00FF00FF; Z must remain set
+    STP
+EOF
+
+run_test "XORA result correct" "test/test_xora_noflag.asm" "00FF00FF" 200
+run_test_flag "XORA preserves Z" "test/test_xora_noflag.asm" "Z" 200
+
+# XEOR: logical XOR without flag modification
+cat > test/test_xeor_noflag.asm << 'EOF'
+; XEOR: flagless EOR - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1
+    LDA #$AAAAAAAA
+    XEOR #$55555555       ; A = $FFFFFFFF; Z must remain, N must NOT be set
+    STP
+EOF
+
+run_test "XEOR result correct" "test/test_xeor_noflag.asm" "FFFFFFFF" 200
+run_test_flags "XEOR preserves Z, no N" "test/test_xeor_noflag.asm" "Z" "N" 200
+
+# XINC: increment without flag modification
+cat > test/test_xinc_noflag.asm << 'EOF'
+; XINC: flagless INC A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1
+    LDA #$7FFFFFFF
+    XINC A                ; A = $80000000; Z must remain, N must NOT be set
+    STP
+EOF
+
+run_test "XINC result correct" "test/test_xinc_noflag.asm" "80000000" 200
+run_test_flags "XINC preserves Z, no N" "test/test_xinc_noflag.asm" "Z" "N" 200
+
+# XDEC: decrement without flag modification
+cat > test/test_xdec_noflag.asm << 'EOF'
+; XDEC: flagless DEC A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000001
+    CMP #$00000001        ; Z=1, C=1
+    LDA #$00000001
+    XDEC A                ; A = $00000000; Z must remain (from CMP), not re-evaluated
+    STP
+EOF
+
+run_test "XDEC result correct" "test/test_xdec_noflag.asm" "00000000" 200
+run_test_flag "XDEC preserves flags" "test/test_xdec_noflag.asm" "Z" 200
+
+# XASL: arithmetic shift left without flag modification
+cat > test/test_xasl_noflag.asm << 'EOF'
+; XASL: flagless ASL A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, C=1
+    LDA #$40000000
+    XASL A                ; A = $80000000; C must NOT be modified, N must NOT be set
+    STP
+EOF
+
+run_test "XASL result correct" "test/test_xasl_noflag.asm" "80000000" 200
+run_test_flags "XASL preserves flags" "test/test_xasl_noflag.asm" "Z" "N" 200
+
+# XLSR: logical shift right without flag modification
+cat > test/test_xlsr_noflag.asm << 'EOF'
+; XLSR: flagless LSR A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, C=1
+    LDA #$00000002
+    XLSR A                ; A = $00000001; flags must NOT change
+    STP
+EOF
+
+run_test "XLSR result correct" "test/test_xlsr_noflag.asm" "00000001" 200
+run_test_flag "XLSR preserves flags" "test/test_xlsr_noflag.asm" "Z" 200
+
+# XROL: rotate left without flag modification
+cat > test/test_xrol_noflag.asm << 'EOF'
+; XROL: flagless ROL A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, C=1 (CMP sets C when A >= operand)
+    LDA #$40000000
+    XROL A                ; A = $80000001 (C was 1, rotated in); C must NOT change
+    STP
+EOF
+
+run_test "XROL result correct" "test/test_xrol_noflag.asm" "80000001" 200
+run_test_flags "XROL preserves flags" "test/test_xrol_noflag.asm" "Z" "N" 200
+
+# XROR: rotate right without flag modification
+cat > test/test_xror_noflag.asm << 'EOF'
+; XROR: flagless ROR A - result correct, flags unchanged
+    .org $1000
+    .M32
+
+    LDA #$00000000
+    CMP #$00000000        ; Z=1, C=1
+    LDA #$00000002
+    XROR A                ; A = $80000001 (C was 1, rotated in to MSB); C must NOT change
+    STP
+EOF
+
+run_test "XROR result correct" "test/test_xror_noflag.asm" "80000001" 200
+run_test_flags "XROR preserves flags" "test/test_xror_noflag.asm" "Z" "N" 200
+
+# Verify that normal (non-X) ADC still sets flags
+cat > test/test_adc_setflags.asm << 'EOF'
+; Normal ADC must still set flags (contrast with XADC)
+    .org $1000
+    .M32
+
+    CLC
+    LDA #$7FFFFFFF
+    ADC #$00000001        ; A = $80000000; should set N, clear Z
+    STP
+EOF
+
+run_test_flags "ADC still sets N" "test/test_adc_setflags.asm" "N" "Z" 200
+
+# Verify normal INC still sets flags
+cat > test/test_inc_setflags.asm << 'EOF'
+; Normal INC must still set flags (contrast with XINC)
+    .org $1000
+    .M32
+
+    LDA #$FFFFFFFF
+    INC A                 ; A = $00000000; should set Z, clear N
+    STP
+EOF
+
+run_test_flags "INC still sets Z" "test/test_inc_setflags.asm" "Z" "N" 200
 
 # Summary
 echo
