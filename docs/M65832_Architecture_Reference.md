@@ -536,7 +536,7 @@ In 32-bit mode:
 - Traditional instructions use 32-bit data by default
 - For 8-bit or 16-bit operations, use Extended ALU (`$02 $80-$97`) with size in mode byte
 - Address size is determined by operand format (B+16 vs 32-bit absolute)
-- For flagless ALU operations in 32-bit mode, use `$42` prefix with supported X-prefixed mnemonics (for example `XAND`, `XSBC`, `XINC`). `$42 $82` (XADC) is reserved/illegal.
+- For flagless ALU operations in 32-bit mode, use `$42` prefix with supported X-prefixed mnemonics (for example `XAND`, `XINC`, `XROL`). `$42 $82/$83` (XADC/XSBC) are reserved/illegal.
 
 > **Note:** The $02 opcode is COP in emulation mode (E=1). In native mode (E=0), it serves as the extended opcode prefix. The $42 opcode is WDM in emulation and native 8/16-bit modes; **in 32-bit mode only (W=11)**, it serves as the flagless extended prefix.
 

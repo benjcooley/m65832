@@ -1486,7 +1486,7 @@ static int assemble_instruction(Assembler *as, char *mnemonic, char *operand) {
     if (ext_alu) {
         if (flagless_prefix) {
             uint8_t opc = ext_alu->opcode;
-            if (opc == 0x80 || opc == 0x81 || opc == 0x82 || opc == 0x97 ||
+            if (opc == 0x80 || opc == 0x81 || opc == 0x82 || opc == 0x83 || opc == 0x97 ||
                 opc == 0x87 || opc == 0x88 || opc == 0x89 || opc == 0x8A) {
                 error(as, "X prefix not valid for %s (already flagless or flag-only)", mnemonic);
                 return 0;

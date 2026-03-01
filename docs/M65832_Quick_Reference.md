@@ -422,7 +422,6 @@ Same encoding as $02 Extended ALU, but **no flags are modified**. X-prefixed mne
 
 | Mnemonic | Encoding | Operation |
 |----------|----------|-----------|
-| XSBC | $42 $83 [mode] ... | dest -= src + !C (no flags) |
 | XAND | $42 $84 [mode] ... | dest &= src (no flags) |
 | XORA | $42 $85 [mode] ... | dest \|= src (no flags) |
 | XEOR | $42 $86 [mode] ... | dest ^= src (no flags) |
@@ -437,7 +436,7 @@ Same encoding as $02 Extended ALU, but **no flags are modified**. X-prefixed mne
 ```asm
 LD.B R0, R1      ; 02 80 20 00 04  (5 bytes)
 ADC.W R0, #$1234 ; 02 82 78 00 34 12  (6 bytes)
-; Note: $42 $82 (XADC) is reserved/illegal
+; Note: $42 $82/$83 (XADC/XSBC) are reserved/illegal
 INC.B A          ; 02 8B 00  (3 bytes)
 XINC.B A         ; 42 8B 00  (flagless)
 ```

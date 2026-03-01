@@ -3067,16 +3067,16 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                 switch (ext_op) {
                     /* === Extended ALU ($02 $80-$97) === */
                     case 0x82: /* ADC */
+                    case 0x83: /* SBC */
                         if (suppress_flags) {
-                            /* XADC ($42 $82) is reserved/illegal. */
+                            /* XADC/XSBC ($42 $82/$42 $83) are reserved/illegal. */
                             illegal_instruction(cpu);
                             cycles = 7;
                             break;
                         }
-                        /* Fall through for normal $02 ADC handling. */
+                        /* Fall through for normal $02 ADC/SBC handling. */
                     case 0x80: /* LD */
                     case 0x81: /* ST */
-                    case 0x83: /* SBC */
                     case 0x84: /* AND */
                     case 0x85: /* ORA */
                     case 0x86: /* EOR */

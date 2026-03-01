@@ -1034,21 +1034,17 @@ EOF
 
 run_test_trap "XADC illegal in \$42 space" "test/test_xadc_illegal.asm" "ILLEGAL_OP" 200
 
-# XSBC: subtraction without flag modification
-cat > test/test_xsbc_noflag.asm << 'EOF'
-; XSBC: flagless SBC - result correct, flags unchanged
+# XSBC is reserved/illegal in flagless ($42) space
+cat > test/test_xsbc_illegal.asm << 'EOF'
+; XSBC is illegal: encode raw bytes for $42 $83 immediate mode
     .org $1000
     .M32
 
-    SEC
-    LDA #$00000000
-    CMP #$00000000        ; Z=1, N=0, C=1
-    LDA #$00000050
-    XSBC #$00000020       ; A = $50 - $20 = $30; flags must NOT change (Z stays from CMP)
+    .byte $42, $83, $98, $20, $00, $00, $00   ; would be XSBC #$00000020
     STP
 EOF
 
-run_test "XSBC result correct" "test/test_xsbc_noflag.asm" "00000030" 200
+run_test_trap "XSBC illegal in \$42 space" "test/test_xsbc_illegal.asm" "ILLEGAL_OP" 200
 
 # XAND: logical AND without flag modification
 cat > test/test_xand_noflag.asm << 'EOF'

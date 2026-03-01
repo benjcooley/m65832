@@ -256,7 +256,6 @@ const M65_ExtALUInstruction m65_extalu_instructions[] = {
     { "ROR",  0x90, 1, 0, 0 },
     { "STZ",  0x97, 0, 1, 0 },
     /* Flagless X-prefixed variants ($42 prefix) */
-    { "XSBC", 0x83, 0, 0, 1 },
     { "XAND", 0x84, 0, 0, 1 },
     { "XORA", 0x85, 0, 0, 1 },
     { "XEOR", 0x86, 0, 0, 1 },

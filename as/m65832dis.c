@@ -622,8 +622,8 @@ int m65832_disasm(const uint8_t *buf, size_t buflen, uint32_t pc,
     
     /* Look up instruction */
     if (is_ext) {
-        if (is_flagless && opcode == 0x82) {
-            snprintf(out, out_size, ".BYTE $42,$82");
+        if (is_flagless && (opcode == 0x82 || opcode == 0x83)) {
+            snprintf(out, out_size, ".BYTE $42,$%02X", opcode);
             return 2;
         }
         const char *ext_alu_base = get_ext_alu_name(opcode);
