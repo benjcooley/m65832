@@ -799,14 +799,13 @@ Prefix any supported mnemonic with `X` to use the `$42` flagless prefix:
 
 ```asm
     ; Flagless arithmetic (no N, Z, C, V updates)
-    XADC.W R0, R1         ; R0 = R0 + R1 + C (16-bit, no flags)
     XSBC R0, #1           ; R0 = R0 - 1 - !C (32-bit, no flags)
     XINC.B R5             ; R5 = R5 + 1 (8-bit, no flags)
     XASL A                ; A <<= 1 (32-bit, no flags)
     XAND.W R3, R4         ; R3 = R3 & R4 (16-bit, no flags)
 ```
 
-**Not valid with X prefix:** LD, ST, STZ (already flagless), CMP, BIT, TSB, TRB (flag-only purpose).
+**Not valid with X prefix:** ADC (reserved/illegal), LD, ST, STZ (already flagless), CMP, BIT, TSB, TRB (flag-only purpose).
 
 ### Barrel Shifter Instructions ($98)
 

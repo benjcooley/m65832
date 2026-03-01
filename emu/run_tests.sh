@@ -1022,49 +1022,17 @@ run_test_flags "TYA sets N in 16-bit" "test/test_xfer_tya_16_setflag.asm" "N" "Z
 echo
 echo "--- Flagless Extended Prefix (\$42) Tests ---"
 
-# XADC: addition without flag modification
-cat > test/test_xadc_noflag.asm << 'EOF'
-; XADC: flagless ADC - result correct, flags unchanged
+# XADC is reserved/illegal in flagless ($42) space
+cat > test/test_xadc_illegal.asm << 'EOF'
+; XADC is illegal: encode raw bytes for $42 $82 immediate mode
     .org $1000
     .M32
 
-    CLC
-    LDA #$00000000
-    CMP #$00000000        ; Z=1, N=0, C=1
-    CLC                   ; C=0 (needed for ADC), Z still from CMP
-    XADC #$00000005       ; A = 0 + 5 = 5; flags must NOT change
+    .byte $42, $82, $98, $05, $00, $00, $00   ; would be XADC #$00000005
     STP
 EOF
 
-run_test "XADC result correct" "test/test_xadc_noflag.asm" "00000005" 200
-
-cat > test/test_xadc_preserves_z.asm << 'EOF'
-; XADC must preserve Z flag (not clear it even though result != 0)
-    .org $1000
-    .M32
-
-    LDA #$00000000
-    CMP #$00000000        ; Z=1
-    CLC
-    XADC #$00000042       ; A = $42, but Z must remain set
-    STP
-EOF
-
-run_test_flags "XADC preserves Z" "test/test_xadc_preserves_z.asm" "Z" "" 200
-
-cat > test/test_xadc_preserves_n.asm << 'EOF'
-; XADC must not set N even on negative result
-    .org $1000
-    .M32
-
-    LDA #$00000001
-    CMP #$00000001        ; Z=1, N=0, C=1
-    SEC                   ; C=1 for known state
-    XADC #$7FFFFFFF       ; A = 1 + $7FFFFFFF + 1 = $80000001; N must NOT be set
-    STP
-EOF
-
-run_test_noflag "XADC does not set N" "test/test_xadc_preserves_n.asm" "N" 200
+run_test_trap "XADC illegal in \$42 space" "test/test_xadc_illegal.asm" "ILLEGAL_OP" 200
 
 # XSBC: subtraction without flag modification
 cat > test/test_xsbc_noflag.asm << 'EOF'
@@ -1228,7 +1196,7 @@ run_test_flags "XROR preserves flags" "test/test_xror_noflag.asm" "Z" "N" 200
 
 # Verify that normal (non-X) ADC still sets flags
 cat > test/test_adc_setflags.asm << 'EOF'
-; Normal ADC must still set flags (contrast with XADC)
+; Normal ADC must still set flags
     .org $1000
     .M32
 

@@ -1,4 +1,4 @@
-; Normal ADC must still set flags (contrast with XADC)
+; Normal ADC must still set flags
     .org $1000
     .M32
 

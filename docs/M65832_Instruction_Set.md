@@ -9,7 +9,7 @@ A complete, verified reference for all M65832 instructions.
 The M65832 extends the WDC 65C816 instruction set with:
 - **32-bit operations** in native-32 mode; 8/16 via Extended ALU
 - **Extended ALU** ($02 $80-$97) with mode byte for 8/16/32-bit sized operations
-- **Flagless ALU** ($42 prefix, **32-bit mode only**) for out-of-order pipeline support (XADC, XAND, etc.)
+- **Flagless ALU** ($42 prefix, **32-bit mode only**) for out-of-order pipeline support (XAND, XSBC, etc.)
 - **New instructions** for multiply, divide, atomics, and system control
 - **Extended opcode page ($02)** for new operations; **$42** for flagless variants (**32-bit mode only**)
 - **Transfer instructions** do not set flags in **32-bit mode** (set N, Z in 8/16-bit modes per 65816 convention)
@@ -294,7 +294,6 @@ The instruction format, mode byte, addressing modes, and operand encoding are id
 
 | $42 Mnemonic | $02 Equivalent | Operation | Flags Suppressed |
 |--------------|----------------|-----------|-----------------|
-| XADC | ADC ($82) | Add with carry | N, Z, C, V |
 | XSBC | SBC ($83) | Subtract with borrow | N, Z, C, V |
 | XAND | AND ($84) | Logical AND | N, Z |
 | XORA | ORA ($85) | Logical OR | N, Z |
@@ -309,14 +308,15 @@ The instruction format, mode byte, addressing modes, and operand encoding are id
 **Not Applicable:** The following instructions should **not** use the `$42` prefix:
 
 - **Flag-setting instructions** (CMP, BIT, TSB, TRB): Their primary purpose is to set flags; a flagless variant would be useless.
+- **ADC ($82):** The `XADC` form is reserved/illegal in `$42` flagless space.
 - **Already flagless instructions** (LD, ST, STZ, LEA, MUL, DIV, FPU ops): These already do not set flags under the `$02` prefix. While `$42` is functionally identical for these, it is considered **unsupported** and the `$02` variant must be used.
 
 **Usage Example:**
 
 ```asm
-XADC.W R0, R1      ; $42 $82 [mode]: R0 = R0 + R1 (16-bit), no flags modified
-XINC R4             ; $42 $8B [mode]: R4 = R4 + 1, no flags modified
-XASL A              ; $42 $8D [mode]: A <<= 1, no flags modified
+XSBC.W R0, R1      ; $42 $83 [mode]: R0 = R0 - R1 - !C (16-bit), no flags modified
+XINC R4            ; $42 $8B [mode]: R4 = R4 + 1, no flags modified
+XASL A             ; $42 $8D [mode]: A <<= 1, no flags modified
 ```
 
 ---
@@ -1761,7 +1761,7 @@ In 32-bit mode, data and address sizing is handled differently for traditional v
 - Data size is encoded in the mode byte (bits 7-6): BYTE, WORD, or LONG
 - Address mode is encoded in the mode byte (bits 4-0)
 - Use `.B`, `.W`, `.L` suffixes in assembly
-- `$42` is the flagless extended prefix in 32-bit mode (XADC, XAND, etc.)
+- `$42` is the flagless extended prefix in 32-bit mode (except `$42 $82`, which is illegal)
 
 **For sized operations, use Extended ALU:**
 ```asm
@@ -2088,19 +2088,6 @@ sys_write:
 The following instructions use the `$42` extended prefix instead of `$02`, producing identical results but suppressing all flag updates. Each is documented as a separate instruction with its own mnemonic.
 
 **Availability:** The `$42` prefix is **only valid in 32-bit mode (W=11)**. In emulation mode (W=00) and native 8/16-bit mode (W=01), the `$42` byte is the WDM (reserved) instruction and does not act as an extended prefix.
-
-### XADC - Add with Carry (Flagless)
-
-**Operation:** `dest = dest + src + C` (flags unchanged)
-
-**Encoding:** `$42 $82 [mode] [dest_dp?] [source...]`
-
-Performs the same addition as ADC, reading the carry flag as input, but does not update N, Z, C, or V flags. Useful when the arithmetic result is needed but subsequent instructions should not depend on flag state.
-
-| Flags Affected | None |
-|----------------|------|
-
----
 
 ### XSBC - Subtract with Borrow (Flagless)
 
