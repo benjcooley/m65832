@@ -5,5 +5,5 @@
     LDA #$00000000
     CMP #$00000000        ; Z=1, C=1
     LDA #$00000002
-    XROR A                ; A = $80000001 (C was 1, rotated in to MSB); C must NOT change
+    XROR A                ; A = $00000001 (pure rotate, no carry-in); flags must NOT change
     STP

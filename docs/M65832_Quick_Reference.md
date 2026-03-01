@@ -431,8 +431,8 @@ Same encoding as $02 Extended ALU, but **no flags are modified**. X-prefixed mne
 | XDEC | $42 $8C [mode] ... | dest-- (no flags) |
 | XASL | $42 $8D [mode] ... | dest <<= 1 (no flags) |
 | XLSR | $42 $8E [mode] ... | dest >>= 1 (no flags) |
-| XROL | $42 $8F [mode] ... | rotate left (no flags) |
-| XROR | $42 $90 [mode] ... | rotate right (no flags) |
+| XROL | $42 $8F [mode] ... | rotate left (no flags, no carry-in) |
+| XROR | $42 $90 [mode] ... | rotate right (no flags, no carry-in) |
 
 **Examples:**
 ```asm

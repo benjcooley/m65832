@@ -5,5 +5,5 @@
     LDA #$00000000
     CMP #$00000000        ; Z=1, C=1 (CMP sets C when A >= operand)
     LDA #$40000000
-    XROL A                ; A = $80000001 (C was 1, rotated in); C must NOT change
+    XROL A                ; A = $80000000 (pure rotate, no carry-in); flags must NOT change
     STP

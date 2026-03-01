@@ -1283,6 +1283,22 @@ static uint32_t op_ror(m65832_cpu_t *cpu, uint32_t val, int width) {
     return val;
 }
 
+/* XROL - Flagless rotate left (no carry participation) */
+static uint32_t op_xrol(uint32_t val, int width) {
+    uint32_t mask = (1ULL << (width * 8)) - 1;
+    uint32_t bits = (uint32_t)(width * 8);
+    val &= mask;
+    return ((val << 1) | (val >> (bits - 1))) & mask;
+}
+
+/* XROR - Flagless rotate right (no carry participation) */
+static uint32_t op_xror(uint32_t val, int width) {
+    uint32_t mask = (1ULL << (width * 8)) - 1;
+    uint32_t sign = 1ULL << (width * 8 - 1);
+    val &= mask;
+    return ((val >> 1) | ((val & 1) ? sign : 0)) & mask;
+}
+
 /* INC */
 static uint32_t op_inc(m65832_cpu_t *cpu, uint32_t val, int width) {
     uint32_t mask = (1ULL << (width * 8)) - 1;
@@ -3215,8 +3231,10 @@ static int execute_instruction(m65832_cpu_t *cpu) {
                                     case 0x8C: result = op_dec(cpu, dest_val, ext_width); break;
                                     case 0x8D: result = op_asl(cpu, dest_val, ext_width); break;
                                     case 0x8E: result = op_lsr(cpu, dest_val, ext_width); break;
-                                    case 0x8F: result = op_rol(cpu, dest_val, ext_width); break;
-                                    case 0x90: result = op_ror(cpu, dest_val, ext_width); break;
+                                    case 0x8F: result = suppress_flags ? op_xrol(dest_val, ext_width)
+                                                                       : op_rol(cpu, dest_val, ext_width); break;
+                                    case 0x90: result = suppress_flags ? op_xror(dest_val, ext_width)
+                                                                       : op_ror(cpu, dest_val, ext_width); break;
                                     default: result = dest_val; break;
                                 }
                                 if (target) {

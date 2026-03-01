@@ -1203,11 +1203,11 @@ cat > test/test_xrol_noflag.asm << 'EOF'
     LDA #$00000000
     CMP #$00000000        ; Z=1, C=1 (CMP sets C when A >= operand)
     LDA #$40000000
-    XROL A                ; A = $80000001 (C was 1, rotated in); C must NOT change
+    XROL A                ; A = $80000000 (pure rotate, no carry-in); flags must NOT change
     STP
 EOF
 
-run_test "XROL result correct" "test/test_xrol_noflag.asm" "80000001" 200
+run_test "XROL result correct" "test/test_xrol_noflag.asm" "80000000" 200
 run_test_flags "XROL preserves flags" "test/test_xrol_noflag.asm" "Z" "N" 200
 
 # XROR: rotate right without flag modification
@@ -1219,11 +1219,11 @@ cat > test/test_xror_noflag.asm << 'EOF'
     LDA #$00000000
     CMP #$00000000        ; Z=1, C=1
     LDA #$00000002
-    XROR A                ; A = $80000001 (C was 1, rotated in to MSB); C must NOT change
+    XROR A                ; A = $00000001 (pure rotate, no carry-in); flags must NOT change
     STP
 EOF
 
-run_test "XROR result correct" "test/test_xror_noflag.asm" "80000001" 200
+run_test "XROR result correct" "test/test_xror_noflag.asm" "00000001" 200
 run_test_flags "XROR preserves flags" "test/test_xror_noflag.asm" "Z" "N" 200
 
 # Verify that normal (non-X) ADC still sets flags

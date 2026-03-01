@@ -303,8 +303,8 @@ The instruction format, mode byte, addressing modes, and operand encoding are id
 | XDEC | DEC ($8C) | Decrement | N, Z |
 | XASL | ASL ($8D) | Arithmetic shift left | N, Z, C |
 | XLSR | LSR ($8E) | Logical shift right | N, Z, C |
-| XROL | ROL ($8F) | Rotate left | N, Z, C |
-| XROR | ROR ($90) | Rotate right | N, Z, C |
+| XROL | ROL ($8F) | Rotate left (no carry-in) | N, Z, C |
+| XROR | ROR ($90) | Rotate right (no carry-in) | N, Z, C |
 
 **Not Applicable:** The following instructions should **not** use the `$42` prefix:
 
@@ -2196,11 +2196,11 @@ The LSB is discarded (not placed in carry).
 
 ### XROL - Rotate Left (Flagless)
 
-**Operation:** `{dest, bit} = {C, dest} << 1` (flags unchanged)
+**Operation:** `dest = rotl(dest, 1)` (flags unchanged)
 
 **Encoding:** `$42 $8F [mode] [dest_dp?]`
 
-Reads carry flag as input but does not update it. The MSB that would normally go into carry is discarded.
+Pure circular rotate within operand width. Carry is not read and not written.
 
 | Flags Affected | None |
 |----------------|------|
@@ -2209,11 +2209,11 @@ Reads carry flag as input but does not update it. The MSB that would normally go
 
 ### XROR - Rotate Right (Flagless)
 
-**Operation:** `{bit, dest} = {dest, C} >> 1` (flags unchanged)
+**Operation:** `dest = rotr(dest, 1)` (flags unchanged)
 
 **Encoding:** `$42 $90 [mode] [dest_dp?]`
 
-Reads carry flag as input but does not update it. The LSB that would normally go into carry is discarded.
+Pure circular rotate within operand width. Carry is not read and not written.
 
 | Flags Affected | None |
 |----------------|------|
